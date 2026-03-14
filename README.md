@@ -15,7 +15,7 @@ The **server** is a pure API with no rendered UI. The **client** is a separate S
 | IDs | All IDs are **GUIDs** |
 | PIN lifecycle | Once a JWT token is created from a PIN, the PIN is **dropped** — used PINs are not stored |
 | Token format | **JWT** with decodable claims: `display_name`, `server_url`, `space_id` |
-| QR code format | Encodes the string `server_url:space_id:pin`; client app URL is independent of server URL |
+| QR code format | Encodes a full client app URL with `server_url`, `space_id`, and `pin` as parameters; client app URL is configurable with a server-side default; QR generation is **optional** — the invitation string can be shared directly |
 | Display name | Client picks a display name **before joining** a space; it cannot be changed per-space; the UI supports defining a primary/current display name |
 | Access type | **MVP: Read/Write for all members**; future versions may introduce configurable access levels |
 | Server project | **Pure API** — no server-rendered UI |
@@ -42,7 +42,6 @@ All IDs are GUIDs.
 |---|---|---|
 | `Id` | GUID | Server-generated |
 | `Name` | string | Human-readable name |
-| `ServerUrl` | string | Canonical URL of this server instance |
 | `CreatedAt` | datetime | |
 
 ### SpacePin
@@ -50,8 +49,7 @@ All IDs are GUIDs.
 |---|---|---|
 | `Id` | GUID | |
 | `SpaceId` | GUID | FK → Space |
-| `Pin` | string (hashed) | Short-lived; **deleted after token is issued** |
-| `ExpiresAt` | datetime | |
+| `Pin` | string (hashed) | **Deleted after token is issued** |
 
 ### SpaceMember
 | Field | Type | Notes |
@@ -60,6 +58,7 @@ All IDs are GUIDs.
 | `SpaceId` | GUID | FK → Space |
 | `DisplayName` | string | Set at join time; **immutable per space** |
 | `JoinedAt` | datetime | |
+| `IsRevoked` | bool | When `true`, server rejects the member's JWT |
 
 ### SpaceItem
 | Field | Type | Notes |
@@ -95,12 +94,22 @@ The client extracts `server_url` and `space_id` from the token to know which ser
 
 ### 1. QR Code / Join Flow
 
-The QR code encodes the plain string: `server_url:space_id:pin`
+Joining a space can be done via a **QR code** or by manually sharing the **invitation string** (`server_url:space_id:pin`). QR code generation is optional.
 
-Because the client app may be deployed at a completely different URL than the server, the QR code does **not** encode the client URL. Instead:
+**Invitation string format:** `server_url:space_id:pin`
 
-1. Space owner calls `POST /spaces/{spaceId}/pins` → server generates a short numeric PIN, stores it (hashed, with TTL), and returns the QR string `server_url:space_id:pin`.
-2. The QR code is displayed by the client app. Scanning it on another device opens the **client app** (e.g. via a deep-link or well-known client URL), which then parses the three components.
+**QR code format:** a full client-app URL with `server_url`, `space_id`, and `pin` as query parameters, e.g.:
+```
+https://client.example.com/join?server=https://myserver.example.com&space=<space_guid>&pin=<pin>
+```
+The client app URL is not stored on the server — it is provided by the admin at QR generation time, with a configurable server-side default. This means scanning the QR code opens the client app directly with the join details pre-filled.
+
+**Flow:**
+
+1. Space owner calls `POST /spaces/{spaceId}/pins` → server generates a PIN and stores it (hashed, no expiry). Admin supplies the client app URL (or uses the server-configured default). Server returns:
+   - The invitation string `server_url:space_id:pin`
+   - Optionally a QR code image encoding the full client app join URL above.
+2. New user either scans the QR code (opens client app with details pre-filled) or enters the invitation string manually.
 3. Joining client shows a display name input. The user picks a display name (the UI allows setting a primary/default name to pre-fill this).
 4. Client calls `POST /spaces/{spaceId}/tokens` (on `server_url`) with `{ pin, display_name }` → server validates PIN, creates a `SpaceMember`, issues a JWT, and **deletes the PIN**.
 5. Client stores the JWT in local storage and uses it as a Bearer token for all subsequent requests to that server+space. Since the JWT contains `server_url` and `space_id`, no additional state is needed.
@@ -145,7 +154,7 @@ A privileged role (protected by a separate admin secret) that can:
 |---|---|---|---|
 | `POST` | `/spaces` | Create a new shared space | Admin |
 | `GET` | `/spaces/{spaceId}` | Get space info | JWT |
-| `POST` | `/spaces/{spaceId}/pins` | Generate a PIN (returns QR string `server_url:space_id:pin`) | Admin |
+| `POST` | `/spaces/{spaceId}/pins` | Generate a PIN; accepts optional client app URL (uses server default if omitted); returns invitation string + optional QR code | Admin |
 | `POST` | `/spaces/{spaceId}/tokens` | Exchange PIN + display name for a JWT; PIN is deleted | None |
 | `GET` | `/spaces/{spaceId}/items` | List items in the space | JWT |
 | `PUT` | `/spaces/{spaceId}/items/{itemId}` | Upsert an item (client-provided GUID) | JWT |
@@ -183,7 +192,7 @@ SharedSpaces/
 - Solution scaffold (`.sln`, projects, EF Core + SQLite)
 - Domain entities + migrations
 - Admin endpoints: create space, generate PINs
-- Join endpoint: validate PIN → issue JWT → delete PIN
+- Join endpoint: validate PIN → issue JWT → delete PIN; on each authenticated request, verify `SpaceMember.IsRevoked = false`
 - Items endpoints: list, upsert (client-GUID), delete; enforce quota
 
 ### Phase 2 — Real-time
@@ -191,7 +200,7 @@ SharedSpaces/
 
 ### Phase 3 — React Client
 - Vite + React scaffold
-- Join flow: parse `server_url:space_id:pin` from QR or manual input; display name input (with primary name pre-fill)
+- Join flow: parse invitation string or QR URL; display name input (with primary name pre-fill)
 - JWT storage + multi-server support
 - Space view: flat item list, file/text upload
 - SignalR client integration for live updates
@@ -202,13 +211,15 @@ SharedSpaces/
 ### Phase 5 — Offline & Polish
 - Service Worker + IndexedDB for offline read/write queue
 - Docker Compose for self-hosting
-- QR code generation for `server_url:space_id:pin` strings
+- Optional QR code generation for invitation strings (client app URL configurable via server default)
 
 ---
 
 ## Security Considerations
 
 - JWTs are signed by the server; clients can decode claims (display name, server URL, space ID) without a round-trip but cannot forge them
+- On every authenticated request the server looks up `SpaceMember` by `sub` and rejects if `IsRevoked = true`
+- The server's canonical URL is embedded in issued JWTs from server configuration — it is not stored per-space
 - PINs are hashed at rest and deleted immediately after a token is issued — no replay possible
 - Per-space storage quota prevents abuse
 - Admin endpoints protected by a separate admin secret
