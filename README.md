@@ -13,8 +13,8 @@ The **server** is a pure API with no rendered UI. The **client** is a separate S
 | Topic | Decision |
 |---|---|
 | IDs | All IDs are **GUIDs** |
-| PIN lifecycle | Once a JWT token is created from a PIN, the PIN is **dropped** — used PINs are not stored |
-| Token format | **JWT** with decodable claims: `display_name`, `server_url`, `space_id` |
+| PIN lifecycle | Once a JWT token is created from an invitation PIN, the invitation is **dropped** — used PINs are not stored |
+| Token format | **JWT** with decodable claims: `display_name`, `server_url`, `space_id`; **no expiration** — validity = `SpaceMember` existence |
 | QR code format | Encodes a full client app URL with `server_url`, `space_id`, and `pin` as parameters; client app URL is configurable with a server-side default; QR generation is **optional** — the invitation string can be shared directly |
 | Display name | Client picks a display name **before joining** a space; it cannot be changed per-space; the UI supports defining a primary/current display name |
 | Access type | **MVP: Read/Write for all members**; future versions may introduce configurable access levels |
@@ -44,7 +44,7 @@ All IDs are GUIDs.
 | `Name` | string | Human-readable name |
 | `CreatedAt` | datetime | |
 
-### SpacePin
+### SpaceInvitation
 | Field | Type | Notes |
 |---|---|---|
 | `Id` | GUID | |
@@ -81,12 +81,11 @@ The token is a standard JWT that the client can decode without a server round-tr
   "sub": "<member_id>",
   "display_name": "Alice",
   "server_url": "https://myserver.example.com",
-  "space_id": "<space_guid>",
-  "exp": 1234567890
+  "space_id": "<space_guid>"
 }
 ```
 
-The client extracts `server_url` and `space_id` from the token to know which server to call and which space to load — no separate state needed.
+The token has **no expiration** — validity is determined solely by the existence of the corresponding `SpaceMember` record. On every authenticated request the server verifies the member still exists and is not revoked.
 
 ---
 
@@ -106,12 +105,12 @@ The client app URL is not stored on the server — it is provided by the admin a
 
 **Flow:**
 
-1. Space owner calls `POST /spaces/{spaceId}/pins` → server generates a PIN and stores it (hashed, no expiry). Admin supplies the client app URL (or uses the server-configured default). Server returns:
+1. Space owner calls `POST /v1/spaces/{spaceId}/invitations` → server generates a PIN and stores it (hashed, no expiry). Admin supplies the client app URL (or uses the server-configured default). Server returns:
    - The invitation string `server_url:space_id:pin`
    - Optionally a QR code image encoding the full client app join URL above.
 2. New user either scans the QR code (opens client app with details pre-filled) or enters the invitation string manually.
 3. Joining client shows a display name input. The user picks a display name (the UI allows setting a primary/default name to pre-fill this).
-4. Client calls `POST /spaces/{spaceId}/tokens` (on `server_url`) with `{ pin, display_name }` → server validates PIN, creates a `SpaceMember`, issues a JWT, and **deletes the PIN**.
+4. Client calls `POST /v1/spaces/{spaceId}/tokens` (on `server_url`) with `{ pin, display_name }` → server validates PIN, creates a `SpaceMember`, issues a JWT, and **deletes the invitation**.
 5. Client stores the JWT in local storage and uses it as a Bearer token for all subsequent requests to that server+space. Since the JWT contains `server_url` and `space_id`, no additional state is needed.
 
 ### 2. Multi-Server Client
@@ -130,7 +129,7 @@ The client app URL is not stored on the server — it is provided by the admin a
 
 ### 4. Real-time Updates
 
-- SignalR hub per space (`/hubs/space/{spaceId}`)
+- SignalR hub per space (`/v1/hubs/space/{spaceId}`)
 - On new item → broadcast to all connected members in that space.
 - On item deletion → broadcast tombstone to all connected members.
 
@@ -152,13 +151,13 @@ A privileged role (protected by a separate admin secret) that can:
 
 | Method | Route | Description | Auth |
 |---|---|---|---|
-| `POST` | `/spaces` | Create a new shared space | Admin |
-| `GET` | `/spaces/{spaceId}` | Get space info | JWT |
-| `POST` | `/spaces/{spaceId}/pins` | Generate a PIN; accepts optional client app URL (uses server default if omitted); returns invitation string + optional QR code | Admin |
-| `POST` | `/spaces/{spaceId}/tokens` | Exchange PIN + display name for a JWT; PIN is deleted | None |
-| `GET` | `/spaces/{spaceId}/items` | List items in the space | JWT |
-| `PUT` | `/spaces/{spaceId}/items/{itemId}` | Upsert an item (client-provided GUID) | JWT |
-| `DELETE` | `/spaces/{spaceId}/items/{itemId}` | Delete an item | JWT |
+| `POST` | `/v1/spaces` | Create a new shared space | Admin |
+| `GET` | `/v1/spaces/{spaceId}` | Get space info | JWT |
+| `POST` | `/v1/spaces/{spaceId}/invitations` | Generate an invitation PIN; accepts optional client app URL (uses server default if omitted); returns invitation string + optional QR code | Admin |
+| `POST` | `/v1/spaces/{spaceId}/tokens` | Exchange PIN + display name for a JWT; invitation is deleted | None |
+| `GET` | `/v1/spaces/{spaceId}/items` | List items in the space | JWT |
+| `PUT` | `/v1/spaces/{spaceId}/items/{itemId}` | Upsert an item (client-provided GUID) | JWT |
+| `DELETE` | `/v1/spaces/{spaceId}/items/{itemId}` | Delete an item | JWT |
 
 ---
 
@@ -169,7 +168,7 @@ SharedSpaces/
 ├── src/
 │   ├── SharedSpaces.Server/          # ASP.NET Core Web API + SignalR
 │   │   ├── Domain/                   # Entities, value objects
-│   │   ├── Features/                 # Vertical slice: Spaces, Pins, Tokens, Items, Admin
+│   │   ├── Features/                 # Vertical slice: Spaces, Invitations, Tokens, Items, Admin
 │   │   ├── Infrastructure/           # EF Core, file storage, SignalR hub
 │   │   └── Program.cs
 │   └── SharedSpaces.Client/          # React SPA (Vite) — independently deployable
@@ -191,8 +190,8 @@ SharedSpaces/
 ### Phase 1 — Core Server
 - Solution scaffold (`.sln`, projects, EF Core + SQLite)
 - Domain entities + migrations
-- Admin endpoints: create space, generate PINs
-- Join endpoint: validate PIN → issue JWT → delete PIN; on each authenticated request, verify `SpaceMember.IsRevoked = false`
+- Admin endpoints: create space, generate invitation PINs
+- Join endpoint: validate PIN → issue JWT → delete invitation; on each authenticated request, verify `SpaceMember.IsRevoked = false`
 - Items endpoints: list, upsert (client-GUID), delete; enforce quota
 
 ### Phase 2 — Real-time
@@ -218,9 +217,10 @@ SharedSpaces/
 ## Security Considerations
 
 - JWTs are signed by the server; clients can decode claims (display name, server URL, space ID) without a round-trip but cannot forge them
+- JWTs have **no expiration** — a token remains valid as long as the corresponding `SpaceMember` record exists and `IsRevoked = false`
 - On every authenticated request the server looks up `SpaceMember` by `sub` and rejects if `IsRevoked = true`
 - The server's canonical URL is embedded in issued JWTs from server configuration — it is not stored per-space
-- PINs are hashed at rest and deleted immediately after a token is issued — no replay possible
+- Invitation PINs are hashed at rest and deleted immediately after a token is issued — no replay possible
 - Per-space storage quota prevents abuse
 - Admin endpoints protected by a separate admin secret
 - HTTPS enforced in production (standard ASP.NET Core middleware)
