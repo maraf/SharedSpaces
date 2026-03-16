@@ -71,3 +71,6 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - QR codes generated via QRCoder library, returned as base64-encoded PNG in API responses, encoding the full client join URL.
 - Review feedback surfaced that invitation payloads must use `serverUrl|spaceId|pin` instead of colon separators because URLs already contain `:` characters.
 - Review feedback also surfaced that admin secret checks should reject multiple `X-Admin-Secret` values and compare UTF-8 bytes with `CryptographicOperations.FixedTimeEquals`.
+- JWT join/auth flow lives under `src/SharedSpaces.Server/Features/Tokens/`, with `TokenEndpoints.cs` handling `POST /v1/spaces/{spaceId}/tokens` and `JwtAuthenticationExtensions.cs` wiring bearer auth plus per-request `SpaceMember` revocation checks.
+- Invitation PIN hashing is now centralized in `src/SharedSpaces.Server/Features/Invitations/InvitationPinHasher.cs`, and token exchange must reuse that same HMACSHA256 + `Admin:Secret` scheme as invitation creation.
+- Backend configuration now expects `Jwt:SigningKey` in `src/SharedSpaces.Server/appsettings.json`; `Program.cs` registers `AddJwtAuthentication()`, then `UseAuthentication()`, custom space-member validation, and `UseAuthorization()` before mapping endpoints.
