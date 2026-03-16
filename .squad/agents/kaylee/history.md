@@ -32,6 +32,17 @@
 - GET/PUT/DELETE /v1/spaces/{spaceId}/items (JWT)
 - SignalR hub: /v1/hubs/space/{spaceId}
 
+## Team Updates (2026-03-16)
+
+**Mal completed issue decomposition:** 14 GitHub issues (#17–#30) created spanning 5 phases:
+- **Phase 1 (Core Server):** #17–#21 (5 issues) — API, auth, schema
+- **Phase 2 (Real-time):** #22 (1 issue) — SignalR
+- **Phase 3 (React Client):** #23–#26 (4 issues) — Join flow, space view, upload (your work starts here)
+- **Phase 4 (Admin UI):** #27 (1 issue) — Dashboard
+- **Phase 5 (Offline & Polish):** #28–#30 (3 issues) — Offline queue, Docker
+
+All issues labeled with `squad`, `phase:N`, and category (backend/frontend/infrastructure/real-time). Dependencies explicit in issue descriptions.
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->

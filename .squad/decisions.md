@@ -2,7 +2,62 @@
 
 ## Active Decisions
 
-No decisions recorded yet.
+### Issue Decomposition: SharedSpaces Implementation Plan
+
+**Decision Date:** 2026-03-16  
+**Decided By:** Mal (Lead/Architect)  
+**Status:** Active
+
+#### Context
+The SharedSpaces README defines a 5-phase implementation plan (Core Server → Real-time → React Client → Admin UI → Offline & Polish). We needed to decompose this into GitHub issues that developers can pick up and execute independently.
+
+#### Decision
+Created 14 GitHub issues (#17-#30) with the following structure:
+
+**Granularity**
+- Each issue is a coherent unit of work for one developer
+- Not too fine-grained (avoided 1 issue per endpoint)
+- Not too coarse (avoided 1 issue per phase)
+- Target: 10-15 issues total
+
+**Issue Content**
+- Clear, specific titles
+- Detailed acceptance criteria (checkbox lists)
+- Technical notes with architectural context
+- Explicit dependencies (references to other issues)
+- Labels: 'squad' + phase label (phase:1-5) + category label (backend/frontend/infrastructure/real-time)
+
+**Phase Distribution**
+- **Phase 1 (Core Server):** 5 issues — highest complexity, foundational work
+- **Phase 2 (Real-time):** 1 issue — focused SignalR implementation
+- **Phase 3 (React Client):** 4 issues — parallel to server work, can start independently
+- **Phase 4 (Admin UI):** 1 issue — straightforward UI work
+- **Phase 5 (Offline & Polish):** 3 issues — independent enhancements
+
+**Key Architectural Decisions Embedded in Issues**
+- Client-generated item GUIDs (not server-generated)
+- JWT claims include server_url for multi-server client support
+- Admin auth via simple header secret (X-Admin-Secret), not JWT
+- File storage abstraction layer for future cloud swap
+- Invitation PINs deleted immediately after JWT issuance
+- JWT has no expiration; validity = SpaceMember.IsRevoked check
+
+#### Rationale
+- **Why 14 issues instead of 30+?** Each issue groups logically related work (e.g., #20 covers entire join/auth flow rather than splitting into 4 separate issues). This reduces coordination overhead and makes each issue independently valuable.
+- **Why explicit dependencies?** Developers need to know what must be done first; no ambiguity about ordering.
+- **Why detailed acceptance criteria?** Reduces back-and-forth; developers understand "done" without constantly referring to README.
+
+#### Consequences
+- **Positive:** Clear work breakdown, each issue independently implementable, dependencies explicit, labels enable filtering
+- **Negative:** Requirement changes require multiple issue updates; some issues (e.g., #21) are large (2-3 days)
+- **Mitigations:** Issues can be split during execution; regular standups catch changes early
+
+#### Alternatives Considered
+1. **One issue per endpoint (30+ issues)** — Rejected: too granular, increases coordination, obscures "big picture"
+2. **One issue per phase (5 issues)** — Rejected: too coarse, impossible parallelization, creates bottlenecks
+3. **Milestone-based grouping without explicit dependencies** — Rejected: developers wouldn't know what to work on first
+
+---
 
 ## Governance
 
