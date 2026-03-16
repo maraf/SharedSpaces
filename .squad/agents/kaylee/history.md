@@ -65,3 +65,7 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - `SpaceItem` IDs remain client-generated per the README; protect the domain by rejecting `Guid.Empty` instead of adding server-side ID generation.
 - Design-time EF configuration should load `appsettings.{ASPNETCORE_ENVIRONMENT}.json` when available, defaulting to Development for local tooling.
 - `.squad/config.json` is machine-specific local state and should stay gitignored rather than committed.
+- Admin endpoints use simple header-based authentication via `AdminAuthenticationFilter` (IEndpointFilter) checking `X-Admin-Secret` header against `Admin:Secret` configuration.
+- Endpoint registration uses extension methods (e.g., `MapSpaceEndpoints()`, `MapInvitationEndpoints()`) to keep `Program.cs` clean and group related endpoints in their feature folders.
+- Invitation PINs are 6-digit numeric, generated with `RandomNumberGenerator` for security, hashed with SHA256 before storage.
+- QR codes generated via QRCoder library, returned as base64-encoded PNG in API responses, encoding the full client join URL.
