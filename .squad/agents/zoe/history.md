@@ -38,6 +38,20 @@
 
 All issues labeled with `squad`, `phase:N`, and category (backend/frontend/infrastructure/real-time). Dependencies explicit. Test work will follow Phase 1 completion with focus on JWT, PIN, quota, and admin endpoint security.
 
+## Team Updates (2026-03-16 Continued)
+
+**Kaylee completed Issue #17:** Parallel to test scaffold, Kaylee delivered the solution foundation:
+- Created `SharedSpaces.sln` with `src/SharedSpaces.Server/` project structure
+- Defined domain entities: Space, SpaceInvitation, SpaceMember, SpaceItem (GUID-based)
+- Configured EF Core with SQLite and fluent entity mappings in `Infrastructure/Persistence/Configurations/`
+- Generated initial migration and verified startup database initialization
+- Branch: `squad/17-solution-scaffold`, PR: #31
+
+Server structure now available to Zoe; test project can reference production entities directly (no stubs needed). Zoe ready to write endpoint tests once Kaylee completes Phase 1 (#18–#21).
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+- Test project (`tests/SharedSpaces.Server.Tests/`) uses EF Core InMemory for isolated unit/integration tests; xUnit + Moq + FluentAssertions provide robust, readable test infrastructure.
+- Server domain entities (Space, SpaceInvitation, SpaceMember, SpaceItem) are GUID-based; all configured with fluent API in `Infrastructure/Persistence/Configurations/` for DRY entity mapping.
+- SQLite and EF Core migrations initialize automatically on startup via `DatabaseInitializationExtensions.InitializeDatabaseAsync()` in `Program.cs`; test database seeding can leverage the same DbContext configuration.

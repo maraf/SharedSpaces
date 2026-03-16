@@ -59,6 +59,50 @@ Created 14 GitHub issues (#17-#30) with the following structure:
 
 ---
 
+### SQLite Path Resolution and Startup Migrations
+
+**Decision Date:** 2026-03-16  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+Issue #17 introduced the first ASP.NET Core server scaffold plus EF Core with SQLite. We needed local runtime startup and `dotnet ef` tooling to behave consistently against the same database file.
+
+#### Decision
+Keep the SQLite connection string in configuration as `ConnectionStrings:DefaultConnection`, and normalize its relative `Data Source` through `SqliteConnectionStringResolver` for both runtime registration and the design-time `AppDbContextFactory`. Also apply pending EF Core migrations during startup through `DatabaseInitializationExtensions.InitializeDatabaseAsync()`.
+
+#### Rationale
+This keeps local setup zero-config while avoiding the common mismatch where `dotnet run` and `dotnet ef` create different SQLite files depending on the working directory. It also means future backend slices can assume the schema is applied when the API starts.
+
+#### Impact
+- SQLite database file is normalized to a consistent location regardless of working directory
+- Pending migrations auto-apply on API startup
+- Fresh local environments require zero manual database setup
+
+---
+
+### Test Project Scaffold Alignment
+
+**Decision Date:** 2026-03-16  
+**Decided By:** Zoe (Tester)  
+**Status:** Active
+
+#### Context
+Issue #17 was laying down the .NET solution/server scaffold, and the server test project needed to be created in parallel to avoid blocking test infrastructure decisions.
+
+#### Decision
+Keep the server test project on the same target framework and EF Core package line as `src/SharedSpaces.Server`, and pin `FluentAssertions` to 6.12.0 for now.
+
+#### Rationale
+Matching the server scaffold avoids package drift before real tests land, and the older FluentAssertions release avoids the new commercial-license warning in routine test runs.
+
+#### Impact
+- Test project uses xUnit, Moq 4.20.70, FluentAssertions 6.12.0, EF Core InMemory
+- Future server test work should preserve framework/package alignment unless the team intentionally upgrades the server stack first
+- Test database isolation via InMemory provider avoids external dependencies
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
