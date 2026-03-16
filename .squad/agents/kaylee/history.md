@@ -67,5 +67,7 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - `.squad/config.json` is machine-specific local state and should stay gitignored rather than committed.
 - Admin endpoints use simple header-based authentication via `AdminAuthenticationFilter` (IEndpointFilter) checking `X-Admin-Secret` header against `Admin:Secret` configuration.
 - Endpoint registration uses extension methods (e.g., `MapSpaceEndpoints()`, `MapInvitationEndpoints()`) to keep `Program.cs` clean and group related endpoints in their feature folders.
-- Invitation PINs are 6-digit numeric, generated with `RandomNumberGenerator` for security, hashed with SHA256 before storage.
+- Invitation PINs are 6-digit numeric, generated with `RandomNumberGenerator` using the correct exclusive upper bound, and hashed at rest with HMACSHA256 keyed by `Admin:Secret`.
 - QR codes generated via QRCoder library, returned as base64-encoded PNG in API responses, encoding the full client join URL.
+- Review feedback surfaced that invitation payloads must use `serverUrl|spaceId|pin` instead of colon separators because URLs already contain `:` characters.
+- Review feedback also surfaced that admin secret checks should reject multiple `X-Admin-Secret` values and compare UTF-8 bytes with `CryptographicOperations.FixedTimeEquals`.

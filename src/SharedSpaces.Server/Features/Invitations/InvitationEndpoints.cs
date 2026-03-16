@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
 using QRCoder;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
@@ -33,7 +32,8 @@ public static class InvitationEndpoints
         }
 
         var pin = GeneratePin();
-        var hashedPin = HashPin(pin);
+        var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
+        var hashedPin = HashPin(pin, adminSecret);
 
         var invitation = new SpaceInvitation
         {
@@ -45,7 +45,7 @@ public static class InvitationEndpoints
         await db.SaveChangesAsync();
 
         var serverUrl = configuration["Server:Url"] ?? throw new InvalidOperationException("Server:Url not configured");
-        var invitationString = $"{serverUrl}:{spaceId}:{pin}";
+        var invitationString = $"{serverUrl}|{spaceId}|{pin}";
 
         string? qrCodeBase64 = null;
         var clientAppUrl = request.ClientAppUrl 
@@ -63,12 +63,13 @@ public static class InvitationEndpoints
 
     private static string GeneratePin()
     {
-        return RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+        return RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
     }
 
-    private static string HashPin(string pin)
+    private static string HashPin(string pin, string adminSecret)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(pin));
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(adminSecret));
+        var bytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(pin));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
