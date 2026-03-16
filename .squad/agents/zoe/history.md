@@ -55,3 +55,6 @@ Server structure now available to Zoe; test project can reference production ent
 - Test project (`tests/SharedSpaces.Server.Tests/`) uses EF Core InMemory for isolated unit/integration tests; xUnit + Moq + FluentAssertions provide robust, readable test infrastructure.
 - Server domain entities (Space, SpaceInvitation, SpaceMember, SpaceItem) are GUID-based; all configured with fluent API in `Infrastructure/Persistence/Configurations/` for DRY entity mapping.
 - SQLite and EF Core migrations initialize automatically on startup via `DatabaseInitializationExtensions.InitializeDatabaseAsync()` in `Program.cs`; test database seeding can leverage the same DbContext configuration.
+- `tests/SharedSpaces.Server.Tests/TokenEndpointTests.cs` is the JWT join/auth integration suite; it uses `WebApplicationFactory<Program>` with EF Core InMemory and test config overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
+- Server startup now supports non-relational test hosts by falling back to `EnsureCreatedAsync()` when the configured `AppDbContext` provider is not relational, which keeps WebApplicationFactory-based integration tests bootable.
+- `src/SharedSpaces.Server/Program.cs` exposes a `public partial class Program` marker so external integration tests can boot the minimal API host without `InternalsVisibleTo` wiring.
