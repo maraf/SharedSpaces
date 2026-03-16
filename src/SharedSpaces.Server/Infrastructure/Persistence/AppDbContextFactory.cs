@@ -9,10 +9,11 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
     public AppDbContext CreateDbContext(string[] args)
     {
         var basePath = ResolveBasePath();
+        var environmentName = ResolveEnvironmentName();
         var configuration = new ConfigurationBuilder()
             .SetBasePath(basePath)
             .AddJsonFile("appsettings.json", optional: false)
-            .AddJsonFile("appsettings.Development.json", optional: true)
+            .AddJsonFile($"appsettings.{environmentName}.json", optional: true)
             .AddEnvironmentVariables()
             .Build();
 
@@ -39,5 +40,12 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 
         return candidates.FirstOrDefault(path => File.Exists(Path.Combine(path, "appsettings.json")))
             ?? throw new InvalidOperationException("Could not locate appsettings.json for design-time AppDbContext creation.");
+    }
+
+    private static string ResolveEnvironmentName()
+    {
+        return Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") is { Length: > 0 } environmentName
+            ? environmentName
+            : "Development";
     }
 }
