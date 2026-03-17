@@ -78,3 +78,4 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - JWT signing key is lazily resolved from config at first use, allowing test environments to override the key via WebApplicationFactory config. This prevents the signing key from being captured during server startup before test config is applied.
 - Admin endpoint tests moved to a test-only `/admin/tokens` endpoint to avoid interference with production TokenEndpoints tests; Coordinator fixed this in commit ee9c2ef.
 - Phase 1 (Core Server) JWT auth milestone complete. Kaylee delivered token endpoint + middleware (commit 24774a5), Zoe delivered 13 integration tests (commit 2616bce), Coordinator fixed test config resolution (commit ee9c2ef).
+- GitHub Actions CI workflow now in place. Kaylee delivered `.github/workflows/ci.yml` (commit 526e691) for automated server validation on PRs/pushes to `main`. All 13 tests pass in CI environment.
