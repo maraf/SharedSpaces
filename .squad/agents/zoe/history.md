@@ -11,6 +11,7 @@
 - Server tests: tests/SharedSpaces.Server.Tests/ (xUnit)
 - Client tests: tests/SharedSpaces.Client.Tests/
 - Integration tests preferred over unit tests with mocks
+- **Test Storage Path:** `./artifacts/storage-tests` (per user directive, 2026-03-17T14:54Z)
 
 ### Security-Critical Test Areas
 - JWT validation: revoked members rejected, malformed tokens rejected, missing claims handled
@@ -70,6 +71,7 @@ Server structure now available to Zoe; test project can reference production ent
 - SpaceHub implementation expects `JoinSpace(Guid spaceId)` method signature (not parameterless) and validates that the spaceId parameter matches the `space_id` claim in the JWT, rejecting mismatches with a hub exception.
 - SignalR event broadcast payloads include both `SpaceId` and `FileSize` fields in addition to item metadata (Id, ContentType, Content, SharedAt, MemberId, DisplayName); tests should verify full event structure matches the `ItemAddedEvent` and `ItemDeletedEvent` records in production code.
 - SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
+- Test storage is now isolated at `./artifacts/storage-tests` per user directive (2026-03-17); ensure test hosts override `Storage:BasePath` to prevent cross-contamination with app storage at `./artifacts/storage`.
 
 ## Team Updates (2026-03-17)
 

@@ -419,6 +419,41 @@ Tests validate full event payloads match production records:
 
 ---
 
+### Storage Path Migration — User Directive
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Marek Fišera (User Directive), Executed by Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+
+User directive requested repository-local storage paths to replace server defaults and centralize test artifacts.
+
+#### Decision
+
+Move application storage to `./artifacts/storage` and test storage to `./artifacts/storage-tests`. Update `.gitignore` to exclude test result files (`*.trx`, `TestResults/`, `artifacts/`).
+
+#### Implementation
+
+- App storage default in `src/SharedSpaces.Server/Program.cs` set to `./artifacts/storage`
+- Test host override in `tests/SharedSpaces.Server.Tests/` sets `Storage:BasePath` to `./artifacts/storage-tests`
+- Old runtime directories cleaned from disk
+- `.gitignore` updated to exclude `*.trx`, `TestResults/`, `artifacts/`
+
+#### Rationale
+
+- **Isolation:** Separates application state from test state, preventing accidental shared writes
+- **Cleanup:** Centralizes all runtime artifacts into one excluded directory
+- **Consistency:** Both local development and CI environments use same paths
+
+#### Impact
+
+- 46 tests passing (verified post-migration)
+- Storage paths now isolated per environment
+- Commit: ffed621
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
