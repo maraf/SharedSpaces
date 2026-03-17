@@ -239,11 +239,12 @@ Migrated the entire solution from .NET 9 to .NET 10:
 
 ---
 
-### Lit HTML + WebComponents vs React — Team Evaluation
+### Lit HTML + WebComponents vs React — Team Evaluation & Friction Research Follow-up
 
 **Decision Date:** 2026-03-17  
+**Follow-up Research:** 2026-03-17 (13:36)  
 **Initiated By:** Marek Fišera  
-**Status:** **Pending — awaiting user decision**
+**Status:** **Pending — awaiting user decision** (team consensus: React recommended)
 
 #### Context
 
@@ -292,6 +293,20 @@ Both have valid points. Neither is wrong. The decision hinges on **what matters 
 #### Required Action
 
 Marek must decide which perspective aligns with SharedSpaces priorities. Both evaluations include detailed rationale, risk assessments, and implementation details (if chosen).
+
+#### Follow-up: Friction Research (2026-03-17)
+
+After Wash raised specific concerns, Mal and Wash conducted independent research into current Lit ecosystem state.
+
+**Mal's findings:** Verified that `@vaadin/router` is officially deprecated and unmaintained. `@lit-labs/router` remains experimental/Labs. Tailwind + Lit is workable (via light DOM, CSS injection, or tokens) but adds ceremony. Testing ecosystem is capable but less cohesive than React. SignalR integration is technically straightforward but lacks deep example pool.
+
+**Wash's findings:** Softened original "dealbreaker" claims. Tailwind friction is real but has workarounds. Testing gap (vs React) has narrowed; Vitest Browser Mode + Playwright is credible. Routing remains the weakest point. Confirmed SignalR is framework-agnostic; React mainly wins on ecosystem density.
+
+**Convergence:** Both agents now recommend **React for the SharedSpaces main SPA**. Routing immaturity (Vaadin deprecated, Labs router experimental) is the core friction. All other concerns are manageable trade-offs, not blockers. Lit remains interesting for future isolated widgets/components.
+
+**See:**
+- `.squad/decisions/inbox/mal-friction-response.md`
+- `.squad/decisions/inbox/wash-friction-research.md`
 
 #### Alternatives Considered
 

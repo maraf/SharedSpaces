@@ -144,3 +144,30 @@ Key findings:
 
 **Decision Status:** Pending. Both evaluations recorded in `.squad/decisions.md` under "Lit HTML + WebComponents vs React — Team Evaluation" with status "Pending — awaiting user decision." Marek must choose based on project priorities (bundle size/standards vs ecosystem maturity/developer velocity).
 
+### Lit Follow-up After Wash Pushback (2026-03-17)
+
+Re-ran the Lit vs React decision against current public docs and current ecosystem evidence after Wash challenged the original recommendation.
+
+**Corrections to my earlier call:**
+- `@vaadin/router` is officially **deprecated** and **no longer actively maintained** — my earlier "mature, battle-tested" description was outdated and wrong for a new-project recommendation.
+- `@lit-labs/router` is still a **Lit Labs** package with explicit warnings that it may receive breaking changes or be retired.
+- Tailwind + Lit is **possible**, but only by either injecting built Tailwind CSS into component styles or rendering some components in light DOM, both of which add decision/setup cost.
+- Lit testing is **capable** (`Web Test Runner`, `WebdriverIO`, `@open-wc/testing`, `@lit-labs/testing`), but React still has the more cohesive default path for a Tailwind-heavy SPA team.
+- SignalR + Lit is technically straightforward because the SignalR client is framework-agnostic, but real-world examples are noticeably thinner than React.
+
+**Updated recommendation:** For SharedSpaces specifically, keep **React** for the main SPA. Lit remains interesting for future isolated widgets or embeddable components, but it is no longer the pragmatic default for issue #23 once routing maturity and Tailwind delivery speed are weighted properly.
+
+### Friction Research Follow-up (2026-03-17 13:36)
+
+Marek asked both Mal and Wash to dive deeper into friction points to resolve the architectural split. After independent research, both agents converged on the same recommendation.
+
+**Key findings:**
+- `@vaadin/router` is deprecated; `@lit-labs/router` is still experimental Labs package
+- Tailwind + Shadow DOM friction is real but workable (light DOM, CSS injection, tokens)
+- Testing ecosystem gap has narrowed (Vitest Browser Mode + Playwright is credible)
+- SignalR integration is framework-agnostic; React wins on example ecosystem, not capability
+- Routing remains the weak point in the Lit story; all other concerns are manageable trade-offs
+
+**Final recommendation:** Keep **React** for the main SharedSpaces SPA. Both agents agree this minimizes friction while maintaining shipping velocity. Lite remains viable for future isolated components with understood constraints.
+
+**Status:** Decision documented in `.squad/decisions.md` as "Pending — awaiting user decision" with team consensus noted.
