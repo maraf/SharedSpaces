@@ -57,6 +57,7 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+- A baseline GitHub Actions CI workflow should validate `SharedSpaces.sln` on `ubuntu-latest` with .NET 9 using `dotnet restore`, `dotnet build --no-restore`, and `dotnet test --no-build` for PRs/pushes to `main`.
 - The backend scaffold lives in `SharedSpaces.sln` with the API project at `src/SharedSpaces.Server/SharedSpaces.Server.csproj`, keeping server work isolated under `src/SharedSpaces.Server/`.
 - EF Core persistence is organized under `src/SharedSpaces.Server/Infrastructure/Persistence/`, with entity configurations in `Configurations/` and generated migrations in `Migrations/`.
 - SQLite stays configured through `ConnectionStrings:DefaultConnection` in `src/SharedSpaces.Server/appsettings.json`, but runtime and design-time both normalize the file path through `SqliteConnectionStringResolver` so `dotnet run` and `dotnet ef` target the same database location.
