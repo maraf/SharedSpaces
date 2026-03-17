@@ -35,8 +35,11 @@ public static class JwtAuthenticationExtensions
                     {
                         var accessToken = context.Request.Query["access_token"];
                         var path = context.HttpContext.Request.Path;
+                        var isHubRequest = path.StartsWithSegments("/v1/spaces")
+                            && (path.Value?.EndsWith("/hub", StringComparison.OrdinalIgnoreCase) == true
+                                || path.Value?.EndsWith("/hub/negotiate", StringComparison.OrdinalIgnoreCase) == true);
 
-                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/v1/hubs"))
+                        if (!string.IsNullOrEmpty(accessToken) && isHubRequest)
                         {
                             context.Token = accessToken;
                         }

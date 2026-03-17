@@ -338,7 +338,7 @@ public class SpaceHubTests
         Guid spaceId,
         string? token)
     {
-        var url = $"{factory.Server.BaseAddress}v1/hubs/space/{spaceId}";
+        var url = $"{factory.Server.BaseAddress}v1/spaces/{spaceId}/hub";
 
         var builder = new HubConnectionBuilder()
             .WithUrl(url, options =>
