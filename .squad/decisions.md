@@ -103,6 +103,79 @@ Matching the server scaffold avoids package drift before real tests land, and th
 
 ---
 
+### GitHub Actions CI Workflow
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+Pull requests targeting `main` needed automatic server build and test feedback before merge to prevent broken states reaching production.
+
+#### Decision
+Add `.github/workflows/ci.yml` as a baseline GitHub Actions workflow that runs on `pull_request` to `main` and `push` to `main`, using `ubuntu-latest` plus .NET 9 to restore, build, and test `SharedSpaces.sln`.
+
+#### Rationale
+- Keeps the first CI pass intentionally small and reliable
+- Uses the solution file so server and test projects stay aligned automatically
+- Mirrors local validation commands already used by the team
+- Foundation for future branch protection rules
+
+#### Impact
+- PRs now receive automated feedback before merge
+- Reduces risk of broken server state reaching main
+- All 13 tests pass in CI environment
+
+---
+
+### JWT Claim Validation in Auth-Flow Tests
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Zoe (Tester)  
+**Status:** Active
+
+#### Context
+Issue #20 requires JWTs issued by the token exchange flow to carry specific claims (`sub`, `display_name`, `server_url`, `space_id`) and explicitly omit expiration. Several auth-flow tests were only proving that a token existed or had JWT shape, leaving claim regressions under-tested.
+
+#### Decision
+For every successful token issuance path covered in `tests/SharedSpaces.Server.Tests/TokenEndpointTests.cs`, decode the JWT payload and validate the concrete claim values against the created `SpaceMember`, the requested display name, the configured `Server:Url`, and the target space ID. Keep a dedicated no-expiration assertion as well.
+
+#### Rationale
+- Validates the contract the client actually depends on, not just token issuance mechanics
+- Turns common auth-flow tests into regression coverage for claim mapping, configuration wiring, and the no-expiration policy
+- Prevents future auth changes from silently breaking client expectations
+
+#### Impact
+- Auth-flow test suite now validates JWT payload shape and semantics
+- Stronger safety net for JWT configuration changes
+- Higher confidence in client-server JWT contract
+
+---
+
+### JWT Test Scaffold
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Zoe (Tester)  
+**Status:** Active
+
+#### Context
+Issue #20 needs integration coverage for token issuance and JWT-protected requests before the rest of the protected item endpoints are fully in place.
+
+#### Decision
+Use `WebApplicationFactory<Program>` in `tests/SharedSpaces.Server.Tests/TokenEndpointTests.cs`, override `AppDbContext` to EF Core InMemory for test isolation, and expose the API entry point with a `public partial class Program` marker. Also make startup database initialization provider-aware so WebApplicationFactory hosts can call `EnsureCreatedAsync()` for non-relational providers instead of always attempting migrations.
+
+#### Rationale
+- Keeps auth-flow tests close to the real HTTP pipeline while avoiding SQLite file coupling and external setup in CI/local runs
+- The provider-aware initialization change is small, production-safe, and removes a recurring failure mode
+- Removes need for external setup in CI/local test runs
+
+#### Impact
+- Auth integration tests run in isolation with InMemory database
+- WebApplicationFactory pattern enables future test scenarios with custom configuration
+- Startup initialization now works seamlessly with both SQLite (production) and InMemory (test) providers
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

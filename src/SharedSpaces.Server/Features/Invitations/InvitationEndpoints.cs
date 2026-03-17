@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using QRCoder;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
@@ -33,7 +32,7 @@ public static class InvitationEndpoints
 
         var pin = GeneratePin();
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
-        var hashedPin = HashPin(pin, adminSecret);
+        var hashedPin = InvitationPinHasher.HashPin(pin, adminSecret);
 
         var invitation = new SpaceInvitation
         {
@@ -64,13 +63,6 @@ public static class InvitationEndpoints
     private static string GeneratePin()
     {
         return RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
-    }
-
-    private static string HashPin(string pin, string adminSecret)
-    {
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(adminSecret));
-        var bytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(pin));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     private static string GenerateQrCode(string data)
