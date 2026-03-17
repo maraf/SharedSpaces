@@ -535,7 +535,7 @@ public class ItemEndpointTests
 
         private readonly string _databaseName = $"sharedspaces-items-tests-{Guid.NewGuid()}";
         private readonly long _maxSpaceQuotaBytes = maxSpaceQuotaBytes ?? 104_857_600;
-        private readonly string _storageBasePath = Path.Combine(Path.GetTempPath(), $"sharedspaces-items-tests-{Guid.NewGuid()}");
+        private const string StorageBasePath = "./artifacts/storage-tests";
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -548,7 +548,7 @@ public class ItemEndpointTests
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
                     ["Server:Url"] = ServerUrl,
-                    ["Storage:BasePath"] = _storageBasePath,
+                    ["Storage:BasePath"] = StorageBasePath,
                     ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString()
                 });
             });

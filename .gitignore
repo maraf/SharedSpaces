@@ -11,6 +11,11 @@
 **/bin/
 **/obj/
 
+# Test and runtime artifacts
+*.trx
+TestResults/
+artifacts/
+
 # Local SQLite database files
 *.db
 *.db-shm

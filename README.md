@@ -129,7 +129,7 @@ The client app URL is not stored on the server — it is provided by the admin a
 
 ### 4. Real-time Updates
 
-- SignalR hub per space (`/v1/hubs/space/{spaceId}`)
+- SignalR hub per space (`/v1/spaces/{spaceId}/hub`)
 - On new item → broadcast to all connected members in that space.
 - On item deletion → broadcast tombstone to all connected members.
 

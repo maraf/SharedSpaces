@@ -30,7 +30,7 @@
 - POST /v1/spaces (Admin), GET /v1/spaces/{spaceId} (JWT)
 - POST /v1/spaces/{spaceId}/invitations (Admin), POST /v1/spaces/{spaceId}/tokens (None)
 - GET/PUT/DELETE /v1/spaces/{spaceId}/items (JWT)
-- SignalR hub: /v1/hubs/space/{spaceId}
+- SignalR hub: /v1/spaces/{spaceId}/hub
 
 ## Team Updates (2026-03-16)
 
@@ -83,3 +83,40 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Item CRUD for authenticated members lives in `src/SharedSpaces.Server/Features/Items/`, with `ItemEndpoints.cs` handling space info lookup plus GET/PUT/DELETE item routes under `/v1/spaces/{spaceId}`.
 - File uploads now go through `src/SharedSpaces.Server/Infrastructure/FileStorage/` (`IFileStorage` + `LocalFileStorage`), which stores relative paths under `Storage:BasePath` and cleans up files/directories when items are replaced or deleted.
 - Per-space quota enforcement now persists `SpaceItem.FileSize`, reads `Storage:MaxSpaceQuotaBytes` from `src/SharedSpaces.Server/appsettings.json`, and returns 413 when a file upload would push a space over quota.
+- SignalR hub for real-time space updates lives under `src/SharedSpaces.Server/Features/Hubs/` with `SpaceHub` at `/v1/spaces/{spaceId}/hub` (route consistency), using JWT authentication and Groups for per-space broadcasting.
+- SignalR JWT authentication is configured via `JwtBearerEvents.OnMessageReceived` to extract tokens from the `access_token` query string parameter for WebSocket connections on `/v1/spaces/.../hub` routes.
+- Item endpoint broadcasts now flow through `ISpaceHubNotifier`, which centralizes hub group targeting and keeps SignalR notifications best-effort.
+- CORS is configured in `Program.cs` to allow SignalR connections from the client app origin (`Server:DefaultClientAppUrl`), with credentials, any header, and any method.
+- SignalR hub methods validate that the JWT's `space_id` claim matches the requested `spaceId` before adding the connection to the space group, preventing cross-space subscriptions.
+- SignalR connections now auto-join their per-space group during `SpaceHub.OnConnectedAsync`, and HTTP item endpoints publish through `ISpaceHubNotifier` so broadcast failures stay best-effort and only log warnings.
+
+## Team Updates (2026-03-17 Continued)
+
+**Kaylee completed Issue #22 (SignalR Hub):** Implemented real-time space updates via SignalR:
+- `SpaceHub` initially routed at `/v1/hubs/space/{spaceId}` with JWT bearer auth via query param token extraction
+- `JoinSpace(Guid spaceId)` method validates space_id claim before adding connection to group
+- Event broadcasting integration: `IHubContext<SpaceHub>` injected into `ItemEndpoints`
+- `ItemAdded` event broadcast on item creation, `ItemDeleted` on item deletion
+- CORS configured to allow WebSocket connections from `Server:DefaultClientAppUrl`
+- Branch: `squad/22-signalr-hub`, commit: 8ec9b4f
+- Ready for merge after Zoe's test pass (all 46 tests passing post-fix)
+
+## Team Updates (2026-03-17 Continued)
+
+**Kaylee applied PR #37 backend feedback (2026-03-17T15:22Z):** Implemented cleaner SignalR boundary, automatic hub group joining, and required storage configuration:
+- Extracted hub broadcast behind `ISpaceHubNotifier` / `SpaceHubNotifier` service interface
+- Auto-join space group in `SpaceHub.OnConnectedAsync` with :guid route constraint
+- Removed file-storage defaults; `Storage:BasePath` now required
+- All item broadcasts now best-effort with warning logs
+- Branch: `squad/pr-feedback`, backend commit: 9d723bd
+- Ready for merge after test feedback pass
+
+**Zoe applied PR #37 test feedback (2026-03-17T15:22Z):** Updated test async patterns and assertion ordering per Copilot reviewer:
+- Updated `TaskCompletionSource` with `TaskCreationOptions.RunContinuationsAsynchronously`
+- Reordered assertions to verify HTTP success before awaiting hub events
+- Removed explicit `JoinSpace` calls (now automatic)
+- Verified test storage paths at `./artifacts/storage-tests`
+- Branch: `squad/pr-feedback`, test commit: 0a93ad9
+- All 46 tests passing
+
+**Decision documented:** PR #37 feedback decision captured in `.squad/decisions.md` with context, rationale, and validation.

@@ -27,6 +27,26 @@ public static class JwtAuthenticationExtensions
                     RequireExpirationTime = false,
                     NameClaimType = SpaceMemberClaimTypes.DisplayName
                 };
+
+                // Support SignalR JWT via query string
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        var path = context.HttpContext.Request.Path;
+                        var isHubRequest = path.StartsWithSegments("/v1/spaces")
+                            && (path.Value?.EndsWith("/hub", StringComparison.OrdinalIgnoreCase) == true
+                                || path.Value?.EndsWith("/hub/negotiate", StringComparison.OrdinalIgnoreCase) == true);
+
+                        if (!string.IsNullOrEmpty(accessToken) && isHubRequest)
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         services.AddAuthorization();

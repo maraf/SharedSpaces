@@ -353,7 +353,8 @@ public class TokenEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Server:Url"] = ServerUrl
+                    ["Server:Url"] = ServerUrl,
+                    ["Storage:BasePath"] = "./artifacts/storage-tests"
                 });
             });
 

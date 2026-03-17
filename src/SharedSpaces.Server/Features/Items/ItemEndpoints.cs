@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -99,6 +100,7 @@ public static class ItemEndpoints
         AppDbContext db,
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
+        ISpaceHubNotifier hubNotifier,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -106,6 +108,8 @@ public static class ItemEndpoints
         {
             return authorizationResult;
         }
+
+        var displayName = httpContext.User.FindFirst(SpaceMemberClaimTypes.DisplayName)?.Value ?? string.Empty;
 
         var (request, requestError) = await ReadUpsertRequestAsync(httpContext.Request, cancellationToken);
         if (requestError is not null)
@@ -225,6 +229,21 @@ public static class ItemEndpoints
             {
                 await transaction.CommitAsync(cancellationToken);
             }
+
+            if (existingItem is null)
+            {
+                var itemAddedEvent = new ItemAddedEvent(
+                    item.Id,
+                    item.SpaceId,
+                    item.MemberId,
+                    displayName,
+                    item.ContentType,
+                    item.Content,
+                    item.FileSize,
+                    item.SharedAt);
+
+                await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+            }
         }
         catch (Exception exception)
         {
@@ -280,6 +299,7 @@ public static class ItemEndpoints
         HttpContext httpContext,
         AppDbContext db,
         IFileStorage fileStorage,
+        ISpaceHubNotifier hubNotifier,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
@@ -300,6 +320,9 @@ public static class ItemEndpoints
 
         db.SpaceItems.Remove(item);
         await db.SaveChangesAsync(cancellationToken);
+
+        var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
+        await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
 
         if (isFile)
         {

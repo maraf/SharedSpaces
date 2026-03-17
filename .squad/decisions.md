@@ -309,6 +309,263 @@ Mal and Wash conducted independent friction research on current Lit ecosystem st
 
 ---
 
+### SignalR Hub Integration Testing Strategy
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Zoe (Tester)  
+**Related Issue:** #22  
+**Status:** Active
+
+## Context
+
+Issue #22 requires comprehensive integration tests for the SignalR hub implementation that Kaylee is building. The tests needed to validate real-time event broadcasting, JWT authentication, space group management, and connection lifecycle scenarios without the actual hub implementation being available yet.
+
+## Decision
+
+Created `tests/SharedSpaces.Server.Tests/SpaceHubTests.cs` with 15 comprehensive integration test scenarios using `Microsoft.AspNetCore.SignalR.Client` 10.0.0 and the existing `WebApplicationFactory<Program>` test infrastructure.
+
+### Test Coverage
+
+**Connection & Authentication (5 tests):**
+- Valid JWT → connection succeeds
+- Missing JWT → 401 Unauthorized
+- Invalid/malformed JWT → 401 Unauthorized
+- Revoked member JWT → 401 Unauthorized
+- Malformed token string → 401 Unauthorized
+
+**JoinSpace Method (2 tests):**
+- Matching spaceId in JWT claim → success
+- Mismatched spaceId in JWT claim → hub exception
+
+**Event Broadcasting (5 tests):**
+- ItemAdded with text item → full event data received
+- ItemAdded with file item → full event data with file path received
+- ItemDeleted → event received with item ID
+- Client not in space group → does NOT receive events
+- Multiple clients in same space → ALL receive broadcasts
+
+**Edge Cases (3 tests):**
+- Disconnect and reconnect → can rejoin space group
+- Hub route with non-existent space → appropriate error
+- Connection lifecycle validation
+
+## Technical Implementation
+
+### Hub Connection Pattern
+```csharp
+var connection = new HubConnectionBuilder()
+    .WithUrl($"{testServer}/v1/hubs/space/{spaceId}", options => {
+        options.HttpMessageHandlerFactory = _ => factory.Server.CreateHandler();
+        options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+    })
+    .Build();
+```
+
+### Event Assertion Pattern
+```csharp
+var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
+connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
+
+await connection.StartAsync();
+await connection.InvokeAsync("JoinSpace", space.Id);
+
+// Trigger the event (e.g., PUT an item)
+
+var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+receivedTask.Should().Be(receivedEvent.Task, "Event should be received within timeout");
+```
+
+### Event Structure
+Tests validate full event payloads match production records:
+- `ItemAddedEvent`: Id, SpaceId, MemberId, DisplayName, ContentType, Content, FileSize, SharedAt
+- `ItemDeletedEvent`: Id, SpaceId
+
+## Rationale
+
+- **WebApplicationFactory reuse:** Leverages existing test infrastructure (InMemory database, config overrides, helper methods) rather than creating separate SignalR-specific test fixtures
+- **Real JWT validation:** Tests exercise the actual JWT authentication pipeline including revocation checks and claim validation
+- **Timeout-based assertions:** Using `Task.WhenAny` with timeouts provides clear failure messages and prevents hung tests
+- **Full event validation:** Tests verify complete event structure including all fields to catch regressions in broadcast payloads
+- **TDD approach:** Tests written before implementation exists, ensuring they validate real requirements rather than just implementation details
+
+## Impact
+
+- 15 new integration tests covering all SignalR acceptance criteria from Issue #22
+- Hub implementation is merged and the SignalR test suite is now passing
+- Test branch `squad/22-signalr-tests` remains the foundation for future real-time feature testing (e.g., typing indicators, presence)
+
+## Current Test Status
+
+- All SignalR integration tests are passing against the current hub implementation
+- Any future failures indicate either regressions or changed expectations that should be reviewed explicitly
+
+## Dependencies
+
+- `Microsoft.AspNetCore.SignalR.Client` 10.0.0 NuGet package (added)
+- Existing `TestWebApplicationFactory` infrastructure
+- JWT test helpers from `ItemEndpointTests.cs`
+
+## Alternatives Considered
+
+1. **Mock-based SignalR tests:** Rejected because we wanted to test real WebSocket/long-polling connections and actual JWT validation
+2. **Separate test fixture for SignalR:** Rejected due to code duplication; WebApplicationFactory pattern works for both REST and SignalR
+3. **Wait for implementation first:** Rejected; TDD approach ensures tests validate requirements, not just implementation
+
+---
+
+### Storage Path Migration — User Directive
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Marek Fišera (User Directive), Executed by Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+
+User directive requested repository-local storage paths to replace server defaults and centralize test artifacts.
+
+#### Decision
+
+Move application storage to `./artifacts/storage` and test storage to `./artifacts/storage-tests`. Update `.gitignore` to exclude test result files (`*.trx`, `TestResults/`, `artifacts/`).
+
+#### Implementation
+
+- App storage default in `src/SharedSpaces.Server/Program.cs` set to `./artifacts/storage`
+- Test host override in `tests/SharedSpaces.Server.Tests/` sets `Storage:BasePath` to `./artifacts/storage-tests`
+- Old runtime directories cleaned from disk
+- `.gitignore` updated to exclude `*.trx`, `TestResults/`, `artifacts/`
+
+#### Rationale
+
+- **Isolation:** Separates application state from test state, preventing accidental shared writes
+- **Cleanup:** Centralizes all runtime artifacts into one excluded directory
+- **Consistency:** Both local development and CI environments use same paths
+
+#### Impact
+
+- 46 tests passing (verified post-migration)
+- Storage paths now isolated per environment
+- Commit: ffed621
+
+---
+
+### SignalR Hub Route Consistency
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Marek Fišera (User Directive), Executed by Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+
+SignalR hub endpoint was routed at `/v1/hubs/space/{spaceId}`, which was inconsistent with the rest of the API surface where space-scoped resources live under `/v1/spaces/{spaceId}/...`.
+
+#### Decision
+
+Changed the SignalR hub route from `/v1/hubs/space/{spaceId}` to `/v1/spaces/{spaceId}/hub` to align with the existing API surface pattern.
+
+#### Implementation
+
+- Updated `HubEndpoints.cs` to map `SpaceHub` at `/v1/spaces/{spaceId}/hub`
+- Updated `JwtAuthenticationExtensions.cs` to recognize both the hub endpoint and the negotiate endpoint under `/v1/spaces/...` for query-string JWT token extraction
+- Updated `SpaceHubTests.cs` to use the new route
+- Refreshed README.md route example to match the implementation
+
+#### Rationale
+
+- Consistency: All space-scoped resources now follow the uniform `/v1/spaces/{spaceId}/...` pattern
+- Predictability: Developers can infer endpoint locations from the API pattern
+- No breaking changes to production: Hub is still in development phase
+
+#### Validation
+
+- Build: ✅ passing (`dotnet build SharedSpaces.sln --nologo`)
+- Tests: ✅ 46/46 passing (`dotnet test SharedSpaces.sln --nologo`)
+- Commit: a935139
+
+#### Impact
+
+- Hub is now discoverable via standard pattern
+- JWT authentication works consistently with query-string extraction for the new route
+- All existing tests pass
+
+---
+
+### PR #37 Backend Review Feedback Application
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Marek Fišera (User + Copilot Reviewer), Executed by Kaylee & Zoe  
+**PR:** #37  
+**Status:** Complete
+
+#### Context
+
+Copilot reviewer raised feedback on PR #37 addressing SignalR hub integration design, storage configuration rigor, and test async patterns. Five key improvement areas identified:
+
+1. Cleaner boundary between HTTP endpoints and SignalR broadcasting
+2. Automatic hub group joining (remove explicit JoinSpace calls)
+3. Storage configuration must be explicit (no defaults)
+4. Route parameter constraints (`:guid` on spaceId)
+5. Test async patterns (RunContinuationsAsynchronously)
+
+#### Decision
+
+**Backend (Kaylee):**
+- Extract hub broadcast responsibilities behind `ISpaceHubNotifier` / `SpaceHubNotifier` service interface
+- Auto-join the SignalR space group inside `SpaceHub.OnConnectedAsync` after validating the route `spaceId` against the JWT `space_id` claim
+- Treat SignalR broadcasts as best-effort with warning logs so transient hub issues do not turn successful item writes/deletes into HTTP 500 responses
+- Require `Storage:BasePath` from configuration instead of relying on file-storage defaults
+- Add `:guid` route constraint to hub endpoint spaceId parameter
+
+**Tests (Zoe):**
+- Update `TaskCompletionSource` instantiation to use `TaskCreationOptions.RunContinuationsAsynchronously`
+- Reorder assertions to verify HTTP success (PUT/DELETE) before awaiting broadcast events
+- Remove explicit `JoinSpace` calls (now automatic in `OnConnectedAsync`)
+- Verify test storage paths align with configuration at `./artifacts/storage-tests`
+
+#### Implementation
+
+**Files Modified:**
+- `src/SharedSpaces.Server/Features/Hubs/SpaceHub.cs` (auto-join, :guid constraint)
+- `src/SharedSpaces.Server/Features/Hubs/HubEndpoints.cs` (:guid constraint mapping)
+- `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs` (ISpaceHubNotifier injection)
+- `src/SharedSpaces.Server/Program.cs` (DI registration)
+- `src/SharedSpaces.Server/Infrastructure/FileStorage/LocalFileStorage.cs` (required BasePath)
+- `src/SharedSpaces.Server/Infrastructure/FileStorage/StorageOptions.cs` (required BasePath)
+- `src/SharedSpaces.Server/appsettings.json` (explicit Storage:BasePath)
+
+**Files Created:**
+- `src/SharedSpaces.Server/Features/Hubs/ISpaceHubNotifier.cs`
+- `src/SharedSpaces.Server/Features/Hubs/SpaceHubNotifier.cs`
+
+**Test Files Modified:**
+- `tests/SharedSpaces.Server.Tests/SpaceHubTests.cs` (async patterns, assertion order, no JoinSpace)
+- `tests/SharedSpaces.Server.Tests/ItemEndpointTests.cs` (assertion order, storage paths)
+- `tests/SharedSpaces.Server.Tests/TokenEndpointTests.cs` (storage paths)
+
+#### Rationale
+
+- **ISpaceHubNotifier:** Separates concerns — HTTP endpoints stay focused on persistence, broadcasting becomes best-effort infrastructure detail
+- **Auto-join:** Reduces client logic complexity and eliminates manual JoinSpace calls
+- **Best-effort broadcasts:** Resilience — failed broadcasts never block successful item writes
+- **Required configuration:** Explicitness eliminates silent failures and makes storage setup visible in configuration
+- **Route constraints:** Prevents route ambiguity and improves matching performance
+- **Async patterns:** RunContinuationsAsynchronously + assertion ordering match real-world usage patterns
+
+#### Validation
+
+✅ Build: `dotnet build SharedSpaces.sln --nologo` passes  
+✅ Tests: **46/46 passing** (`dotnet test SharedSpaces.sln --nologo`)  
+✅ Backend commit: 9d723bd  
+✅ Test commit: 0a93ad9  
+
+#### Impact
+
+- Hub integration fully decoupled from HTTP layer
+- Storage configuration now explicit and auditable
+- Test async patterns match production best practices
+- All existing functionality preserved; tests act as regression guard
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

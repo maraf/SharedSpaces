@@ -12,14 +12,15 @@ public sealed class LocalFileStorage : IFileStorage
         ArgumentNullException.ThrowIfNull(environment);
 
         var configuredBasePath = options.Value.BasePath;
-        var basePath = string.IsNullOrWhiteSpace(configuredBasePath)
-            ? "./storage"
-            : configuredBasePath;
+        if (string.IsNullOrWhiteSpace(configuredBasePath))
+        {
+            throw new InvalidOperationException("Storage:BasePath must be configured with a non-empty path.");
+        }
 
         _basePath = Path.GetFullPath(
-            Path.IsPathRooted(basePath)
-                ? basePath
-                : Path.Combine(environment.ContentRootPath, basePath));
+            Path.IsPathRooted(configuredBasePath)
+                ? configuredBasePath
+                : Path.Combine(environment.ContentRootPath, configuredBasePath));
 
         Directory.CreateDirectory(_basePath);
     }
