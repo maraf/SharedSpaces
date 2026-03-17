@@ -80,3 +80,6 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Phase 1 (Core Server) JWT auth milestone complete. Kaylee delivered token endpoint + middleware (commit 24774a5), Zoe delivered 13 integration tests (commit 2616bce), Coordinator fixed test config resolution (commit ee9c2ef).
 - GitHub Actions CI workflow now in place. Kaylee delivered `.github/workflows/ci.yml` (commit 526e691) for automated server validation on PRs/pushes to `main`. All 13 tests pass in CI environment.
 - `SpaceMemberAuthorizationMiddleware` should challenge the bearer scheme for revoked or missing members so every auth failure path returns a standard 401 with the expected `WWW-Authenticate` header.
+- Item CRUD for authenticated members lives in `src/SharedSpaces.Server/Features/Items/`, with `ItemEndpoints.cs` handling space info lookup plus GET/PUT/DELETE item routes under `/v1/spaces/{spaceId}`.
+- File uploads now go through `src/SharedSpaces.Server/Infrastructure/FileStorage/` (`IFileStorage` + `LocalFileStorage`), which stores relative paths under `Storage:BasePath` and cleans up files/directories when items are replaced or deleted.
+- Per-space quota enforcement now persists `SpaceItem.FileSize`, reads `Storage:MaxSpaceQuotaBytes` from `src/SharedSpaces.Server/appsettings.json`, and returns 413 when a file upload would push a space over quota.
