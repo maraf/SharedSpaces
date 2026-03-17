@@ -48,6 +48,44 @@ All issues labeled with `squad`, `phase:N`, and category (backend/frontend/infra
 
 Your Phase 2 work (#22 SignalR) can assume item CRUD is stable. The hub will broadcast item-created/item-deleted events. Consider reusing the same SpaceItem models from ItemEndpoints for serialization consistency.
 
+## Team Updates (2026-03-17)
+
+**Kaylee completed Phase 1, issue #21:** Space items CRUD endpoints live. Key patterns for your work:
+- **Vertical slice pattern:** Each feature owns its endpoints, models, and logic in `Features/{Feature}/`
+- **File storage abstraction:** `IFileStorage` interface in `Infrastructure/FileStorage/` enables testing and cloud swaps. Implementations receive `Storage:BasePath` config.
+- **Multipart file upload:** Manual form parsing within endpoint handler, JWT auth runs before parsing
+- **Quota tracking:** Metadata-based (persisted `FileSize` on items), not filesystem scans
+- **Database:** Now on .NET 10 with explicit `Microsoft.IdentityModel.JsonWebTokens` package (required for JWT validation in .NET 10)
+
+Your Phase 2 work (#22 SignalR) can assume item CRUD is stable. The hub will broadcast item-created/item-deleted events. Consider reusing the same SpaceItem models from ItemEndpoints for serialization consistency.
+
+## Lit HTML vs React Evaluation (2026-03-17)
+
+**Status:** ✅ Completed frontend perspective evaluation, recommending React over Lit.
+
+**Wash's Recommendation:** ⚠️ **RECOMMEND REACT** (not Lit)
+
+Marek asked for team feedback on switching from React to Lit HTML + WebComponents for Phase 3 client. Wash evaluated the proposal from a **hands-on frontend developer perspective** and recommended sticking with React.
+
+**Key Concerns:**
+1. **Routing is broken/experimental** — Vaadin deprecated, @lit-labs/router experimental, URLPattern is roll-your-own. React Router mature and battle-tested.
+2. **Shadow DOM + Tailwind friction (dealbreaker)** — Utility classes don't penetrate Shadow DOM. Requires constant workarounds vs React's effortless integration. Issue #23 explicitly calls for Tailwind.
+3. **Testing ecosystem gap** — React Testing Library trivial to set up; Lit's testing in 2025 is "usable but fragmented." Would waste time configuring tooling instead of writing tests.
+4. **Developer velocity** — 30% of time lost to tooling friction and pattern research instead of shipping features. 10x more Stack Overflow answers for React + SignalR.
+5. **State management** — Lit's reactive properties work fine, but React hooks make complex state (JWT manager, SignalR hub registry, offline queue) **straightforward**.
+
+**Acknowledged Lit's strengths:** Elegant, lightweight, standards-based, good for design systems and microfrontends. But **not the right tool for this SPA.**
+
+**Honest assessment:** "Lit is a great technology. It's just the wrong tool for this job. React lets me focus on building the app, not fighting the framework."
+
+**Mal's Counter-Recommendation:** ✅ **APPROVE THE SWITCH** (see Mal's history for rationale)
+
+**Decision Status:** Pending. Both evaluations recorded in `.squad/decisions.md` under "Lit HTML + WebComponents vs React — Team Evaluation" with status "Pending — awaiting user decision." Marek must choose based on project priorities:
+- **Lit (Mal's case):** Bundle size, standards, architecture
+- **React (Wash's case):** Routing maturity, Tailwind integration, testing ecosystem, developer velocity
+
+You'll likely start Phase 3 after Marek decides. If React approved, issue #23 proceeds as-is. If Lit approved, #23 needs rewrite (Lit + vaadin-router + @web/test-runner).
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->

@@ -237,6 +237,70 @@ Migrated the entire solution from .NET 9 to .NET 10:
 
 ---
 
+---
+
+### Lit HTML + WebComponents vs React — Team Evaluation
+
+**Decision Date:** 2026-03-17  
+**Initiated By:** Marek Fišera  
+**Status:** **Pending — awaiting user decision**
+
+#### Context
+
+Issue #23 proposes switching the SharedSpaces client from React to Lit HTML + WebComponents. The team provided two comprehensive evaluations:
+
+#### Perspective 1: Mal (Lead/Architect) — APPROVE
+
+**Recommendation:** Switch to Lit.
+
+**Key Points:**
+- SignalR integration is native and cleaner than React patterns
+- Multi-server JWT management simpler without forced single-app-state
+- 40% bundle size reduction (110-140 KB gzipped savings)
+- Better fit for standards-based, self-hostable platform
+- Timeline impact: ZERO (Phase 3 hasn't started yet)
+
+**Trade-offs accepted:** Smaller ecosystem, React DevTools unavailable, team learning curve (3-5 days)
+
+**See:** `.squad/decisions/inbox/mal-lithtml-evaluation.md`
+
+#### Perspective 2: Wash (Frontend Dev) — RECOMMEND REACT
+
+**Recommendation:** Stick with React.
+
+**Key Concerns:**
+- **Routing:** Vaadin Router deprecated, @lit-labs/router experimental — risk and dev time
+- **Shadow DOM + Tailwind friction:** Utility classes don't penetrate Shadow DOM, requires constant workarounds (dealbreaker)
+- **Testing ecosystem:** React Testing Library trivial; Lit's testing is fragmented in 2025
+- **Developer velocity:** 30% of time lost to tooling/patterns instead of shipping features
+- Stack Overflow: 10x more React + SignalR examples; Lit developer is on their own
+
+**Strengths acknowledged:** Lit is elegant, lightweight, technically sound—just wrong tool for this job.
+
+**See:** `.squad/decisions/inbox/wash-lithtml-evaluation.md`
+
+#### The Split
+
+This is a genuine architectural disagreement with supporting evidence:
+- **Mal prioritizes:** Bundle size, architectural purity, standards alignment
+- **Wash prioritizes:** Routing maturity, Tailwind integration, testing ecosystem, developer velocity
+
+Both have valid points. Neither is wrong. The decision hinges on **what matters most to the project:**
+1. **Performance & standards (mobile-first, self-hosted)** → Lit
+2. **Velocity & ecosystem maturity** → React
+
+#### Required Action
+
+Marek must decide which perspective aligns with SharedSpaces priorities. Both evaluations include detailed rationale, risk assessments, and implementation details (if chosen).
+
+#### Alternatives Considered
+
+- **React (status quo):** Mature ecosystem, large bundle, excellent tooling
+- **Lit HTML (proposal):** Lightweight, standards-based, smaller bundle, immature routing/testing
+- **Vue 3:** Not evaluated; React vs Lit was the proposed comparison
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

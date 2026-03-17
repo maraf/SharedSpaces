@@ -122,3 +122,25 @@ Created 14 GitHub issues (maraf/SharedSpaces#17-#30) breaking down the 5-phase i
 
 **Ready for Phase 3:** React client can assume all server APIs are available and stable. Use same JWT structure and models from API responses for type safety.
 
+### Lit HTML vs React Evaluation (2026-03-17)
+
+**Status:** ✅ Completed architectural evaluation, split verdict awaiting Marek's decision.
+
+Evaluated Marek's proposal to switch from React to Lit HTML + WebComponents for the SharedSpaces client SPA.
+
+**Mal's Recommendation:** ✅ **APPROVE THE SWITCH**
+
+Key findings:
+- **SignalR integration:** Native, cleaner than React patterns (no wrapper boilerplate)
+- **Multi-server JWT:** Simpler architecture without forced single-app-state
+- **Bundle size:** 40% reduction (110-140 KB gzipped) = significant UX win for self-hosted, mobile-first deployments
+- **Dependency footprint:** Fewer libraries to maintain
+- **Standards-based:** WebComponents are the web platform, not a framework
+- **Timeline:** ZERO impact (Phase 3 hasn't started yet)
+
+**Fit assessment:** All 8 dimensions rated positive (SignalR excellent, bundle size decisive advantage, routing good enough). Risks all low with documented mitigations.
+
+**Wash's Counter-Recommendation:** ⚠️ **RECOMMEND REACT** (see Wash's history for rationale)
+
+**Decision Status:** Pending. Both evaluations recorded in `.squad/decisions.md` under "Lit HTML + WebComponents vs React — Team Evaluation" with status "Pending — awaiting user decision." Marek must choose based on project priorities (bundle size/standards vs ecosystem maturity/developer velocity).
+
