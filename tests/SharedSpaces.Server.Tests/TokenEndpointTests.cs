@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
@@ -13,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
 namespace SharedSpaces.Server.Tests;
@@ -392,7 +391,7 @@ public class TokenEndpointTests
                 {
                     Id = Guid.NewGuid(),
                     SpaceId = spaceId,
-                    Pin = HashPin(pin, AdminSecret)
+                    Pin = InvitationPinHasher.HashPin(pin, AdminSecret)
                 };
 
                 db.SpaceInvitations.Add(invitation);
@@ -413,13 +412,6 @@ public class TokenEndpointTests
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             return await action(db);
-        }
-
-        private static string HashPin(string pin, string adminSecret)
-        {
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(adminSecret));
-            var bytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(pin));
-            return Convert.ToHexString(bytes).ToLowerInvariant();
         }
     }
 }
