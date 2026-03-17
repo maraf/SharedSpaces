@@ -53,11 +53,9 @@ public static class TokenEndpoints
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
         var hashedPin = InvitationPinHasher.HashPin(request.Pin.Trim(), adminSecret);
 
-        var invitations = await db.SpaceInvitations
-            .Where(invitation => invitation.SpaceId == spaceId)
-            .ToListAsync();
+        var invitation = await db.SpaceInvitations
+            .FirstOrDefaultAsync(existingInvitation => existingInvitation.SpaceId == spaceId && existingInvitation.Pin == hashedPin);
 
-        var invitation = invitations.FirstOrDefault(candidate => candidate.Pin == hashedPin);
         if (invitation == null)
         {
             return Results.Unauthorized();
@@ -73,7 +71,15 @@ public static class TokenEndpoints
 
         db.SpaceMembers.Add(member);
         db.SpaceInvitations.Remove(invitation);
-        await db.SaveChangesAsync();
+
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Unauthorized();
+        }
 
         var token = CreateToken(member, configuration);
         return Results.Ok(new TokenResponse(token));

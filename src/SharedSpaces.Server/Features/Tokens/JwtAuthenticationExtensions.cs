@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -52,7 +53,7 @@ internal sealed class SpaceMemberAuthorizationMiddleware(RequestDelegate next)
         var subject = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
         if (!Guid.TryParse(subject, out var memberId))
         {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.ChallengeAsync(JwtBearerDefaults.AuthenticationScheme);
             return;
         }
 
@@ -62,7 +63,7 @@ internal sealed class SpaceMemberAuthorizationMiddleware(RequestDelegate next)
 
         if (member == null || member.IsRevoked)
         {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.ChallengeAsync(JwtBearerDefaults.AuthenticationScheme);
             return;
         }
 
