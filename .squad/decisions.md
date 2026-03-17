@@ -454,6 +454,47 @@ Move application storage to `./artifacts/storage` and test storage to `./artifac
 
 ---
 
+### SignalR Hub Route Consistency
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Marek Fišera (User Directive), Executed by Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+
+SignalR hub endpoint was routed at `/v1/hubs/space/{spaceId}`, which was inconsistent with the rest of the API surface where space-scoped resources live under `/v1/spaces/{spaceId}/...`.
+
+#### Decision
+
+Changed the SignalR hub route from `/v1/hubs/space/{spaceId}` to `/v1/spaces/{spaceId}/hub` to align with the existing API surface pattern.
+
+#### Implementation
+
+- Updated `HubEndpoints.cs` to map `SpaceHub` at `/v1/spaces/{spaceId}/hub`
+- Updated `JwtAuthenticationExtensions.cs` to recognize both the hub endpoint and the negotiate endpoint under `/v1/spaces/...` for query-string JWT token extraction
+- Updated `SpaceHubTests.cs` to use the new route
+- Refreshed README.md route example to match the implementation
+
+#### Rationale
+
+- Consistency: All space-scoped resources now follow the uniform `/v1/spaces/{spaceId}/...` pattern
+- Predictability: Developers can infer endpoint locations from the API pattern
+- No breaking changes to production: Hub is still in development phase
+
+#### Validation
+
+- Build: ✅ passing (`dotnet build SharedSpaces.sln --nologo`)
+- Tests: ✅ 46/46 passing (`dotnet test SharedSpaces.sln --nologo`)
+- Commit: a935139
+
+#### Impact
+
+- Hub is now discoverable via standard pattern
+- JWT authentication works consistently with query-string extraction for the new route
+- All existing tests pass
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
