@@ -28,6 +28,12 @@ app.MapSpaceEndpoints();
 app.MapInvitationEndpoints();
 app.MapTokenEndpoints();
 
+if (app.Environment.IsEnvironment("Testing"))
+{
+    app.MapGet("/test/protected", () => Results.Ok())
+        .RequireAuthorization();
+}
+
 app.Run();
 
 public partial class Program

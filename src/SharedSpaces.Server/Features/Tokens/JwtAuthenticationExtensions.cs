@@ -11,11 +11,10 @@ public static class JwtAuthenticationExtensions
 {
     public static IServiceCollection AddJwtAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
-        var signingKey = JwtTokenSigningKeyFactory.Create(configuration);
-
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
+                var signingKey = JwtTokenSigningKeyFactory.Create(configuration);
                 options.MapInboundClaims = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {

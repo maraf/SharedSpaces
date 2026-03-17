@@ -156,9 +156,9 @@ public class TokenEndpointTests
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
 
-        var response = await GetProtectedItemsAsync(client, space.Id, token);
+        var response = await GetProtectedEndpointAsync(client, token);
 
-        response.IsSuccessStatusCode.Should().BeTrue();
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -167,9 +167,7 @@ public class TokenEndpointTests
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
 
-        var space = await factory.CreateSpaceAsync();
-
-        var response = await GetProtectedItemsAsync(client, space.Id);
+        var response = await GetProtectedEndpointAsync(client);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -195,7 +193,7 @@ public class TokenEndpointTests
             await db.SaveChangesAsync();
         });
 
-        var response = await GetProtectedItemsAsync(client, space.Id, token);
+        var response = await GetProtectedEndpointAsync(client, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -215,7 +213,7 @@ public class TokenEndpointTests
         var token = await ReadTokenAsync(tokenResponse);
         var invalidToken = token[..^1] + (token[^1] == 'a' ? 'b' : 'a');
 
-        var response = await GetProtectedItemsAsync(client, space.Id, invalidToken);
+        var response = await GetProtectedEndpointAsync(client, invalidToken);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -259,9 +257,9 @@ public class TokenEndpointTests
         return client.PostAsJsonAsync($"/v1/spaces/{spaceId}/tokens", new ExchangeTokenRequest(pin, displayName));
     }
 
-    private static async Task<HttpResponseMessage> GetProtectedItemsAsync(HttpClient client, Guid spaceId, string? token = null)
+    private static async Task<HttpResponseMessage> GetProtectedEndpointAsync(HttpClient client, string? token = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/spaces/{spaceId}/items");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/test/protected");
         if (!string.IsNullOrWhiteSpace(token))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
