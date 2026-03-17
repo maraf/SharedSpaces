@@ -5,6 +5,7 @@ using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -153,7 +154,7 @@ public class SpaceHubTests
 
         var evt = await receivedEvent.Task;
         evt.Id.Should().Be(itemId);
-        evt.ContentType.Should().Be("text/plain");
+        evt.ContentType.Should().Be("text");
         evt.Content.Should().Be(textContent);
         evt.MemberId.Should().Be(member.Id);
         evt.DisplayName.Should().Be(member.DisplayName);
@@ -186,8 +187,8 @@ public class SpaceHubTests
 
         var evt = await receivedEvent.Task;
         evt.Id.Should().Be(itemId);
-        evt.ContentType.Should().Be("application/octet-stream");
-        evt.Content.Should().StartWith("/files/");
+        evt.ContentType.Should().Be("file");
+        evt.Content.Should().Be(fileName);
         evt.MemberId.Should().Be(member.Id);
         evt.DisplayName.Should().Be(member.DisplayName);
         evt.SharedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
@@ -326,8 +327,10 @@ public class SpaceHubTests
 
         await using var connection = CreateHubConnection(factory, nonExistentSpaceId, token);
 
-        var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<HttpRequestException>();
+        await connection.StartAsync();
+
+        var act = async () => await connection.InvokeAsync("JoinSpace", nonExistentSpaceId);
+        await act.Should().ThrowAsync<HubException>();
     }
 
     private static HubConnection CreateHubConnection(
@@ -386,7 +389,8 @@ public class SpaceHubTests
 
         var formContent = new MultipartFormDataContent
         {
-            { new StringContent("text/plain"), "contentType" },
+            { new StringContent(itemId.ToString()), "id" },
+            { new StringContent("text"), "contentType" },
             { new StringContent(content), "content" }
         };
         request.Content = formContent;
@@ -407,7 +411,8 @@ public class SpaceHubTests
 
         var formContent = new MultipartFormDataContent
         {
-            { new StringContent("application/octet-stream"), "contentType" },
+            { new StringContent(itemId.ToString()), "id" },
+            { new StringContent("file"), "contentType" },
             { new ByteArrayContent(fileContent), "file", fileName }
         };
         request.Content = formContent;
