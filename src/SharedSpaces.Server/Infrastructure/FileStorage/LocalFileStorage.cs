@@ -13,7 +13,7 @@ public sealed class LocalFileStorage : IFileStorage
 
         var configuredBasePath = options.Value.BasePath;
         var basePath = string.IsNullOrWhiteSpace(configuredBasePath)
-            ? "./storage"
+            ? "./artifacts/storage"
             : configuredBasePath;
 
         _basePath = Path.GetFullPath(
