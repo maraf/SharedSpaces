@@ -37,6 +37,17 @@
 
 All issues labeled with `squad`, `phase:N`, and category (backend/frontend/infrastructure/real-time). Dependencies explicit in issue descriptions. You can start Phase 3 once Phase 1 APIs are available.
 
+## Team Updates (2026-03-17)
+
+**Kaylee completed Phase 1, issue #21:** Space items CRUD endpoints live. Key patterns for your work:
+- **Vertical slice pattern:** Each feature owns its endpoints, models, and logic in `Features/{Feature}/`
+- **File storage abstraction:** `IFileStorage` interface in `Infrastructure/FileStorage/` enables testing and cloud swaps. Implementations receive `Storage:BasePath` config.
+- **Multipart file upload:** Manual form parsing within endpoint handler, JWT auth runs before parsing
+- **Quota tracking:** Metadata-based (persisted `FileSize` on items), not filesystem scans
+- **Database:** Now on .NET 10 with explicit `Microsoft.IdentityModel.JsonWebTokens` package (required for JWT validation in .NET 10)
+
+Your Phase 2 work (#22 SignalR) can assume item CRUD is stable. The hub will broadcast item-created/item-deleted events. Consider reusing the same SpaceItem models from ItemEndpoints for serialization consistency.
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->

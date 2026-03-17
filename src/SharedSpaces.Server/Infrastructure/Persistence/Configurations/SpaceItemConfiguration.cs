@@ -22,6 +22,10 @@ public class SpaceItemConfiguration : IEntityTypeConfiguration<SpaceItem>
         builder.Property(item => item.Content)
             .IsRequired();
 
+        builder.Property(item => item.FileSize)
+            .HasDefaultValue(0L)
+            .IsRequired();
+
         builder.Property(item => item.SharedAt)
             .IsRequired();
 
