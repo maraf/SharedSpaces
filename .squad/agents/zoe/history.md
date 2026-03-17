@@ -70,3 +70,20 @@ Server structure now available to Zoe; test project can reference production ent
 - SpaceHub implementation expects `JoinSpace(Guid spaceId)` method signature (not parameterless) and validates that the spaceId parameter matches the `space_id` claim in the JWT, rejecting mismatches with a hub exception.
 - SignalR event broadcast payloads include both `SpaceId` and `FileSize` fields in addition to item metadata (Id, ContentType, Content, SharedAt, MemberId, DisplayName); tests should verify full event structure matches the `ItemAddedEvent` and `ItemDeletedEvent` records in production code.
 - SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
+
+## Team Updates (2026-03-17)
+
+**Zoe completed Issue #22 (SignalR Hub Tests):** Wrote 15 comprehensive integration tests for real-time hub:
+- Test coverage: connection auth (5 tests), JoinSpace validation (2), event broadcasting (5), edge cases (3)
+- Used `Microsoft.AspNetCore.SignalR.Client` 10.0.0 with `WebApplicationFactory` pattern
+- Tests written TDD-style before implementation, validating requirements not just implementation
+- Event assertions use `TaskCompletionSource<T>` + `Task.WhenAny` timeout pattern for safety
+- Branch: `squad/22-signalr-tests`, initial commit: b32bb24
+
+**Zoe fix pass:** Diagnosed and fixed 6 test failures on merged branches:
+- Root cause: form data contract mismatches between tests and endpoint implementations
+- Fixed missing `id` form field in item creation payloads
+- Corrected `contentType` values (text/file vs image/png mismatches)
+- Fixed non-existent space test expectations
+- Result: All 46 tests passing (15 SignalR + 31 existing endpoint tests)
+- Commit: fc4a0c3

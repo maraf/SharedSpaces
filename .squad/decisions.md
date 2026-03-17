@@ -309,6 +309,116 @@ Mal and Wash conducted independent friction research on current Lit ecosystem st
 
 ---
 
+### SignalR Hub Integration Testing Strategy
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Zoe (Tester)  
+**Related Issue:** #22  
+**Status:** Active
+
+## Context
+
+Issue #22 requires comprehensive integration tests for the SignalR hub implementation that Kaylee is building. The tests needed to validate real-time event broadcasting, JWT authentication, space group management, and connection lifecycle scenarios without the actual hub implementation being available yet.
+
+## Decision
+
+Created `tests/SharedSpaces.Server.Tests/SpaceHubTests.cs` with 15 comprehensive integration test scenarios using `Microsoft.AspNetCore.SignalR.Client` 10.0.0 and the existing `WebApplicationFactory<Program>` test infrastructure.
+
+### Test Coverage
+
+**Connection & Authentication (5 tests):**
+- Valid JWT → connection succeeds
+- Missing JWT → 401 Unauthorized
+- Invalid/malformed JWT → 401 Unauthorized
+- Revoked member JWT → 401 Unauthorized
+- Malformed token string → 401 Unauthorized
+
+**JoinSpace Method (2 tests):**
+- Matching spaceId in JWT claim → success
+- Mismatched spaceId in JWT claim → hub exception
+
+**Event Broadcasting (5 tests):**
+- ItemAdded with text item → full event data received
+- ItemAdded with file item → full event data with file path received
+- ItemDeleted → event received with item ID
+- Client not in space group → does NOT receive events
+- Multiple clients in same space → ALL receive broadcasts
+
+**Edge Cases (3 tests):**
+- Disconnect and reconnect → can rejoin space group
+- Hub route with non-existent space → appropriate error
+- Connection lifecycle validation
+
+## Technical Implementation
+
+### Hub Connection Pattern
+```csharp
+var connection = new HubConnectionBuilder()
+    .WithUrl($"{testServer}/v1/hubs/space/{spaceId}", options => {
+        options.HttpMessageHandlerFactory = _ => factory.Server.CreateHandler();
+        options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+    })
+    .Build();
+```
+
+### Event Assertion Pattern
+```csharp
+var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
+connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
+
+await connection.StartAsync();
+await connection.InvokeAsync("JoinSpace", space.Id);
+
+// Trigger the event (e.g., PUT an item)
+
+var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+receivedTask.Should().Be(receivedEvent.Task, "Event should be received within timeout");
+```
+
+### Event Structure
+Tests validate full event payloads match production records:
+- `ItemAddedEvent`: Id, SpaceId, MemberId, DisplayName, ContentType, Content, FileSize, SharedAt
+- `ItemDeletedEvent`: Id, SpaceId
+
+## Rationale
+
+- **WebApplicationFactory reuse:** Leverages existing test infrastructure (InMemory database, config overrides, helper methods) rather than creating separate SignalR-specific test fixtures
+- **Real JWT validation:** Tests exercise the actual JWT authentication pipeline including revocation checks and claim validation
+- **Timeout-based assertions:** Using `Task.WhenAny` with timeouts provides clear failure messages and prevents hung tests
+- **Full event validation:** Tests verify complete event structure including all fields to catch regressions in broadcast payloads
+- **TDD approach:** Tests written before implementation exists, ensuring they validate real requirements rather than just implementation details
+
+## Impact
+
+- 15 new integration tests covering all SignalR acceptance criteria from Issue #22
+- Tests compile successfully but will fail until hub implementation is merged
+- Test branch `squad/22-signalr-tests` can be merged independently or alongside Kaylee's `squad/22-signalr-hub` branch
+- Foundation for future real-time feature testing (e.g., typing indicators, presence)
+
+## Expected Test Status
+
+**Before hub implementation merge:**
+- All 15 tests will fail with connection/routing errors
+- This is expected and documented
+
+**After hub implementation merge:**
+- Tests should pass if implementation follows standard ASP.NET Core SignalR patterns
+- Any failures indicate either test assumptions or implementation deviations
+
+## Dependencies
+
+- `Microsoft.AspNetCore.SignalR.Client` 10.0.0 NuGet package (added)
+- Existing `TestWebApplicationFactory` infrastructure
+- JWT test helpers from `ItemEndpointTests.cs`
+
+## Alternatives Considered
+
+1. **Mock-based SignalR tests:** Rejected because we wanted to test real WebSocket/long-polling connections and actual JWT validation
+2. **Separate test fixture for SignalR:** Rejected due to code duplication; WebApplicationFactory pattern works for both REST and SignalR
+3. **Wait for implementation first:** Rejected; TDD approach ensures tests validate requirements, not just implementation
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
