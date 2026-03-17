@@ -1,4 +1,5 @@
 using SharedSpaces.Server.Features.Admin;
+using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Features.Items;
 using SharedSpaces.Server.Features.Spaces;
@@ -13,11 +14,24 @@ builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<AdminAuthenticationFilter>();
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+builder.Services.AddSignalR();
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        var clientAppUrl = builder.Configuration["Server:DefaultClientAppUrl"] ?? "https://localhost:5173";
+        policy.WithOrigins(clientAppUrl)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 var app = builder.Build();
 
 await app.InitializeDatabaseAsync();
 
+app.UseCors();
 app.UseAuthentication();
 app.UseSpaceMemberAuthorization();
 app.UseAuthorization();
@@ -32,6 +46,7 @@ app.MapSpaceEndpoints();
 app.MapInvitationEndpoints();
 app.MapTokenEndpoints();
 app.MapItemEndpoints();
+app.MapHubEndpoints();
 
 if (app.Environment.IsEnvironment("Testing"))
 {
