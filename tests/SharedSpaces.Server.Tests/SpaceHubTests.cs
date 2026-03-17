@@ -108,7 +108,7 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, token);
         await connection.StartAsync();
 
-        var act = async () => await connection.InvokeAsync("JoinSpace");
+        var act = async () => await connection.InvokeAsync("JoinSpace", space.Id);
         await act.Should().NotThrowAsync();
     }
 
@@ -124,7 +124,7 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, hubSpace.Id, token);
         await connection.StartAsync();
 
-        var act = async () => await connection.InvokeAsync("JoinSpace");
+        var act = async () => await connection.InvokeAsync("JoinSpace", hubSpace.Id);
         await act.Should().ThrowAsync<Exception>();
     }
 
@@ -142,7 +142,7 @@ public class SpaceHubTests
         connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace");
+        await connection.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
         var textContent = "Test message";
@@ -174,7 +174,7 @@ public class SpaceHubTests
         connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace");
+        await connection.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
         var fileName = "test.txt";
@@ -207,7 +207,7 @@ public class SpaceHubTests
         connection.On<ItemDeletedEvent>("ItemDeleted", evt => receivedEvent.SetResult(evt));
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace");
+        await connection.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
         await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
@@ -264,8 +264,8 @@ public class SpaceHubTests
 
         await connection1.StartAsync();
         await connection2.StartAsync();
-        await connection1.InvokeAsync("JoinSpace");
-        await connection2.InvokeAsync("JoinSpace");
+        await connection1.InvokeAsync("JoinSpace", space.Id);
+        await connection2.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
         await PutTextItemAsync(client, space.Id, itemId, "Test message", token1);
@@ -295,11 +295,11 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, token);
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace");
+        await connection.InvokeAsync("JoinSpace", space.Id);
         await connection.StopAsync();
 
         await connection.StartAsync();
-        var act = async () => await connection.InvokeAsync("JoinSpace");
+        var act = async () => await connection.InvokeAsync("JoinSpace", space.Id);
         await act.Should().NotThrowAsync();
 
         var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
@@ -429,13 +429,15 @@ public class SpaceHubTests
 
     private sealed record ItemAddedEvent(
         Guid Id,
+        Guid SpaceId,
+        Guid MemberId,
+        string DisplayName,
         string ContentType,
         string Content,
-        DateTime SharedAt,
-        Guid MemberId,
-        string DisplayName);
+        long FileSize,
+        DateTime SharedAt);
 
-    private sealed record ItemDeletedEvent(Guid Id);
+    private sealed record ItemDeletedEvent(Guid Id, Guid SpaceId);
 
     private sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
     {
