@@ -101,10 +101,22 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Branch: `squad/22-signalr-hub`, commit: 8ec9b4f
 - Ready for merge after Zoe's test pass (all 46 tests passing post-fix)
 
-**Kaylee applied route consistency update (2026-03-17):** Per user directive, swapped SignalR hub route:
-- Changed from `/v1/hubs/space/{spaceId}` to `/v1/spaces/{spaceId}/hub`
-- Updated `HubEndpoints.cs` with new route mapping
-- Updated `JwtAuthenticationExtensions.cs` to recognize hub requests under `/v1/spaces/...`
-- Updated `SpaceHubTests.cs` and README.md to reflect new route
-- All 46 tests passing, commit: a935139
-- Decision documented in `.squad/decisions.md`
+## Team Updates (2026-03-17 Continued)
+
+**Kaylee applied PR #37 backend feedback (2026-03-17T15:22Z):** Implemented cleaner SignalR boundary, automatic hub group joining, and required storage configuration:
+- Extracted hub broadcast behind `ISpaceHubNotifier` / `SpaceHubNotifier` service interface
+- Auto-join space group in `SpaceHub.OnConnectedAsync` with :guid route constraint
+- Removed file-storage defaults; `Storage:BasePath` now required
+- All item broadcasts now best-effort with warning logs
+- Branch: `squad/pr-feedback`, backend commit: 9d723bd
+- Ready for merge after test feedback pass
+
+**Zoe applied PR #37 test feedback (2026-03-17T15:22Z):** Updated test async patterns and assertion ordering per Copilot reviewer:
+- Updated `TaskCompletionSource` with `TaskCreationOptions.RunContinuationsAsynchronously`
+- Reordered assertions to verify HTTP success before awaiting hub events
+- Removed explicit `JoinSpace` calls (now automatic)
+- Verified test storage paths at `./artifacts/storage-tests`
+- Branch: `squad/pr-feedback`, test commit: 0a93ad9
+- All 46 tests passing
+
+**Decision documented:** PR #37 feedback decision captured in `.squad/decisions.md` with context, rationale, and validation.

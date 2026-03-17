@@ -83,6 +83,8 @@ Server structure now available to Zoe; test project can reference production ent
 - Event assertions use `TaskCompletionSource<T>` + `Task.WhenAny` timeout pattern for safety
 - Branch: `squad/22-signalr-tests`, initial commit: b32bb24
 
+## Team Updates (2026-03-17 Continued)
+
 **Zoe fix pass:** Diagnosed and fixed 6 test failures on merged branches:
 - Root cause: form data contract mismatches between tests and endpoint implementations
 - Fixed missing `id` form field in item creation payloads
@@ -90,3 +92,11 @@ Server structure now available to Zoe; test project can reference production ent
 - Fixed non-existent space test expectations
 - Result: All 46 tests passing (15 SignalR + 31 existing endpoint tests)
 - Commit: fc4a0c3
+
+**Zoe applied PR #37 test feedback (2026-03-17T15:22Z):** Updated async patterns and assertion ordering per Copilot reviewer:
+- Updated `TaskCompletionSource` with `TaskCreationOptions.RunContinuationsAsynchronously`
+- Reordered assertions to verify HTTP success before awaiting hub events
+- Removed explicit `JoinSpace` calls (now automatic in `SpaceHub.OnConnectedAsync`)
+- Verified test storage paths isolated at `./artifacts/storage-tests`
+- Branch: `squad/pr-feedback`, commit: 0a93ad9
+- All 46 tests passing; ready for merge after backend changes (Kaylee complete)

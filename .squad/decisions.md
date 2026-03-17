@@ -489,6 +489,83 @@ Changed the SignalR hub route from `/v1/hubs/space/{spaceId}` to `/v1/spaces/{sp
 
 ---
 
+### PR #37 Backend Review Feedback Application
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Marek Fišera (User + Copilot Reviewer), Executed by Kaylee & Zoe  
+**PR:** #37  
+**Status:** Complete
+
+#### Context
+
+Copilot reviewer raised feedback on PR #37 addressing SignalR hub integration design, storage configuration rigor, and test async patterns. Five key improvement areas identified:
+
+1. Cleaner boundary between HTTP endpoints and SignalR broadcasting
+2. Automatic hub group joining (remove explicit JoinSpace calls)
+3. Storage configuration must be explicit (no defaults)
+4. Route parameter constraints (`:guid` on spaceId)
+5. Test async patterns (RunContinuationsAsynchronously)
+
+#### Decision
+
+**Backend (Kaylee):**
+- Extract hub broadcast responsibilities behind `ISpaceHubNotifier` / `SpaceHubNotifier` service interface
+- Auto-join the SignalR space group inside `SpaceHub.OnConnectedAsync` after validating the route `spaceId` against the JWT `space_id` claim
+- Treat SignalR broadcasts as best-effort with warning logs so transient hub issues do not turn successful item writes/deletes into HTTP 500 responses
+- Require `Storage:BasePath` from configuration instead of relying on file-storage defaults
+- Add `:guid` route constraint to hub endpoint spaceId parameter
+
+**Tests (Zoe):**
+- Update `TaskCompletionSource` instantiation to use `TaskCreationOptions.RunContinuationsAsynchronously`
+- Reorder assertions to verify HTTP success (PUT/DELETE) before awaiting broadcast events
+- Remove explicit `JoinSpace` calls (now automatic in `OnConnectedAsync`)
+- Verify test storage paths align with configuration at `./artifacts/storage-tests`
+
+#### Implementation
+
+**Files Modified:**
+- `src/SharedSpaces.Server/Features/Hubs/SpaceHub.cs` (auto-join, :guid constraint)
+- `src/SharedSpaces.Server/Features/Hubs/HubEndpoints.cs` (:guid constraint mapping)
+- `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs` (ISpaceHubNotifier injection)
+- `src/SharedSpaces.Server/Program.cs` (DI registration)
+- `src/SharedSpaces.Server/Infrastructure/FileStorage/LocalFileStorage.cs` (required BasePath)
+- `src/SharedSpaces.Server/Infrastructure/FileStorage/StorageOptions.cs` (required BasePath)
+- `src/SharedSpaces.Server/appsettings.json` (explicit Storage:BasePath)
+
+**Files Created:**
+- `src/SharedSpaces.Server/Features/Hubs/ISpaceHubNotifier.cs`
+- `src/SharedSpaces.Server/Features/Hubs/SpaceHubNotifier.cs`
+
+**Test Files Modified:**
+- `tests/SharedSpaces.Server.Tests/SpaceHubTests.cs` (async patterns, assertion order, no JoinSpace)
+- `tests/SharedSpaces.Server.Tests/ItemEndpointTests.cs` (assertion order, storage paths)
+- `tests/SharedSpaces.Server.Tests/TokenEndpointTests.cs` (storage paths)
+
+#### Rationale
+
+- **ISpaceHubNotifier:** Separates concerns — HTTP endpoints stay focused on persistence, broadcasting becomes best-effort infrastructure detail
+- **Auto-join:** Reduces client logic complexity and eliminates manual JoinSpace calls
+- **Best-effort broadcasts:** Resilience — failed broadcasts never block successful item writes
+- **Required configuration:** Explicitness eliminates silent failures and makes storage setup visible in configuration
+- **Route constraints:** Prevents route ambiguity and improves matching performance
+- **Async patterns:** RunContinuationsAsynchronously + assertion ordering match real-world usage patterns
+
+#### Validation
+
+✅ Build: `dotnet build SharedSpaces.sln --nologo` passes  
+✅ Tests: **46/46 passing** (`dotnet test SharedSpaces.sln --nologo`)  
+✅ Backend commit: 9d723bd  
+✅ Test commit: 0a93ad9  
+
+#### Impact
+
+- Hub integration fully decoupled from HTTP layer
+- Storage configuration now explicit and auditable
+- Test async patterns match production best practices
+- All existing functionality preserved; tests act as regression guard
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
