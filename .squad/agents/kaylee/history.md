@@ -30,7 +30,7 @@
 - POST /v1/spaces (Admin), GET /v1/spaces/{spaceId} (JWT)
 - POST /v1/spaces/{spaceId}/invitations (Admin), POST /v1/spaces/{spaceId}/tokens (None)
 - GET/PUT/DELETE /v1/spaces/{spaceId}/items (JWT)
-- SignalR hub: /v1/hubs/space/{spaceId}
+- SignalR hub: /v1/spaces/{spaceId}/hub
 
 ## Team Updates (2026-03-16)
 
@@ -84,10 +84,11 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - File uploads now go through `src/SharedSpaces.Server/Infrastructure/FileStorage/` (`IFileStorage` + `LocalFileStorage`), which stores relative paths under `Storage:BasePath` and cleans up files/directories when items are replaced or deleted.
 - Per-space quota enforcement now persists `SpaceItem.FileSize`, reads `Storage:MaxSpaceQuotaBytes` from `src/SharedSpaces.Server/appsettings.json`, and returns 413 when a file upload would push a space over quota.
 - SignalR hub for real-time space updates lives under `src/SharedSpaces.Server/Features/Hubs/` with `SpaceHub` at `/v1/spaces/{spaceId}/hub` (route consistency), using JWT authentication and Groups for per-space broadcasting.
-- SignalR JWT authentication is configured via `JwtBearerEvents.OnMessageReceived` to extract tokens from the `access_token` query string parameter for WebSocket connections (paths starting with `/v1/hubs`).
-- `IHubContext<SpaceHub>` is injected into `ItemEndpoints` to broadcast `ItemAdded` (on new item creation) and `ItemDeleted` (on item deletion) events to the `space:{spaceId}` group.
+- SignalR JWT authentication is configured via `JwtBearerEvents.OnMessageReceived` to extract tokens from the `access_token` query string parameter for WebSocket connections on `/v1/spaces/.../hub` routes.
+- Item endpoint broadcasts now flow through `ISpaceHubNotifier`, which centralizes hub group targeting and keeps SignalR notifications best-effort.
 - CORS is configured in `Program.cs` to allow SignalR connections from the client app origin (`Server:DefaultClientAppUrl`), with credentials, any header, and any method.
 - SignalR hub methods validate that the JWT's `space_id` claim matches the requested `spaceId` before adding the connection to the space group, preventing cross-space subscriptions.
+- SignalR connections now auto-join their per-space group during `SpaceHub.OnConnectedAsync`, and HTTP item endpoints publish through `ISpaceHubNotifier` so broadcast failures stay best-effort and only log warnings.
 
 ## Team Updates (2026-03-17 Continued)
 

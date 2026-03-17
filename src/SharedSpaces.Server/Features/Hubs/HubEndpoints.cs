@@ -4,7 +4,7 @@ public static class HubEndpoints
 {
     public static IEndpointRouteBuilder MapHubEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapHub<SpaceHub>("/v1/spaces/{spaceId}/hub");
+        app.MapHub<SpaceHub>("/v1/spaces/{spaceId:guid}/hub");
         return app;
     }
 }

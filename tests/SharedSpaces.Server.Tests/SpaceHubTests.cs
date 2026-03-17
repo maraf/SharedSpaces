@@ -5,7 +5,6 @@ using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -99,34 +98,60 @@ public class SpaceHubTests
     }
 
     [Fact]
-    public async Task JoinSpace_WithMatchingSpaceId_Succeeds()
+    public async Task ConnectToHub_AutoJoinsSpaceGroup_OnConnectedAsync()
     {
         await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
         var space = await factory.CreateSpaceAsync();
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, space.Id, token);
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
+
         await connection.StartAsync();
 
-        var act = async () => await connection.InvokeAsync("JoinSpace", space.Id);
-        await act.Should().NotThrowAsync();
+        var itemId = Guid.NewGuid();
+        var response = await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
+        response.EnsureSuccessStatusCode();
+
+        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        receivedTask.Should().Be(receivedEvent.Task, "connected clients should auto-join the space group on connect");
+
+        var evt = await receivedEvent.Task;
+        evt.Id.Should().Be(itemId);
+        evt.SpaceId.Should().Be(space.Id);
     }
 
     [Fact]
-    public async Task JoinSpace_WithMismatchedSpaceId_Fails()
+    public async Task ConnectToHub_WithMismatchedRouteSpaceId_DoesNotReceiveEvents()
     {
         await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
         var claimSpace = await factory.CreateSpaceAsync("Claim Space");
         var hubSpace = await factory.CreateSpaceAsync("Hub Space");
         var member = await factory.CreateMemberAsync(claimSpace.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, claimSpace.Id, member.DisplayName);
 
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, hubSpace.Id, token);
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
+
         await connection.StartAsync();
 
-        var act = async () => await connection.InvokeAsync("JoinSpace", hubSpace.Id);
-        await act.Should().ThrowAsync<Exception>();
+        var itemId = Guid.NewGuid();
+        var response = await PutTextItemAsync(client, claimSpace.Id, itemId, "Test message", token);
+        response.EnsureSuccessStatusCode();
+
+        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        receivedTask.Should().NotBe(receivedEvent.Task, "clients with a mismatched route space should never join the broadcast group");
     }
 
     [Fact]
@@ -138,16 +163,19 @@ public class SpaceHubTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, space.Id, token);
-        connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
         var textContent = "Test message";
-        await PutTextItemAsync(client, space.Id, itemId, textContent, token);
+        var response = await PutTextItemAsync(client, space.Id, itemId, textContent, token);
+        response.EnsureSuccessStatusCode();
 
         var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         receivedTask.Should().Be(receivedEvent.Task, "ItemAdded event should be received within 5 seconds");
@@ -170,17 +198,20 @@ public class SpaceHubTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, space.Id, token);
-        connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
         var fileName = "test.txt";
         var fileContent = "File content"u8.ToArray();
-        await PutFileItemAsync(client, space.Id, itemId, fileName, fileContent, token);
+        var response = await PutFileItemAsync(client, space.Id, itemId, fileName, fileContent, token);
+        response.EnsureSuccessStatusCode();
 
         var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         receivedTask.Should().Be(receivedEvent.Task, "ItemAdded event should be received within 5 seconds");
@@ -203,16 +234,20 @@ public class SpaceHubTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        var receivedEvent = new TaskCompletionSource<ItemDeletedEvent>();
+        var receivedEvent = new TaskCompletionSource<ItemDeletedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, space.Id, token);
-        connection.On<ItemDeletedEvent>("ItemDeleted", evt => receivedEvent.SetResult(evt));
+        connection.On<ItemDeletedEvent>("ItemDeleted", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
-        await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
-        await DeleteItemAsync(client, space.Id, itemId, token);
+        var putResponse = await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
+        putResponse.EnsureSuccessStatusCode();
+        var deleteResponse = await DeleteItemAsync(client, space.Id, itemId, token);
+        deleteResponse.EnsureSuccessStatusCode();
 
         var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         receivedTask.Should().Be(receivedEvent.Task, "ItemDeleted event should be received within 5 seconds");
@@ -222,25 +257,32 @@ public class SpaceHubTests
     }
 
     [Fact]
-    public async Task ClientNotInSpaceGroup_DoesNotReceiveEvents()
+    public async Task ClientConnectedToDifferentSpace_DoesNotReceiveEvents()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
-        var space = await factory.CreateSpaceAsync();
-        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
-        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var receivingSpace = await factory.CreateSpaceAsync("Receiving Space");
+        var sendingSpace = await factory.CreateSpaceAsync("Sending Space");
+        var receivingMember = await factory.CreateMemberAsync(receivingSpace.Id, "Zoe");
+        var receivingToken = GenerateTestJwt(receivingMember.Id, receivingSpace.Id, receivingMember.DisplayName);
+        var sendingMember = await factory.CreateMemberAsync(sendingSpace.Id, "Mal");
+        var sendingToken = GenerateTestJwt(sendingMember.Id, sendingSpace.Id, sendingMember.DisplayName);
 
-        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
-        await using var connection = CreateHubConnection(factory, space.Id, token);
-        connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var connection = CreateHubConnection(factory, receivingSpace.Id, receivingToken);
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
 
         await connection.StartAsync();
 
         var itemId = Guid.NewGuid();
-        await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
+        var response = await PutTextItemAsync(client, sendingSpace.Id, itemId, "Test message", sendingToken);
+        response.EnsureSuccessStatusCode();
 
         var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(2)));
-        receivedTask.Should().NotBe(receivedEvent.Task, "ItemAdded event should NOT be received without joining the space group");
+        receivedTask.Should().NotBe(receivedEvent.Task, "clients should only receive events for the space they connected to");
     }
 
     [Fact]
@@ -254,22 +296,27 @@ public class SpaceHubTests
         var token1 = GenerateTestJwt(member1.Id, space.Id, member1.DisplayName);
         var token2 = GenerateTestJwt(member2.Id, space.Id, member2.DisplayName);
 
-        var receivedEvent1 = new TaskCompletionSource<ItemAddedEvent>();
-        var receivedEvent2 = new TaskCompletionSource<ItemAddedEvent>();
+        var receivedEvent1 = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receivedEvent2 = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await using var connection1 = CreateHubConnection(factory, space.Id, token1);
         await using var connection2 = CreateHubConnection(factory, space.Id, token2);
 
-        connection1.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent1.SetResult(evt));
-        connection2.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent2.SetResult(evt));
+        connection1.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent1.TrySetResult(evt);
+        });
+        connection2.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent2.TrySetResult(evt);
+        });
 
         await connection1.StartAsync();
         await connection2.StartAsync();
-        await connection1.InvokeAsync("JoinSpace", space.Id);
-        await connection2.InvokeAsync("JoinSpace", space.Id);
 
         var itemId = Guid.NewGuid();
-        await PutTextItemAsync(client, space.Id, itemId, "Test message", token1);
+        var response = await PutTextItemAsync(client, space.Id, itemId, "Test message", token1);
+        response.EnsureSuccessStatusCode();
 
         var received1Task = await Task.WhenAny(receivedEvent1.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         var received2Task = await Task.WhenAny(receivedEvent2.Task, Task.Delay(TimeSpan.FromSeconds(5)));
@@ -285,7 +332,7 @@ public class SpaceHubTests
     }
 
     [Fact]
-    public async Task DisconnectAndReconnect_CanRejoinSpaceGroup()
+    public async Task DisconnectAndReconnect_AutoRejoinsSpaceGroup()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -293,21 +340,21 @@ public class SpaceHubTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, space.Id, token);
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
 
         await connection.StartAsync();
-        await connection.InvokeAsync("JoinSpace", space.Id);
         await connection.StopAsync();
 
         await connection.StartAsync();
-        var act = async () => await connection.InvokeAsync("JoinSpace", space.Id);
-        await act.Should().NotThrowAsync();
-
-        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>();
-        connection.On<ItemAddedEvent>("ItemAdded", evt => receivedEvent.SetResult(evt));
 
         var itemId = Guid.NewGuid();
-        await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
+        var response = await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
+        response.EnsureSuccessStatusCode();
 
         var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         receivedTask.Should().Be(receivedEvent.Task, "ItemAdded event should be received after reconnect");
@@ -317,20 +364,30 @@ public class SpaceHubTests
     }
 
     [Fact]
-    public async Task HubRoute_WithNonExistentSpace_HandlesGracefully()
+    public async Task ConnectToHub_WithNonExistentSpace_DoesNotReceiveEvents()
     {
         await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
         var nonExistentSpaceId = Guid.NewGuid();
         var fakeSpace = await factory.CreateSpaceAsync();
         var member = await factory.CreateMemberAsync(fakeSpace.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, fakeSpace.Id, member.DisplayName);
 
+        var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var connection = CreateHubConnection(factory, nonExistentSpaceId, token);
+        connection.On<ItemAddedEvent>("ItemAdded", evt =>
+        {
+            receivedEvent.TrySetResult(evt);
+        });
 
         await connection.StartAsync();
 
-        var act = async () => await connection.InvokeAsync("JoinSpace", nonExistentSpaceId);
-        await act.Should().ThrowAsync<HubException>();
+        var itemId = Guid.NewGuid();
+        var response = await PutTextItemAsync(client, fakeSpace.Id, itemId, "Test message", token);
+        response.EnsureSuccessStatusCode();
+
+        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        receivedTask.Should().NotBe(receivedEvent.Task, "clients connected with a non-existent route space should never join a broadcast group");
     }
 
     private static HubConnection CreateHubConnection(

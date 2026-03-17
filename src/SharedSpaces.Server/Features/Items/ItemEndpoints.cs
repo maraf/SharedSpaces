@@ -3,7 +3,6 @@ using System.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Runtime.ExceptionServices;
 using System.Text;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
@@ -101,7 +100,7 @@ public static class ItemEndpoints
         AppDbContext db,
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
-        IHubContext<SpaceHub> hubContext,
+        ISpaceHubNotifier hubNotifier,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -109,6 +108,8 @@ public static class ItemEndpoints
         {
             return authorizationResult;
         }
+
+        var displayName = httpContext.User.FindFirst(SpaceMemberClaimTypes.DisplayName)?.Value ?? string.Empty;
 
         var (request, requestError) = await ReadUpsertRequestAsync(httpContext.Request, cancellationToken);
         if (requestError is not null)
@@ -229,28 +230,19 @@ public static class ItemEndpoints
                 await transaction.CommitAsync(cancellationToken);
             }
 
-            // Broadcast ItemAdded event after successful save (only for new items)
             if (existingItem is null)
             {
-                var member = await db.SpaceMembers
-                    .AsNoTracking()
-                    .Where(m => m.Id == memberId)
-                    .Select(m => new { m.DisplayName })
-                    .SingleAsync(cancellationToken);
-
                 var itemAddedEvent = new ItemAddedEvent(
                     item.Id,
                     item.SpaceId,
                     item.MemberId,
-                    member.DisplayName,
+                    displayName,
                     item.ContentType,
                     item.Content,
                     item.FileSize,
                     item.SharedAt);
 
-                await hubContext.Clients
-                    .Group($"space:{spaceId}")
-                    .SendAsync("ItemAdded", itemAddedEvent, cancellationToken);
+                await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
             }
         }
         catch (Exception exception)
@@ -307,7 +299,7 @@ public static class ItemEndpoints
         HttpContext httpContext,
         AppDbContext db,
         IFileStorage fileStorage,
-        IHubContext<SpaceHub> hubContext,
+        ISpaceHubNotifier hubNotifier,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
@@ -329,11 +321,8 @@ public static class ItemEndpoints
         db.SpaceItems.Remove(item);
         await db.SaveChangesAsync(cancellationToken);
 
-        // Broadcast ItemDeleted event after successful delete
         var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
-        await hubContext.Clients
-            .Group($"space:{spaceId}")
-            .SendAsync("ItemDeleted", itemDeletedEvent, cancellationToken);
+        await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
 
         if (isFile)
         {

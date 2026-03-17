@@ -12,8 +12,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddPersistence(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<AdminAuthenticationFilter>();
-builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
+builder.Services.AddOptions<StorageOptions>()
+    .Bind(builder.Configuration.GetSection("Storage"))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.BasePath), "Storage:BasePath must be configured.")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+builder.Services.AddSingleton<ISpaceHubNotifier, SpaceHubNotifier>();
 builder.Services.AddSignalR();
 builder.Services.AddCors(options =>
 {

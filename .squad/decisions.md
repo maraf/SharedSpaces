@@ -391,19 +391,13 @@ Tests validate full event payloads match production records:
 ## Impact
 
 - 15 new integration tests covering all SignalR acceptance criteria from Issue #22
-- Tests compile successfully but will fail until hub implementation is merged
-- Test branch `squad/22-signalr-tests` can be merged independently or alongside Kaylee's `squad/22-signalr-hub` branch
-- Foundation for future real-time feature testing (e.g., typing indicators, presence)
+- Hub implementation is merged and the SignalR test suite is now passing
+- Test branch `squad/22-signalr-tests` remains the foundation for future real-time feature testing (e.g., typing indicators, presence)
 
-## Expected Test Status
+## Current Test Status
 
-**Before hub implementation merge:**
-- All 15 tests will fail with connection/routing errors
-- This is expected and documented
-
-**After hub implementation merge:**
-- Tests should pass if implementation follows standard ASP.NET Core SignalR patterns
-- Any failures indicate either test assumptions or implementation deviations
+- All SignalR integration tests are passing against the current hub implementation
+- Any future failures indicate either regressions or changed expectations that should be reviewed explicitly
 
 ## Dependencies
 

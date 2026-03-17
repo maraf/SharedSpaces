@@ -68,10 +68,11 @@ Server structure now available to Zoe; test project can reference production ent
 - Quota enforcement tests are strongest when they use a tiny configured `Storage:MaxSpaceQuotaBytes` plus an existing file item, proving the server rejects uploads based on aggregate per-space usage rather than only single-file size.
 - SignalR hub integration tests use `Microsoft.AspNetCore.SignalR.Client` 10.0.0 with `WebApplicationFactory` test server wiring; hub connections pass JWT tokens via `AccessTokenProvider` in the `HubConnectionBuilder.WithUrl` options.
 - SignalR client event assertions should register handlers with `connection.On<TEvent>(eventName, handler)` before calling `StartAsync()`, and use `TaskCompletionSource<TEvent>` with `Task.WhenAny` timeout patterns to verify broadcasts arrive within expected time windows.
-- SpaceHub implementation expects `JoinSpace(Guid spaceId)` method signature (not parameterless) and validates that the spaceId parameter matches the `space_id` claim in the JWT, rejecting mismatches with a hub exception.
+- SpaceHub now auto-joins the route's space group during `OnConnectedAsync`, validating the route `spaceId` against the JWT `space_id` claim and closing the connection when they do not match.
 - SignalR event broadcast payloads include both `SpaceId` and `FileSize` fields in addition to item metadata (Id, ContentType, Content, SharedAt, MemberId, DisplayName); tests should verify full event structure matches the `ItemAddedEvent` and `ItemDeletedEvent` records in production code.
 - SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
 - Test storage is now isolated at `./artifacts/storage-tests` per user directive (2026-03-17); ensure test hosts override `Storage:BasePath` to prevent cross-contamination with app storage at `./artifacts/storage`.
+- `SpaceHub` now auto-joins the route's space group during `OnConnectedAsync`; hub integration tests should connect to `/v1/spaces/{spaceId}/hub`, register handlers before `StartAsync()`, use `TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously)` + `TrySetResult`, and assert PUT/DELETE success before awaiting broadcast events.
 
 ## Team Updates (2026-03-17)
 
