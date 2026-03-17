@@ -239,79 +239,72 @@ Migrated the entire solution from .NET 9 to .NET 10:
 
 ---
 
-### Lit HTML + WebComponents vs React — Team Evaluation & Friction Research Follow-up
+### Lit HTML + WebComponents Approved for SharedSpaces Client
 
 **Decision Date:** 2026-03-17  
-**Follow-up Research:** 2026-03-17 (13:36)  
-**Initiated By:** Marek Fišera  
-**Status:** **Pending — awaiting user decision** (team consensus: React recommended)
+**Approved By:** Marek Fišera (Project Owner)  
+**Lead Approval:** Mal (Lead/Architect)  
+**Related Issue:** #23  
+**Status:** ✅ **APPROVED** (active decision)
 
-#### Context
+#### Summary
 
-Issue #23 proposes switching the SharedSpaces client from React to Lit HTML + WebComponents. The team provided two comprehensive evaluations:
+After team evaluation and Marek Fišera's final decision, the SharedSpaces client will use **Lit HTML + WebComponents** (not React) for the Phase 3 SPA implementation.
 
-#### Perspective 1: Mal (Lead/Architect) — APPROVE
+#### Key Rationale
 
-**Recommendation:** Switch to Lit.
+1. **Bundle Size:** ~40% reduction (110-140 KB gzipped vs 190-230 KB React) — significant UX win for self-hosted, mobile-first deployments
+2. **Standards-Based:** WebComponents are the web platform standard, not framework-dependent
+3. **SignalR Integration:** Native lifecycle hook support (connectedCallback/disconnectedCallback) is cleaner than React patterns
+4. **Routing:** Single-view app (/join → /space/:spaceId flow) eliminates routing as a concern — Lit's weak point becomes irrelevant
+5. **Tailwind CSS:** Light DOM mode (override createRenderRoot) makes Tailwind work seamlessly without workarounds
 
-**Key Points:**
-- SignalR integration is native and cleaner than React patterns
-- Multi-server JWT management simpler without forced single-app-state
-- 40% bundle size reduction (110-140 KB gzipped savings)
-- Better fit for standards-based, self-hostable platform
-- Timeline impact: ZERO (Phase 3 hasn't started yet)
+#### Technical Implementation
 
-**Trade-offs accepted:** Smaller ecosystem, React DevTools unavailable, team learning curve (3-5 days)
+- **Framework:** Lit HTML with TypeScript
+- **DOM Mode:** Light DOM (for Tailwind compatibility)
+- **Build:** Vite (unchanged)
+- **State Management:** @lit/context for global auth state
+- **Testing:** Vitest Browser Mode + Playwright
+- **SignalR:** Native JavaScript client with Lit lifecycle hooks
+- **Architecture:** Vertical slice structure under features/ (join, space-view, admin)
 
-**See:** `.squad/decisions/inbox/mal-lithtml-evaluation.md`
+#### Acceptance Criteria (Issue #23)
 
-#### Perspective 2: Wash (Frontend Dev) — RECOMMEND REACT
+- [ ] Initialize Vite + Lit + TypeScript project under src/SharedSpaces.Client
+- [ ] Set up minimal view switching (single-view app: /join → /space/:spaceId flow)
+- [ ] Create project structure: features/, components/, lib/
+- [ ] Add Tailwind CSS with light DOM rendering (override createRenderRoot)
+- [ ] Configure ESLint and Prettier
+- [ ] Add basic app shell component
+- [ ] Verify dev server runs and hot reload works
 
-**Recommendation:** Stick with React.
+#### Team Evaluation Context
 
-**Key Concerns:**
-- **Routing:** Vaadin Router deprecated, @lit-labs/router experimental — risk and dev time
-- **Shadow DOM + Tailwind friction:** Utility classes don't penetrate Shadow DOM, requires constant workarounds (dealbreaker)
-- **Testing ecosystem:** React Testing Library trivial; Lit's testing is fragmented in 2025
-- **Developer velocity:** 30% of time lost to tooling/patterns instead of shipping features
-- Stack Overflow: 10x more React + SignalR examples; Lit developer is on their own
+Mal and Wash conducted independent friction research on current Lit ecosystem state (2026-03-17 13:36):
+- **Mal's findings:** Verified routing landscape (Vaadin deprecated, Labs router experimental), confirmed Tailwind + Lit is workable via light DOM, testing ecosystem capable but less cohesive than React
+- **Wash's findings:** Softened "dealbreaker" concerns, acknowledged Tailwind workarounds exist, validated testing gap has narrowed, confirmed routing is still the weakest point but not a blocker for single-view app
+- **Convergence:** Single-view architecture eliminates the core routing friction. All other concerns become manageable trade-offs. Lit remains viable as the approved choice.
 
-**Strengths acknowledged:** Lit is elegant, lightweight, technically sound—just wrong tool for this job.
+#### Accepted Trade-offs
 
-**See:** `.squad/decisions/inbox/wash-lithtml-evaluation.md`
+- Smaller ecosystem (mitigated by standards-based approach)
+- React DevTools unavailable (web platform DevTools sufficient)
+- Team learning curve 3-5 days (shallow curve for web dev teams, excellent documentation)
 
-#### The Split
+#### Impact
 
-This is a genuine architectural disagreement with supporting evidence:
-- **Mal prioritizes:** Bundle size, architectural purity, standards alignment
-- **Wash prioritizes:** Routing maturity, Tailwind integration, testing ecosystem, developer velocity
-
-Both have valid points. Neither is wrong. The decision hinges on **what matters most to the project:**
-1. **Performance & standards (mobile-first, self-hosted)** → Lit
-2. **Velocity & ecosystem maturity** → React
-
-#### Required Action
-
-Marek must decide which perspective aligns with SharedSpaces priorities. Both evaluations include detailed rationale, risk assessments, and implementation details (if chosen).
-
-#### Follow-up: Friction Research (2026-03-17)
-
-After Wash raised specific concerns, Mal and Wash conducted independent research into current Lit ecosystem state.
-
-**Mal's findings:** Verified that `@vaadin/router` is officially deprecated and unmaintained. `@lit-labs/router` remains experimental/Labs. Tailwind + Lit is workable (via light DOM, CSS injection, or tokens) but adds ceremony. Testing ecosystem is capable but less cohesive than React. SignalR integration is technically straightforward but lacks deep example pool.
-
-**Wash's findings:** Softened original "dealbreaker" claims. Tailwind friction is real but has workarounds. Testing gap (vs React) has narrowed; Vitest Browser Mode + Playwright is credible. Routing remains the weakest point. Confirmed SignalR is framework-agnostic; React mainly wins on ecosystem density.
-
-**Convergence:** Both agents now recommend **React for the SharedSpaces main SPA**. Routing immaturity (Vaadin deprecated, Labs router experimental) is the core friction. All other concerns are manageable trade-offs, not blockers. Lit remains interesting for future isolated widgets/components.
-
-**See:**
-- `.squad/decisions/inbox/mal-friction-response.md`
-- `.squad/decisions/inbox/wash-friction-research.md`
+- **GitHub Issue #23:** Updated with new title, body, and acceptance criteria
+- **GitHub Issue Comment:** Added explaining the technology decision
+- **Squad Team Docs:** Updated team.md, agents/wash/charter.md, and routing.md to reflect Lit + WebComponents
+- **Wash's Charter:** Updated to reflect Lit expertise instead of React
+- **Timeline:** Zero impact — Phase 3 hasn't started yet
+- **Dependency:** No coupling to Phase 1 or Phase 2 work
 
 #### Alternatives Considered
 
-- **React (status quo):** Mature ecosystem, large bundle, excellent tooling
-- **Lit HTML (proposal):** Lightweight, standards-based, smaller bundle, immature routing/testing
+- **React (prior recommendation):** Mature ecosystem, large bundle, excellent tooling
+- **Lit HTML (approved):** Lightweight, standards-based, smaller bundle, acceptable routing for single-view app
 - **Vue 3:** Not evaluated; React vs Lit was the proposed comparison
 
 ---

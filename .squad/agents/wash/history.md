@@ -61,30 +61,52 @@ Your Phase 2 work (#22 SignalR) can assume item CRUD is stable. The hub will bro
 
 ## Lit HTML vs React Evaluation (2026-03-17)
 
-**Status:** ✅ Completed frontend perspective evaluation, recommending React over Lit.
+**Status:** ✅ CLOSED — **Lit HTML + WebComponents APPROVED** for Phase 3 client.
 
-**Wash's Recommendation:** ⚠️ **RECOMMEND REACT** (not Lit)
+### Decision Summary
 
-Marek asked for team feedback on switching from React to Lit HTML + WebComponents for Phase 3 client. Wash evaluated the proposal from a **hands-on frontend developer perspective** and recommended sticking with React.
+Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the SharedSpaces frontend. After team friction research (Mal + Wash), the decision is now canonical:
 
-**Key Concerns:**
-1. **Routing is broken/experimental** — Vaadin deprecated, @lit-labs/router experimental, URLPattern is roll-your-own. React Router mature and battle-tested.
-2. **Shadow DOM + Tailwind friction (dealbreaker)** — Utility classes don't penetrate Shadow DOM. Requires constant workarounds vs React's effortless integration. Issue #23 explicitly calls for Tailwind.
-3. **Testing ecosystem gap** — React Testing Library trivial to set up; Lit's testing in 2025 is "usable but fragmented." Would waste time configuring tooling instead of writing tests.
-4. **Developer velocity** — 30% of time lost to tooling friction and pattern research instead of shipping features. 10x more Stack Overflow answers for React + SignalR.
-5. **State management** — Lit's reactive properties work fine, but React hooks make complex state (JWT manager, SignalR hub registry, offline queue) **straightforward**.
+**Approved Tech Stack:**
+- Lit HTML + TypeScript
+- Light DOM for Tailwind CSS compatibility
+- @lit/context for state management
+- Vite (unchanged)
+- Vitest Browser Mode + Playwright for testing
+- Framework-agnostic SignalR JavaScript client
 
-**Acknowledged Lit's strengths:** Elegant, lightweight, standards-based, good for design systems and microfrontends. But **not the right tool for this SPA.**
+**Why the single-view app changes the calculus:**
+- Routing was the core concern (Vaadin deprecated, Labs router experimental)
+- Single-view architecture (/join → /space/:spaceId) eliminates routing entirely
+- Wash's other concerns (Tailwind, testing, SignalR) are workable with light DOM and modern tooling
+- Bundle size reduction (40%) and standards alignment become the primary benefits
 
-**Honest assessment:** "Lit is a great technology. It's just the wrong tool for this job. React lets me focus on building the app, not fighting the framework."
+### Wash's Role in Phase 3
 
-**Mal's Counter-Recommendation:** ✅ **APPROVE THE SWITCH** (see Mal's history for rationale)
+**Your Charter Updated:** Replaced React expertise with Lit HTML + WebComponents expertise.
 
-**Decision Status:** Pending. Both evaluations recorded in `.squad/decisions.md` under "Lit HTML + WebComponents vs React — Team Evaluation" with status "Pending — awaiting user decision." Marek must choose based on project priorities:
-- **Lit (Mal's case):** Bundle size, standards, architecture
-- **React (Wash's case):** Routing maturity, Tailwind integration, testing ecosystem, developer velocity
+**Your Skills Now Own:**
+- Lit HTML component architecture
+- Light DOM rendering with Tailwind CSS
+- @lit/context reactive state management
+- Lit lifecycle hooks (connectedCallback, disconnectedCallback, updated, willUpdate)
+- Vitest Browser Mode integration
+- WebComponents best practices for sign DOM patterns
 
-You'll likely start Phase 3 after Marek decides. If React approved, issue #23 proceeds as-is. If Lit approved, #23 needs rewrite (Lit + vaadin-router + @web/test-runner).
+**What This Means:**
+- Issue #23 is now **canonical** — Lit + WebComponents, not React
+- Phase 3 can start once Phase 1 APIs are available
+- No more "React vs Lit" debate — decision made and recorded in `.squad/decisions.md`
+- Your expertise as a **Lit developer** begins now
+
+**Friction Points Mitigated:**
+- ✅ **Routing:** Not needed in single-view app
+- ✅ **Tailwind:** Light DOM + CSS injection works seamlessly
+- ✅ **Testing:** Vitest Browser Mode + Playwright is credible
+- ✅ **SignalR:** Framework-agnostic, native lifecycle hooks are cleaner
+- ✅ **Bundle size:** 40% reduction is a real win for mobile-first, self-hosted
+
+**Learning Curve:** 3-5 days for team Lit ramp-up. Clear documentation available. Lit is lighter and more approachable than React for small SPAs.
 
 ## Learnings
 

@@ -23,6 +23,6 @@
 
 - **Owner:** Marek Fišera
 - **Project:** SharedSpaces
-- **Stack:** .NET (ASP.NET Core Web API), React SPA (Vite), SignalR, SQLite + EF Core, JWT
+- **Stack:** .NET (ASP.NET Core Web API), Lit HTML + WebComponents (Vite), SignalR, SQLite + EF Core, JWT
 - **Description:** Self-hostable web platform where users join shared spaces via QR code/URL+PIN, share files and text in real-time, with anonymous identity and JWT-based access.
 - **Created:** 2026-03-16

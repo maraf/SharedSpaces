@@ -157,6 +157,29 @@ Re-ran the Lit vs React decision against current public docs and current ecosyst
 
 **Updated recommendation:** For SharedSpaces specifically, keep **React** for the main SPA. Lit remains interesting for future isolated widgets or embeddable components, but it is no longer the pragmatic default for issue #23 once routing maturity and Tailwind delivery speed are weighted properly.
 
+### Marek's Final Decision: Lit HTML + WebComponents (2026-03-17)
+
+**Status:** ✅ **APPROVED — Lit HTML + WebComponents is the canonical choice for SharedSpaces SPA.**
+
+After reviewing both team evaluations, Marek made the final decision: **switch to Lit HTML + WebComponents** for the Phase 3 client implementation.
+
+**Key Insight:** The single-view app design (no routing beyond /join → /space/:spaceId) eliminates routing as a concern. With routing out of the way, Lit's advantages (40% smaller bundle, standards-based, native SignalR integration, light DOM + Tailwind) decisively outweigh React's ecosystem maturity.
+
+**Actions Taken:**
+1. Updated GitHub issue #23 with new title and acceptance criteria
+2. Added decision comment to issue #23
+3. Updated squad team docs (team.md, agents/wash/charter.md, routing.md)
+4. Updated Wash's charter to reflect Lit expertise instead of React
+5. Created decision document: `.squad/decisions/inbox/mal-lit-approved.md`
+
+**Implications for Wash:**
+- Wash's role remains unchanged (Frontend Dev)
+- Expertise now: Lit, TypeScript, Vite, SignalR client, light DOM + Tailwind, responsive SPA design
+- Same component ownership; different framework
+- Vitest Browser Mode + Playwright for testing (instead of React Testing Library)
+
+**Timeline:** Zero impact — Phase 3 hasn't started. Kaylee and Zoe are still completing Phase 1 and 2.
+
 ### Friction Research Follow-up (2026-03-17 13:36)
 
 Marek asked both Mal and Wash to dive deeper into friction points to resolve the architectural split. After independent research, both agents converged on the same recommendation.

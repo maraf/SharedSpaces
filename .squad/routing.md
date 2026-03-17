@@ -7,7 +7,7 @@ How to decide who handles what.
 | Work Type | Route To | Examples |
 |-----------|----------|----------|
 | Backend / API / .NET | Kaylee | ASP.NET Core endpoints, EF Core entities, migrations, SignalR hub, JWT auth |
-| Frontend / React / UI | Wash | React components, Vite config, SignalR client, join flow UI, state management |
+| Frontend / Lit HTML / UI | Wash | Lit HTML components, Vite config, SignalR client, join flow UI, state management |
 | Architecture / Design | Mal | System design, API contracts, domain model decisions, scope calls |
 | Code review | Mal | Review PRs, check quality, suggest improvements |
 | Testing / QA | Zoe | Write tests, find edge cases, verify fixes, integration tests |
