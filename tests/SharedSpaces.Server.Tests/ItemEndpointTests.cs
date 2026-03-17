@@ -646,32 +646,33 @@ public class ItemEndpointTests
             private readonly object _syncRoot = new();
             private readonly Dictionary<string, byte[]> _files = new(StringComparer.OrdinalIgnoreCase);
 
-            public async Task<string> SaveAsync(Guid spaceId, Guid itemId, Stream content, CancellationToken ct)
+            private static string GetKey(Guid spaceId, Guid itemId) => $"{spaceId:N}/{itemId:N}";
+
+            public async Task SaveAsync(Guid spaceId, Guid itemId, Stream content, CancellationToken ct)
             {
                 ct.ThrowIfCancellationRequested();
                 ArgumentNullException.ThrowIfNull(content);
 
                 await using var buffer = new MemoryStream();
                 await content.CopyToAsync(buffer, ct);
-                var path = $"{spaceId:N}/{itemId:N}/{Guid.NewGuid():N}.bin";
+                var key = GetKey(spaceId, itemId);
 
                 lock (_syncRoot)
                 {
-                    _files[path] = buffer.ToArray();
+                    _files[key] = buffer.ToArray();
                 }
-
-                return path;
             }
 
-            public Task<Stream> ReadAsync(string path, CancellationToken ct)
+            public Task<Stream> ReadAsync(Guid spaceId, Guid itemId, CancellationToken ct)
             {
                 ct.ThrowIfCancellationRequested();
+                var key = GetKey(spaceId, itemId);
 
                 lock (_syncRoot)
                 {
-                    if (!_files.TryGetValue(path, out var bytes))
+                    if (!_files.TryGetValue(key, out var bytes))
                     {
-                        throw new FileNotFoundException($"Stored file '{path}' was not found.", path);
+                        throw new FileNotFoundException($"Stored file '{key}' was not found.", key);
                     }
 
                     Stream stream = new MemoryStream(bytes, writable: false);
@@ -679,13 +680,14 @@ public class ItemEndpointTests
                 }
             }
 
-            public Task DeleteAsync(string path, CancellationToken ct)
+            public Task DeleteAsync(Guid spaceId, Guid itemId, CancellationToken ct)
             {
                 ct.ThrowIfCancellationRequested();
+                var key = GetKey(spaceId, itemId);
 
                 lock (_syncRoot)
                 {
-                    _files.Remove(path);
+                    _files.Remove(key);
                 }
 
                 return Task.CompletedTask;

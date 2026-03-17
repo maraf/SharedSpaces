@@ -1,19 +1,19 @@
+using Microsoft.Extensions.Options;
+
 namespace SharedSpaces.Server.Infrastructure.FileStorage;
 
 public sealed class LocalFileStorage : IFileStorage
 {
-    private const string DefaultBasePath = "./storage";
     private readonly string _basePath;
-    private readonly string _normalizedBasePath;
 
-    public LocalFileStorage(IConfiguration configuration, IHostEnvironment environment)
+    public LocalFileStorage(IOptions<StorageOptions> options, IHostEnvironment environment)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
 
-        var configuredBasePath = configuration["Storage:BasePath"];
+        var configuredBasePath = options.Value.BasePath;
         var basePath = string.IsNullOrWhiteSpace(configuredBasePath)
-            ? DefaultBasePath
+            ? "./storage"
             : configuredBasePath;
 
         _basePath = Path.GetFullPath(
@@ -22,101 +22,72 @@ public sealed class LocalFileStorage : IFileStorage
                 : Path.Combine(environment.ContentRootPath, basePath));
 
         Directory.CreateDirectory(_basePath);
-        _normalizedBasePath = _basePath.EndsWith(Path.DirectorySeparatorChar)
-            ? _basePath
-            : _basePath + Path.DirectorySeparatorChar;
     }
 
-    public async Task<string> SaveAsync(Guid spaceId, Guid itemId, Stream content, CancellationToken ct)
+    public async Task SaveAsync(Guid spaceId, Guid itemId, Stream content, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        var fileName = $"{Guid.NewGuid():N}.bin";
-        var relativePath = Path.Combine(spaceId.ToString(), itemId.ToString(), fileName);
-        var fullPath = ResolveFullPath(relativePath);
-        var directoryPath = Path.GetDirectoryName(fullPath)
-            ?? throw new InvalidOperationException("Could not resolve the storage directory.");
-
+        var directoryPath = Path.Combine(_basePath, spaceId.ToString());
         Directory.CreateDirectory(directoryPath);
+
+        var fullPath = Path.Combine(directoryPath, $"{itemId}.bin");
 
         try
         {
-            await using var output = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+            await using var output = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
             await content.CopyToAsync(output, ct);
-            return relativePath;
         }
         catch
         {
-            if (File.Exists(fullPath))
+            try
             {
-                File.Delete(fullPath);
-                DeleteDirectoryIfEmpty(directoryPath);
-                DeleteDirectoryIfEmpty(Path.GetDirectoryName(directoryPath));
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup
             }
 
             throw;
         }
     }
 
-    public Task<Stream> ReadAsync(string path, CancellationToken ct)
+    public Task<Stream> ReadAsync(Guid spaceId, Guid itemId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        var fullPath = ResolveFullPath(path);
+        var fullPath = Path.Combine(_basePath, spaceId.ToString(), $"{itemId}.bin");
         Stream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
         return Task.FromResult(stream);
     }
 
-    public Task DeleteAsync(string path, CancellationToken ct)
+    public Task DeleteAsync(Guid spaceId, Guid itemId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        if (string.IsNullOrWhiteSpace(path))
+        var fullPath = Path.Combine(_basePath, spaceId.ToString(), $"{itemId}.bin");
+        if (File.Exists(fullPath))
         {
-            return Task.CompletedTask;
+            File.Delete(fullPath);
         }
 
-        var fullPath = ResolveFullPath(path);
-        if (!File.Exists(fullPath))
+        try
         {
-            return Task.CompletedTask;
+            var directoryPath = Path.GetDirectoryName(fullPath);
+            if (directoryPath is not null && Directory.Exists(directoryPath) && !Directory.EnumerateFileSystemEntries(directoryPath).Any())
+            {
+                Directory.Delete(directoryPath);
+            }
         }
-
-        File.Delete(fullPath);
-        DeleteDirectoryIfEmpty(Path.GetDirectoryName(fullPath));
-        DeleteDirectoryIfEmpty(Path.GetDirectoryName(Path.GetDirectoryName(fullPath)));
+        catch
+        {
+            // Best-effort directory cleanup
+        }
 
         return Task.CompletedTask;
-    }
-
-    private string ResolveFullPath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            throw new InvalidOperationException("Storage path is required.");
-        }
-
-        var fullPath = Path.GetFullPath(Path.Combine(_basePath, path));
-        if (!fullPath.StartsWith(_normalizedBasePath, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Storage path must stay within the configured base path.");
-        }
-
-        return fullPath;
-    }
-
-    private static void DeleteDirectoryIfEmpty(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-        {
-            return;
-        }
-
-        if (Directory.EnumerateFileSystemEntries(path).Any())
-        {
-            return;
-        }
-
-        Directory.Delete(path);
     }
 }

@@ -200,7 +200,7 @@ Issue #21 required authenticated space/item CRUD endpoints plus file uploads and
 #### Impact
 - Four new endpoints: GET space metadata, GET items list, PUT upsert (text or file), DELETE item + storage cleanup
 - File storage now pluggable via dependency injection
-- Quota limits enforced at API layer (default: 50 MB per space)
+- Quota limits enforced at API layer (default: 100 MB per space)
 - Space membership validation runs before item operations
 - Multipart file uploads supported with server-rendered file paths in responses
 

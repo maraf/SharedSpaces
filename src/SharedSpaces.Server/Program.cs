@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddPersistence(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<AdminAuthenticationFilter>();
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 
 var app = builder.Build();

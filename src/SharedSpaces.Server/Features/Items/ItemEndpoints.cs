@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
@@ -14,7 +15,6 @@ namespace SharedSpaces.Server.Features.Items;
 public static class ItemEndpoints
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SpaceQuotaLocks = new();
-    private const long DefaultMaxSpaceQuotaBytes = 104_857_600L;
     private const int DefaultMaxTextContentBytes = 1_048_576;
 
     public static IEndpointRouteBuilder MapItemEndpoints(this IEndpointRouteBuilder app)
@@ -98,7 +98,7 @@ public static class ItemEndpoints
         HttpContext httpContext,
         AppDbContext db,
         IFileStorage fileStorage,
-        IConfiguration configuration,
+        IOptions<StorageOptions> storageOptions,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -115,23 +115,23 @@ public static class ItemEndpoints
 
         if (itemId == Guid.Empty)
         {
-            return Results.BadRequest(new { Error = "Item ID must be a non-empty GUID." });
+            return Results.BadRequest(new { Error = "Item ID must be a non-empty GUID" });
         }
 
         if (request!.Id == Guid.Empty)
         {
-            return Results.BadRequest(new { Error = "Request item ID must be a non-empty GUID." });
+            return Results.BadRequest(new { Error = "Request item ID must be a non-empty GUID" });
         }
 
         if (request.Id != itemId)
         {
-            return Results.BadRequest(new { Error = "Request item ID must match the route item ID." });
+            return Results.BadRequest(new { Error = "Request item ID must match the route item ID" });
         }
 
         var normalizedContentType = request.ContentType.Trim().ToLowerInvariant();
         if (normalizedContentType is not ("text" or "file"))
         {
-            return Results.BadRequest(new { Error = "ContentType must be either 'text' or 'file'." });
+            return Results.BadRequest(new { Error = "ContentType must be either 'text' or 'file'" });
         }
 
         var spaceExists = await db.Spaces
@@ -158,10 +158,7 @@ public static class ItemEndpoints
             SpaceId = spaceId
         };
 
-        var previousFilePath = existingItem is not null && string.Equals(existingItem.ContentType, "file", StringComparison.OrdinalIgnoreCase)
-            ? existingItem.Content
-            : null;
-        var newStoredPath = (string?)null;
+        var wasFile = existingItem is not null && string.Equals(existingItem.ContentType, "file", StringComparison.OrdinalIgnoreCase);
         string content;
         long fileSize;
 
@@ -169,17 +166,17 @@ public static class ItemEndpoints
         {
             if (request.File is not null)
             {
-                return Results.BadRequest(new { Error = "File payload is only allowed when ContentType is 'file'." });
+                return Results.BadRequest(new { Error = "File payload is only allowed when ContentType is 'file'" });
             }
 
             if (request.Content is null)
             {
-                return Results.BadRequest(new { Error = "Content is required when ContentType is 'text'." });
+                return Results.BadRequest(new { Error = "Content is required when ContentType is 'text'" });
             }
 
             if (Encoding.UTF8.GetByteCount(request.Content) > DefaultMaxTextContentBytes)
             {
-                return Results.BadRequest(new { Error = $"Text content must not exceed {DefaultMaxTextContentBytes} bytes." });
+                return Results.BadRequest(new { Error = $"Text content must not exceed {DefaultMaxTextContentBytes} bytes" });
             }
 
             content = request.Content;
@@ -189,7 +186,7 @@ public static class ItemEndpoints
         {
             if (request.File is null)
             {
-                return Results.BadRequest(new { Error = "File is required when ContentType is 'file'." });
+                return Results.BadRequest(new { Error = "File is required when ContentType is 'file'" });
             }
 
             var currentUsage = await db.SpaceItems
@@ -197,16 +194,15 @@ public static class ItemEndpoints
                 .SumAsync(existing => (long?)existing.FileSize, cancellationToken) ?? 0L;
             var currentItemSize = existingItem?.FileSize ?? 0L;
             var projectedUsage = currentUsage - currentItemSize + request.File.Length;
-            var maxSpaceQuotaBytes = configuration.GetValue<long?>("Storage:MaxSpaceQuotaBytes") ?? DefaultMaxSpaceQuotaBytes;
 
-            if (projectedUsage > maxSpaceQuotaBytes)
+            if (projectedUsage > storageOptions.Value.MaxSpaceQuotaBytes)
             {
-                return Results.Json(new { Error = "Space storage quota exceeded." }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                return Results.Json(new { Error = "Space storage quota exceeded" }, statusCode: StatusCodes.Status413PayloadTooLarge);
             }
 
             await using var fileStream = request.File.OpenReadStream();
-            newStoredPath = await fileStorage.SaveAsync(spaceId, itemId, fileStream, cancellationToken);
-            content = newStoredPath;
+            await fileStorage.SaveAsync(spaceId, itemId, fileStream, cancellationToken);
+            content = request.File.FileName;
             fileSize = request.File.Length;
         }
 
@@ -237,11 +233,11 @@ public static class ItemEndpoints
                 await transaction.RollbackAsync(cancellationToken);
             }
 
-            if (newStoredPath is not null)
+            if (normalizedContentType == "file" && existingItem is null)
             {
                 try
                 {
-                    await fileStorage.DeleteAsync(newStoredPath, cancellationToken);
+                    await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
                 }
                 catch
                 {
@@ -252,9 +248,16 @@ public static class ItemEndpoints
             throw;
         }
 
-        if (!string.IsNullOrWhiteSpace(previousFilePath) && !string.Equals(previousFilePath, newStoredPath, StringComparison.OrdinalIgnoreCase))
+        if (wasFile && normalizedContentType != "file")
         {
-            await fileStorage.DeleteAsync(previousFilePath, cancellationToken);
+            try
+            {
+                await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+            }
+            catch
+            {
+                // Best-effort file cleanup when switching from file to text
+            }
         }
 
         var response = new SpaceItemResponse(
@@ -293,16 +296,21 @@ public static class ItemEndpoints
             return Results.NotFound(new { Error = "Item not found" });
         }
 
-        var filePath = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase)
-            ? item.Content
-            : null;
+        var isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase);
 
         db.SpaceItems.Remove(item);
         await db.SaveChangesAsync(cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(filePath))
+        if (isFile)
         {
-            await fileStorage.DeleteAsync(filePath, cancellationToken);
+            try
+            {
+                await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+            }
+            catch
+            {
+                // Best-effort file cleanup
+            }
         }
 
         return Results.NoContent();
@@ -348,11 +356,11 @@ public static class ItemEndpoints
         }
         catch (BadHttpRequestException)
         {
-            return (null, Results.BadRequest(new { Error = "Invalid form payload." }));
+            return (null, Results.BadRequest(new { Error = "Invalid form payload" }));
         }
         catch (InvalidDataException)
         {
-            return (null, Results.BadRequest(new { Error = "Invalid form payload." }));
+            return (null, Results.BadRequest(new { Error = "Invalid form payload" }));
         }
     }
 
