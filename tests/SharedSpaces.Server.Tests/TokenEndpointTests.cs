@@ -26,15 +26,17 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(response);
         token.Should().NotBeNullOrWhiteSpace();
         token.Split('.').Should().HaveCount(3);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
     }
 
     [Fact]
@@ -44,24 +46,15 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var token = await ReadTokenAsync(response);
-        var payload = DecodeJwtPayload(token);
-        var member = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync());
-
-        payload.Should().ContainKey("sub");
-        payload["sub"].GetString().Should().Be(member.Id.ToString());
-        payload.Should().ContainKey("display_name");
-        payload["display_name"].GetString().Should().Be("Zoe");
-        payload.Should().ContainKey("server_url");
-        payload["server_url"].GetString().Should().Be(TestWebApplicationFactory.ServerUrl);
-        payload.Should().ContainKey("space_id");
-        payload["space_id"].GetString().Should().Be(space.Id.ToString());
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
     }
 
     [Fact]
@@ -71,12 +64,15 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         var invitation = await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = await ReadTokenAsync(response);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
         var invitationStillExists = await factory.WithDbContextAsync(db => db.SpaceInvitations.AnyAsync(x => x.Id == invitation.Id));
         invitationStillExists.Should().BeFalse();
     }
@@ -96,7 +92,10 @@ public class TokenEndpointTests
         var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = await ReadTokenAsync(response);
+        var tokenMemberId = await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
         var member = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync());
+        member.Id.Should().Be(tokenMemberId);
         member.SpaceId.Should().Be(space.Id);
         member.DisplayName.Should().Be(displayName);
         member.IsRevoked.Should().BeFalse();
@@ -149,12 +148,14 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, displayName);
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
 
         var response = await GetProtectedEndpointAsync(client, token);
 
@@ -179,12 +180,14 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, displayName);
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
 
         await factory.WithDbContextAsync(async db =>
         {
@@ -205,12 +208,14 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, displayName);
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
         var invalidToken = token[..^1] + (token[^1] == 'a' ? 'b' : 'a');
 
         var response = await GetProtectedEndpointAsync(client, invalidToken);
@@ -225,13 +230,15 @@ public class TokenEndpointTests
         using var client = factory.CreateClient();
 
         var pin = "123456";
+        var displayName = "Zoe";
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, "Zoe");
+        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var token = await ReadTokenAsync(response);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
         var payload = DecodeJwtPayload(token);
 
         payload.Should().NotContainKey("exp");
@@ -274,6 +281,39 @@ public class TokenEndpointTests
         tokenResponse.Should().NotBeNull();
         tokenResponse!.Token.Should().NotBeNullOrWhiteSpace();
         return tokenResponse.Token;
+    }
+
+    private static async Task<Guid> AssertJwtClaimsAsync(
+        TestWebApplicationFactory factory,
+        string token,
+        Guid expectedSpaceId,
+        string expectedDisplayName)
+    {
+        var payload = DecodeJwtPayload(token);
+        var member = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync());
+
+        member.SpaceId.Should().Be(expectedSpaceId);
+        member.DisplayName.Should().Be(expectedDisplayName);
+
+        payload.Should().ContainKey("sub");
+        payload["sub"].ValueKind.Should().Be(JsonValueKind.String);
+        payload["sub"].GetString().Should().Be(member.Id.ToString());
+
+        payload.Should().ContainKey("display_name");
+        payload["display_name"].ValueKind.Should().Be(JsonValueKind.String);
+        payload["display_name"].GetString().Should().Be(expectedDisplayName);
+
+        payload.Should().ContainKey("server_url");
+        payload["server_url"].ValueKind.Should().Be(JsonValueKind.String);
+        payload["server_url"].GetString().Should().Be(TestWebApplicationFactory.ServerUrl);
+
+        payload.Should().ContainKey("space_id");
+        payload["space_id"].ValueKind.Should().Be(JsonValueKind.String);
+        payload["space_id"].GetString().Should().Be(expectedSpaceId.ToString());
+
+        payload.Should().NotContainKey("exp");
+
+        return member.Id;
     }
 
     private static Dictionary<string, JsonElement> DecodeJwtPayload(string token)

@@ -60,3 +60,4 @@ Server structure now available to Zoe; test project can reference production ent
 - `src/SharedSpaces.Server/Program.cs` exposes a `public partial class Program` marker so external integration tests can boot the minimal API host without `InternalsVisibleTo` wiring.
 - JWT signing key is lazily resolved from config at first use, allowing test environments to override the key via WebApplicationFactory config. This prevents the signing key from being captured during server startup before test config is applied.
 - TokenEndpointTests now contains 13 passing integration tests covering PIN exchange, JWT issuance, revoked member rejection, quota enforcement, and QR code payload integrity. Test host properly wired with config overrides.
+- Successful token exchange tests should decode the JWT payload and assert the concrete `sub`, `display_name`, `server_url`, and `space_id` claim values, while also asserting the token has no `exp` claim.
