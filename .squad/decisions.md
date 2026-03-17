@@ -176,6 +176,67 @@ Use `WebApplicationFactory<Program>` in `tests/SharedSpaces.Server.Tests/TokenEn
 
 ---
 
+### Space Items CRUD Endpoints & File Storage Abstraction
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+Issue #21 required authenticated space/item CRUD endpoints plus file uploads and quota enforcement without disrupting existing space, invitation, or token endpoint implementations.
+
+#### Decision
+- Implement item endpoints as a vertical slice in `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs`, mapped from `Program.cs` with `.RequireAuthorization()` on the `/v1/spaces/{spaceId}` group
+- Persist file quota metadata directly on `SpaceItem.FileSize` so quota checks do not depend on filesystem scans
+- Introduce `IFileStorage.cs` abstraction with `LocalFileStorage` as the initial implementation, storing files relative to `Storage:BasePath` for future cloud storage swaps
+- Read multipart form payloads manually in the item upsert endpoint so JWT authorization runs before form parsing and both text/file upserts stay in one endpoint contract
+
+#### Rationale
+- Vertical slice pattern keeps the backend aligned with existing code organization and preserves thin endpoint wiring in `Program.cs`
+- Persisting `FileSize` metadata makes quota enforcement deterministic and cheap (no filesystem scans)
+- `IFileStorage` abstraction decouples the item domain from storage implementation, enabling cloud storage adoption without reworking endpoints
+- Manual form parsing within the endpoint handler lets authentication middleware run first, simplifying the request pipeline
+
+#### Impact
+- Four new endpoints: GET space metadata, GET items list, PUT upsert (text or file), DELETE item + storage cleanup
+- File storage now pluggable via dependency injection
+- Quota limits enforced at API layer (default: 50 MB per space)
+- Space membership validation runs before item operations
+- Multipart file uploads supported with server-rendered file paths in responses
+
+---
+
+### .NET 10 Migration & JWT Authentication Fix
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+The project was running on .NET 9, but .NET 10 (10.0.100 SDK) was available and needed for alignment with team infrastructure and long-term support.
+
+#### Decision
+Migrated the entire solution from .NET 9 to .NET 10:
+1. Updated `TargetFramework` to `net10.0` in both server and test project files
+2. Updated all Microsoft.* NuGet packages from 9.0.4 to 10.0.0
+3. Explicitly added `Microsoft.IdentityModel.JsonWebTokens` 8.16.0 as a direct dependency
+4. Updated CI workflow (`.github/workflows/ci.yml`) to use .NET 10 SDK
+
+#### Rationale
+- .NET 10 is the latest stable LTS release and provides improved JWT token handling via `JsonWebTokenHandler`
+- JWT bearer middleware in .NET 10 requires `Microsoft.IdentityModel.JsonWebTokens` to be explicitly referenced; without it, validation silently falls back to the older handler
+- All existing tests pass with the migration; no domain code changes required
+- CI now tests against the target runtime version
+
+#### Impact
+- Solution targets .NET 10 with all 32 tests passing
+- JWT validation works correctly with proper token rejection for invalid signatures/claims
+- Reduced risk of silent JWT validation failures in production
+- Future JWT enhancements can rely on `JsonWebTokenHandler` improvements
+- Note: Future developers must ensure .NET 10 projects explicitly reference `Microsoft.IdentityModel.JsonWebTokens`, unlike .NET 9 where it was transitively included
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

@@ -73,3 +73,52 @@ Created 14 GitHub issues (maraf/SharedSpaces#17-#30) breaking down the 5-phase i
 - File storage abstraction for future cloud provider swap
 - Invitation PINs are deleted after JWT issuance (no replay)
 - JWT has NO expiration; validity = SpaceMember.IsRevoked check
+
+### Phase 1 Completion: Kaylee & Zoe (2026-03-17)
+
+**Status:** ✅ All Phase 1 core server APIs are now implemented and tested.
+
+**Completed Issues:**
+- #17: Solution scaffold + EF Core + SQLite ✅
+- #18: Domain entities + migrations ✅
+- #19: Admin endpoints ✅
+- #20: Join/auth flow ✅
+- #21: Items CRUD + file storage abstraction ✅
+
+**Key Implementation Patterns for Future Phases:**
+
+1. **Vertical Slice Architecture**
+   - Each feature lives in `src/SharedSpaces.Server/Features/{Feature}/` with its own endpoints, models, and logic
+   - Endpoints are thin wrappers calling into domain/application logic
+   - Dependency injection in `Program.cs` keeps wiring centralized
+
+2. **File Storage Abstraction**
+   - `IFileStorage` interface in `Infrastructure/FileStorage/` enables testability and cloud migration
+   - `LocalFileStorage` stores files relative to `Storage:BasePath` from config
+   - Implementations are pluggable; future cloud storage (S3, Azure) is a one-endpoint swap
+
+3. **Multipart File Upload Pattern**
+   - Manual form parsing within the endpoint handler (not automatic model binding)
+   - JWT authorization runs before form parsing — auth failures return 401 before payload is consumed
+   - File size validation and quota checks happen server-side (never trust client)
+
+4. **Quota Tracking**
+   - Metadata-based: `SpaceItem.FileSize` is persisted to database
+   - No filesystem scans at request time — O(1) quota enforcement via sum of item sizes
+   - Allows accurate quota in distributed systems (future)
+
+5. **Database & Testing**
+   - SQLite is production database with proper migrations
+   - EF Core `InMemory` provider is used in tests via `WebApplicationFactory`
+   - `AppDbContext` is provided-aware; startup initialization detects SQLite vs InMemory and applies migrations/EnsureCreated accordingly
+   - Solution targets .NET 10 with explicit `Microsoft.IdentityModel.JsonWebTokens` package (required for JWT validation in .NET 10)
+
+6. **Authentication**
+   - JWT tokens have no expiration claim
+   - Validity is determined by `SpaceMember` existence + `IsRevoked` flag check
+   - All protected endpoints use `.RequireAuthorization()` in route groups
+
+**Ready for Phase 2:** SignalR hub can assume item CRUD is stable and tested. Hub should broadcast `item-created` and `item-deleted` events using the same `SpaceItem` model for serialization consistency.
+
+**Ready for Phase 3:** React client can assume all server APIs are available and stable. Use same JWT structure and models from API responses for type safety.
+
