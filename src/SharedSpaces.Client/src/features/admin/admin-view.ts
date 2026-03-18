@@ -21,8 +21,6 @@ export class AdminView extends BaseElement {
 
   @state() private adminSecret: string | null = null;
   @state() private secretInput = '';
-  @state() private isAuthenticating = false;
-
   @state() private spaces: SpaceResponse[] = [];
   @state() private newSpaceName = '';
   @state() private isCreatingSpace = false;
@@ -63,27 +61,13 @@ export class AdminView extends BaseElement {
     localStorage.setItem(SPACES_CACHE_KEY, JSON.stringify(this.spaces));
   }
 
-  private handleSecretSubmit = async (e: Event) => {
+  private handleSecretSubmit = (e: Event) => {
     e.preventDefault();
     if (!this.secretInput.trim()) return;
 
-    this.isAuthenticating = true;
+    localStorage.setItem(ADMIN_SECRET_KEY, this.secretInput);
+    this.adminSecret = this.secretInput;
     this.errorMessage = '';
-
-    try {
-      await createSpace(this.apiBaseUrl, this.secretInput, '__test_auth__');
-      localStorage.setItem(ADMIN_SECRET_KEY, this.secretInput);
-      this.adminSecret = this.secretInput;
-    } catch (error) {
-      if (error instanceof AdminApiError && error.status === 401) {
-        this.errorMessage = 'Invalid admin secret. Please try again.';
-      } else {
-        this.errorMessage =
-          error instanceof Error ? error.message : 'Failed to authenticate';
-      }
-    } finally {
-      this.isAuthenticating = false;
-    }
   };
 
   private handleLogout = () => {
@@ -110,6 +94,11 @@ export class AdminView extends BaseElement {
       this.saveSpaces();
       this.newSpaceName = '';
     } catch (error) {
+      if (error instanceof AdminApiError && error.status === 401) {
+        this.handleLogout();
+        this.errorMessage = 'Invalid admin secret. Please re-enter.';
+        return;
+      }
       this.errorMessage =
         error instanceof Error ? error.message : 'Failed to create space';
     } finally {
@@ -146,6 +135,11 @@ export class AdminView extends BaseElement {
       );
       state.invitation = invitation;
     } catch (error) {
+      if (error instanceof AdminApiError && error.status === 401) {
+        this.handleLogout();
+        this.errorMessage = 'Invalid admin secret. Please re-enter.';
+        return;
+      }
       state.error =
         error instanceof Error ? error.message : 'Failed to generate invitation';
     } finally {
@@ -208,7 +202,7 @@ export class AdminView extends BaseElement {
                 (this.secretInput = (e.target as HTMLInputElement).value)}
               placeholder="Enter admin secret"
               class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              ?disabled=${this.isAuthenticating}
+              ?disabled=${!this.secretInput.trim()}
             />
           </div>
 
@@ -224,10 +218,10 @@ export class AdminView extends BaseElement {
 
           <button
             type="submit"
-            ?disabled=${this.isAuthenticating || !this.secretInput.trim()}
+            ?disabled=${!this.secretInput.trim()}
             class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            ${this.isAuthenticating ? 'Authenticating...' : 'Continue'}
+            Continue
           </button>
         </form>
       </view-card>
