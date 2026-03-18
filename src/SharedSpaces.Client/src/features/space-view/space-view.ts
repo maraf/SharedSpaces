@@ -10,6 +10,12 @@ export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'api-base-url' })
   apiBaseUrl = '/';
 
+  @property({ type: String, attribute: 'space-id' })
+  spaceId?: string;
+
+  @property({ type: String, attribute: 'server-url' })
+  serverUrl?: string;
+
   private handleBack = () => {
     this.dispatchEvent(
       new CustomEvent<AppViewChangeDetail>('view-change', {
@@ -64,6 +70,26 @@ export class SpaceView extends BaseElement {
               >
                 Connection
               </p>
+              ${this.spaceId
+                ? html`
+                    <p class="mt-2 text-sm text-slate-300">
+                      Space ID:
+                      <span class="block break-all font-mono text-xs text-sky-300"
+                        >${this.spaceId}</span
+                      >
+                    </p>
+                  `
+                : ''}
+              ${this.serverUrl
+                ? html`
+                    <p class="mt-2 text-sm text-slate-300">
+                      Server:
+                      <span class="block break-all font-mono text-xs text-sky-300"
+                        >${this.serverUrl}</span
+                      >
+                    </p>
+                  `
+                : ''}
               <p class="mt-2 text-sm text-slate-300">
                 Runtime API base URL:
                 <span class="break-all font-mono text-xs text-sky-300"

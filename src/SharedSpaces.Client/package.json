@@ -13,21 +13,27 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier . --write"
+    "format": "prettier . --write",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@lit/context": "^1.1.6",
+    "jwt-decode": "^4.0.0",
     "lit": "^3.3.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.1",
+    "@vitest/ui": "^4.1.0",
     "eslint": "^10.0.3",
     "eslint-plugin-lit": "^2.2.1",
+    "happy-dom": "^20.8.4",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.2.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.0"
   }
 }

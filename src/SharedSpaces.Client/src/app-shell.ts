@@ -1,6 +1,6 @@
 import { provide } from '@lit/context';
 import { html } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 
 import './features/join/join-view';
 import './features/space-view/space-view';
@@ -9,8 +9,10 @@ import {
   getRuntimeAppConfig,
   type AppConfig,
 } from './lib/app-context';
+import { authContext, type AuthState } from './lib/auth-context';
 import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
+import { parseInvitationFromUrl } from './lib/invitation';
 
 @customElement('app-shell')
 export class AppShell extends BaseElement {
@@ -19,8 +21,37 @@ export class AppShell extends BaseElement {
   @provide({ context: appContext })
   private appConfig: AppConfig = getRuntimeAppConfig();
 
+  @provide({ context: authContext })
+  @state()
+  private authState: AuthState = {};
+
+  @state() private currentSpaceId?: string;
+  @state() private currentServerUrl?: string;
+
+  override connectedCallback() {
+    super.connectedCallback();
+    
+    // Check if URL has invitation, stay on join view if so
+    const invitation = parseInvitationFromUrl();
+    if (invitation) {
+      this.view = 'join';
+    }
+  }
+
   private handleViewChange = (event: CustomEvent<AppViewChangeDetail>) => {
-    this.view = event.detail.view;
+    const { view, spaceId, serverUrl, token } = event.detail;
+    
+    this.view = view;
+    
+    // Update auth state if we have token data
+    if (token && spaceId && serverUrl) {
+      this.currentSpaceId = spaceId;
+      this.currentServerUrl = serverUrl;
+      this.authState = {
+        token,
+        displayName: this.authState.displayName,
+      };
+    }
   };
 
   override render() {
@@ -66,6 +97,8 @@ export class AppShell extends BaseElement {
               : html`<space-view
                   class="w-full"
                   .apiBaseUrl=${this.appConfig.apiBaseUrl}
+                  .spaceId=${this.currentSpaceId}
+                  .serverUrl=${this.currentServerUrl}
                 ></space-view>`}
           </main>
         </div>
