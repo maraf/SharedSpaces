@@ -96,6 +96,15 @@ public static class InvitationEndpoints
         AppDbContext db,
         CancellationToken cancellationToken)
     {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
         var invitation = await db.SpaceInvitations
             .SingleOrDefaultAsync(existingInvitation => existingInvitation.SpaceId == spaceId && existingInvitation.Id == invitationId, cancellationToken);
 

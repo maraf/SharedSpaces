@@ -679,6 +679,20 @@ public class AdminEndpointTests
         error!.Error.Should().Contain("Invitation not found");
     }
 
+    [Fact]
+    public async Task DeleteInvitation_WithMissingSpace_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await DeleteInvitationAsync(client, Guid.NewGuid(), Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Space not found");
+    }
+
     // ========== Helper Methods ==========
 
     private static async Task<HttpResponseMessage> CreateSpaceAsync(
