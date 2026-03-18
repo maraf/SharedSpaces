@@ -2,6 +2,7 @@ import { provide } from '@lit/context';
 import { html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
+import './features/admin/admin-view';
 import './features/join/join-view';
 import './features/space-view/space-view';
 import {
@@ -23,6 +24,10 @@ export class AppShell extends BaseElement {
     this.view = event.detail.view;
   };
 
+  private handleBackToJoin = () => {
+    this.view = 'join';
+  };
+
   override render() {
     return html`
       <div
@@ -35,6 +40,17 @@ export class AppShell extends BaseElement {
             class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
           >
             <div>
+              ${this.view !== 'join'
+                ? html`
+                    <button
+                      type="button"
+                      @click=${this.handleBackToJoin}
+                      class="mb-3 inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                    >
+                      ← Back to join
+                    </button>
+                  `
+                : null}
               <p
                 class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300"
               >
@@ -46,11 +62,20 @@ export class AppShell extends BaseElement {
                 Lit HTML + WebComponents shell
               </h1>
             </div>
-            <div
-              class="rounded-full border border-slate-800 bg-slate-900/80 px-4 py-2 text-sm text-slate-300"
-            >
-              Current view:
-              <span class="ml-2 font-semibold text-white">${this.view}</span>
+            <div class="flex items-center gap-3">
+              <button
+                @click=${() => (this.view = 'admin')}
+                class="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                title="Admin panel"
+              >
+                ⚙️ Admin
+              </button>
+              <div
+                class="rounded-full border border-slate-800 bg-slate-900/80 px-4 py-2 text-sm text-slate-300"
+              >
+                Current view:
+                <span class="ml-2 font-semibold text-white">${this.view}</span>
+              </div>
             </div>
           </header>
 
@@ -63,10 +88,15 @@ export class AppShell extends BaseElement {
                   class="w-full"
                   .apiBaseUrl=${this.appConfig.apiBaseUrl}
                 ></join-view>`
-              : html`<space-view
-                  class="w-full"
-                  .apiBaseUrl=${this.appConfig.apiBaseUrl}
-                ></space-view>`}
+              : this.view === 'space'
+                ? html`<space-view
+                    class="w-full"
+                    .apiBaseUrl=${this.appConfig.apiBaseUrl}
+                  ></space-view>`
+                : html`<admin-view
+                    class="w-full"
+                    .apiBaseUrl=${this.appConfig.apiBaseUrl}
+                  ></admin-view>`}
           </main>
         </div>
       </div>

@@ -73,6 +73,12 @@ Server structure now available to Zoe; test project can reference production ent
 - SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
 - Test storage is now isolated at `./artifacts/storage-tests` per user directive (2026-03-17); ensure test hosts override `Storage:BasePath` to prevent cross-contamination with app storage at `./artifacts/storage`.
 - `SpaceHub` now auto-joins the route's space group during `OnConnectedAsync`; hub integration tests should connect to `/v1/spaces/{spaceId}/hub`, register handlers before `StartAsync()`, use `TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously)` + `TrySetResult`, and assert PUT/DELETE success before awaiting broadcast events.
+- Admin endpoint tests (`AdminEndpointTests.cs`) verify POST /v1/spaces and POST /v1/spaces/{spaceId}/invitations with comprehensive auth failure, validation edge cases, and happy path coverage; all admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header validation.
+- Admin invitation generation creates 6-digit PINs, hashes them for storage, and returns both invitation string (server_url|space_id|pin format) and base64 PNG QR code; tests verify QR code PNG signature (0x89504E47) and PIN uniqueness across multiple invitations.
+- TestWebApplicationFactory requires `Microsoft.EntityFrameworkCore.Infrastructure` using statement to access `IDbContextOptionsConfiguration<>` for proper DbContext service removal during test setup.
+- `GET /v1/spaces` is an admin-protected endpoint that returns all spaces as the shared `SpaceResponse` shape ordered by `CreatedAt` descending; integration tests should cover empty-state, auth failure, and newest-first listing.
+- Admin member-management coverage is strongest when tests create `SpaceMember` rows through the real invitation + token exchange flow (create space → create invitation → POST `/v1/spaces/{id}/tokens`) instead of seeding members directly, so member listing/revocation scenarios exercise the join pipeline end to end.
+- Admin invitation-management list responses are metadata-only (`InvitationListResponse` = `Id` + `SpaceId`) and must never expose hashed PINs; tests should deserialize the array shape and also inspect raw JSON to confirm no `pin` property leaks.
 
 ## Team Updates (2026-03-17)
 
@@ -100,3 +106,43 @@ Server structure now available to Zoe; test project can reference production ent
 - Verified test storage paths isolated at `./artifacts/storage-tests`
 - Branch: `squad/pr-feedback`, commit: 0a93ad9
 - All 46 tests passing; ready for merge after backend changes (Kaylee complete)
+
+## Team Updates (2026-03-17 Continued)
+
+**Zoe completed admin endpoint tests (Issue #27 support):** Wrote 18 comprehensive integration tests for admin API endpoints:
+- Test file: `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs`
+- Space creation coverage: happy path (201), missing/wrong admin secret (401), empty name (400), very long name edge case (400), max length (201), name trimming
+- Invitation generation coverage: happy path (200 with QR code), custom clientAppUrl, missing/wrong admin secret (401), non-existent space (404), QR code validation (PNG signature), invitation string format validation, hashed PIN storage, unique PINs for multiple invitations
+- All 64 tests passing (46 existing + 18 new admin tests)
+- Follows existing test patterns: `TestWebApplicationFactory` with EF Core InMemory, same config overrides, consistent naming conventions
+- Admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header and constant-time comparison for security
+- Result: Admin panel frontend (Wash's work on #27) now has full backend test coverage to build against
+
+**Wash completed admin panel UI (#27):** Built full admin panel at `src/SharedSpaces.Client/src/features/admin/` with:
+- **admin-api.ts:** Typed API client with admin endpoints (space creation, invitation generation, QR code requests)
+- **admin-view.ts:** Full UI component with state management, localStorage persistence for admin secret and space cache
+- **Per-space invitation state:** Record<spaceId, InvitationState> for independent UI state per space
+- **QR code rendering:** base64 PNG data URLs rendered directly as img src, no external libraries
+- **Copy-to-clipboard:** navigator.clipboard API for invitation string copying
+- **Styling:** Consistent dark theme (slate-950/900/800 backgrounds, sky-400 primary actions, emerald-400 success states)
+- **TypeScript compliance:** Explicit class properties for erasableSyntaxOnly compatibility
+- **Security:** Admin secret validation via test space creation (no dedicated auth endpoint)
+- Branch: `squad/27-admin-panel-ui`, ready for code review. Your test suite provides full confidence for frontend integration.
+
+## Team Updates (2026-03-18)
+
+**Coordinated PR #41 feedback resolution (2026-03-18T17:27:29Z):**
+
+Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comments and implement auth flow changes:
+
+- **Kaylee** (commit b130fc0): Added `GET /v1/spaces` admin endpoint, enabling credential validation without side effects. Returns `SpaceResponse[]` on success; 401 on invalid secret.
+- **Wash** (commits 7b8a1f5 & 2c92ca3): Fixed 5 frontend PR review comments (disabled async inputs, error parsing, URL normalization, render-side effects, navigation). Then rewrote admin auth flow—removed localStorage, validate-by-fetching `GET /v1/spaces`, in-memory state only. Page refresh returns to login form. Moved back navigation to shell chrome.
+- **Zoe** (commit af96c28): Fixed QR test naming convention; added 3 new `GET /v1/spaces` tests (valid/invalid/format). Test suite now 67 total.
+
+**Key outcomes:**
+- Admin auth is now ephemeral (no localStorage) and validates via GET /v1/spaces instead of test space creation
+- All PR #41 frontend review feedback resolved
+- Admin backend has dedicated listing endpoint with proper auth
+- Test coverage expanded (67 total, 3 new GET /v1/spaces tests)
+
+**Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.
