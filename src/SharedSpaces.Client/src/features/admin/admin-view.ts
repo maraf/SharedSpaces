@@ -240,83 +240,89 @@ export class AdminView extends BaseElement {
       return this.renderSecretPrompt();
     }
 
+    const body = html`
+      ${this.renderAuthenticatedHeader()} ${this.renderSpacesSection()}
+    `;
+
     return html`
       <view-card
         headline="Admin Panel"
         supporting-text="Manage spaces and generate invitation links"
-      >
-        ${this.renderAuthenticatedHeader()} ${this.renderSpacesSection()}
-      </view-card>
+        .body=${body}
+      ></view-card>
     `;
   }
 
   private renderSecretPrompt() {
+    const body = html`
+      <form
+        @submit=${this.handleSecretSubmit}
+        class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-6"
+      >
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="space-y-2">
+            <label
+              for="admin-server-url"
+              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            >
+              Server URL
+            </label>
+            <input
+              id="admin-server-url"
+              type="text"
+              .value=${this.serverUrlInput}
+              @input=${(e: InputEvent) =>
+                (this.serverUrlInput = (e.target as HTMLInputElement).value)}
+              placeholder="https://api.example.com"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <label
+              for="admin-secret"
+              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            >
+              Admin Secret
+            </label>
+            <input
+              id="admin-secret"
+              type="password"
+              .value=${this.secretInput}
+              @input=${(e: InputEvent) =>
+                (this.secretInput = (e.target as HTMLInputElement).value)}
+              placeholder="Enter admin secret"
+              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+            />
+          </div>
+        </div>
+
+        ${this.errorMessage
+          ? html`
+              <div
+                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+              >
+                ${this.errorMessage}
+              </div>
+            `
+          : null}
+
+        <button
+          type="submit"
+          ?disabled=${!this.secretInput.trim() || !this.serverUrlInput.trim()}
+          class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Continue
+        </button>
+      </form>
+    `;
+
     return html`
       <view-card
         headline="Admin Access"
         supporting-text="Enter a server URL and admin secret to continue"
-      >
-        <form
-          @submit=${this.handleSecretSubmit}
-          class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-6"
-        >
-          <div class="grid gap-4 md:grid-cols-2">
-            <div class="space-y-2">
-              <label
-                for="admin-server-url"
-                class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-              >
-                Server URL
-              </label>
-              <input
-                id="admin-server-url"
-                type="text"
-                .value=${this.serverUrlInput}
-                @input=${(e: InputEvent) =>
-                  (this.serverUrlInput = (e.target as HTMLInputElement).value)}
-                placeholder="https://api.example.com"
-                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              />
-            </div>
-
-            <div class="space-y-2">
-              <label
-                for="admin-secret"
-                class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-              >
-                Admin Secret
-              </label>
-              <input
-                id="admin-secret"
-                type="password"
-                .value=${this.secretInput}
-                @input=${(e: InputEvent) =>
-                  (this.secretInput = (e.target as HTMLInputElement).value)}
-                placeholder="Enter admin secret"
-                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              />
-            </div>
-          </div>
-
-          ${this.errorMessage
-            ? html`
-                <div
-                  class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-                >
-                  ${this.errorMessage}
-                </div>
-              `
-            : null}
-
-          <button
-            type="submit"
-            ?disabled=${!this.secretInput.trim() || !this.serverUrlInput.trim()}
-            class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Continue
-          </button>
-        </form>
-      </view-card>
+        .body=${body}
+      ></view-card>
     `;
   }
 
