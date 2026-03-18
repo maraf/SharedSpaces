@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+
+:root {
+  color: #e2e8f0;
+  background-color: #020617;
+  font-family: Inter, 'Segoe UI', Roboto, sans-serif;
+  font-synthesis: none;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100svh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
