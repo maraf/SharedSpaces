@@ -14,7 +14,19 @@ export interface TokenStore {
 export function getTokens(): Record<string, string> {
   try {
     const stored = localStorage.getItem(STORAGE_KEY_TOKENS);
-    return stored ? JSON.parse(stored) : {};
+    if (!stored) return {};
+    const parsed = JSON.parse(stored);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    // Only keep string values
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') {
+        result[key] = value;
+      }
+    }
+    return result;
   } catch {
     return {};
   }

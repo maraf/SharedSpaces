@@ -35,7 +35,8 @@ export async function exchangeToken(
   pin: string,
   displayName: string
 ): Promise<TokenExchangeResponse> {
-  const url = `${serverUrl}/v1/spaces/${spaceId}/tokens`;
+  const normalizedServerUrl = serverUrl.replace(/\/+$/, '');
+  const url = `${normalizedServerUrl}/v1/spaces/${spaceId}/tokens`;
   
   try {
     const response = await fetch(url, {

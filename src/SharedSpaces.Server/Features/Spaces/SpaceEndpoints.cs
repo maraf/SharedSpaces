@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -10,10 +11,30 @@ public static class SpaceEndpoints
     {
         var group = app.MapGroup("/v1/spaces");
 
+        group.MapGet("/", GetSpaces)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
         group.MapPost("/", CreateSpace)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
+        group.MapGet("/{spaceId:guid}/members", GetMembers)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
+        group.MapPost("/{spaceId:guid}/members/{memberId:guid}/revoke", RevokeMember)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
         return app;
+    }
+
+    private static async Task<IResult> GetSpaces(AppDbContext db)
+    {
+        var response = await db.Spaces
+            .AsNoTracking()
+            .OrderByDescending(space => space.CreatedAt)
+            .Select(space => new SpaceResponse(space.Id, space.Name, space.CreatedAt))
+            .ToListAsync();
+
+        return Results.Ok(response);
     }
 
     private static async Task<IResult> CreateSpace(
@@ -40,5 +61,61 @@ public static class SpaceEndpoints
 
         var response = new SpaceResponse(space.Id, space.Name, space.CreatedAt);
         return Results.Created($"/v1/spaces/{space.Id}", response);
+    }
+
+    private static async Task<IResult> GetMembers(
+        Guid spaceId,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
+        var response = await db.SpaceMembers
+            .AsNoTracking()
+            .Where(member => member.SpaceId == spaceId)
+            .OrderByDescending(member => member.JoinedAt)
+            .Select(member => new MemberResponse(member.Id, member.DisplayName, member.JoinedAt, member.IsRevoked))
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(response);
+    }
+
+    private static async Task<IResult> RevokeMember(
+        Guid spaceId,
+        Guid memberId,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
+        var member = await db.SpaceMembers
+            .SingleOrDefaultAsync(existingMember => existingMember.SpaceId == spaceId && existingMember.Id == memberId, cancellationToken);
+
+        if (member is null)
+        {
+            return Results.NotFound(new { Error = "Member not found" });
+        }
+
+        if (!member.IsRevoked)
+        {
+            member.IsRevoked = true;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return Results.NoContent();
     }
 }

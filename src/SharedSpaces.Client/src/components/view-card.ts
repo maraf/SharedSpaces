@@ -1,4 +1,4 @@
-import { html } from 'lit';
+import { html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
 import { BaseElement } from '../lib/base-element';
@@ -9,6 +9,8 @@ export class ViewCard extends BaseElement {
 
   @property({ type: String, attribute: 'supporting-text' })
   supportingText = '';
+
+  @property({ attribute: false }) body: unknown = null;
 
   override render() {
     return html`
@@ -34,9 +36,7 @@ export class ViewCard extends BaseElement {
               : null}
           </div>
         </header>
-        <div class="mt-6 space-y-6">
-          <slot></slot>
-        </div>
+        <div class="mt-6 space-y-6">${this.body ?? nothing}</div>
       </section>
     `;
   }

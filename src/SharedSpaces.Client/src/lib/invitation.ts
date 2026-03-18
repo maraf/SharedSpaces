@@ -21,7 +21,10 @@ export function parseInvitationString(invitation: string): InvitationData | null
     return null;
   }
 
-  const [serverUrl, spaceId, pin] = parts;
+  const [rawServerUrl, rawSpaceId, rawPin] = parts;
+  const serverUrl = rawServerUrl.trim();
+  const spaceId = rawSpaceId.trim();
+  const pin = rawPin.trim();
 
   // Validate server URL (must be URL-like)
   if (!serverUrl || !isValidUrl(serverUrl)) {
@@ -38,11 +41,7 @@ export function parseInvitationString(invitation: string): InvitationData | null
     return null;
   }
 
-  return {
-    serverUrl: serverUrl.trim(),
-    spaceId: spaceId.trim(),
-    pin: pin.trim()
-  };
+  return { serverUrl, spaceId, pin };
 }
 
 /**
@@ -58,7 +57,7 @@ export function parseInvitationFromUrl(): InvitationData | null {
     return null;
   }
 
-  return parseInvitationString(decodeURIComponent(invitation));
+  return parseInvitationString(invitation);
 }
 
 /**

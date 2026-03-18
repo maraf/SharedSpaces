@@ -906,3 +906,148 @@ Total: 48 passing tests
 - Add coverage reporting when client code matures (vitest has built-in coverage via c8/istanbul)
 - Consider component testing with @testing-library/lit for UI components
 - May need MSW (Mock Service Worker) for more complex API scenarios
+### Issue #27 Admin Panel Implementation Patterns
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented in #27
+
+#### Context
+
+Issue #27 required building an admin panel UI for space and invitation management. The panel needed to authenticate via admin secret, manage spaces, and generate invitations with QR codes.
+
+#### Key Implementation Decisions
+
+##### 1. Admin Secret Storage and Validation
+- **Pattern:** Admin credentials (secret, server URL, spaces) are kept in ephemeral in-memory state only. No localStorage persistence.
+- **Validation:** Credentials are validated by calling `GET /v1/spaces` with the submitted server URL and `X-Admin-Secret` header. A successful response returns the space list; 401 bounces back to the login form.
+- **Rationale:** Ephemeral state avoids leaving admin credentials in the browser and ensures the session resets on page refresh. The dedicated GET /v1/spaces admin endpoint provides secure, non-destructive credential validation without side effects.
+
+##### 2. Space Caching Strategy
+- **Pattern:** Spaces are fetched on login via `GET /v1/spaces` and stored in ephemeral in-memory state only.
+- **Rationale:** Since ephemeral credentials are validated by calling GET /v1/spaces, the response doubles as the source of truth. No localStorage persistence needed—consistent with the ephemeral auth design.
+- **Benefit:** Spaces are always current per session, no stale cache issues across browser tabs or sessions.
+
+##### 3. Per-Space Invitation State Management
+- **Pattern:** Store invitation generation state in a Record<spaceId, InvitationState> component property
+- **State includes:** isGenerating flag, clientAppUrl input, generated invitation, error message
+- **Rationale:** Each space has independent invitation generation UI, so state is keyed by space ID. Component-local state avoids global state complexity for UI-only concerns.
+
+##### 4. QR Code Display
+- **Pattern:** Render base64-encoded PNG as data URL: `data:image/png;base64,${qrCodeBase64}`
+- **Size:** Fixed 200x200px with white background padding via inline style
+- **Rationale:** Server returns base64 PNG, so we render directly as an img src. No additional libraries needed.
+
+##### 5. TypeScript Configuration Constraint
+- **Issue:** `erasableSyntaxOnly` in tsconfig doesn't support constructor parameter properties (`public status?: number`)
+- **Solution:** Declare class properties separately, assign in constructor body
+- **Rationale:** Matches project's TypeScript configuration and maintains type safety.
+
+#### Styling Consistency
+
+Followed existing dark theme patterns from join-view and space-view:
+- **Backgrounds:** slate-950 (base), slate-900/70-80 (cards), slate-950/60 (forms)
+- **Borders:** slate-800 (solid), slate-700 (dashed/subtle)
+- **Text:** slate-50 (primary), slate-300 (secondary), slate-400 (labels)
+- **Primary actions:** sky-400 background, slate-950 text, hover to sky-300
+- **Success states:** emerald-400, emerald-900/950 backgrounds
+- **Errors:** red-900 border, red-950/50 background, red-300 text
+- **Small caps labels:** text-xs font-semibold uppercase tracking-[0.24em]
+- **Rounded corners:** rounded-2xl for cards, rounded-3xl for large containers, rounded-full for buttons
+
+#### Component Architecture
+
+- **API Client:** Separate `admin-api.ts` module with typed functions and custom error class
+- **Component:** Single `admin-view.ts` component managing all admin UI state
+- **Sub-components:** Not needed — conditional rendering keeps complexity manageable
+- **Error Handling:** Per-operation error states (space creation vs invitation generation) for precise user feedback
+
+#### Validation
+
+✅ Admin secret validation via test space creation  
+✅ Space caching in localStorage  
+✅ Invitation generation with QR codes (base64 PNG)  
+✅ Copy-to-clipboard via navigator.clipboard  
+✅ Styling consistent with existing UI patterns  
+✅ TypeScript compliance with erasableSyntaxOnly  
+✅ Integration tests written (16 new tests, all 64 passing)
+
+#### Consequences
+
+**Positive:**
+- Clean separation between API client and UI component
+- localStorage provides zero-setup persistence
+- Per-space state keeps UI responsive and isolated
+- Comprehensive error handling with specific messages
+- Styling consistent across admin, join, and space-view features
+
+**Negative:**
+- Space cache is session-local, not shared across browsers/devices
+- Test space creation for auth validation is a workaround (acceptable given no dedicated endpoint)
+
+**Mitigations:**
+- Document cache limitations in UI (future)
+- If GET /spaces endpoint is added, replace localStorage cache with API calls
+# Wash: view-card light DOM fix
+
+## Context
+`view-card` lives in `src/SharedSpaces.Client/src/components/view-card.ts` and extends `BaseElement`, so it renders in light DOM for Tailwind compatibility. That made its `<slot></slot>` ineffective: Lit re-rendering replaced any child content passed by `admin-view`, `join-view`, and `space-view`.
+
+## Decision
+Keep `view-card` as a custom element, but move its variable body content to a non-attribute property (`.body=${html`...`}`) instead of relying on children/slots.
+
+## Why
+- Preserves the existing component API shape (`headline`, `supporting-text`) and styling wrapper.
+- Fits the project's light-DOM + Tailwind architecture without introducing shadow DOM styling issues.
+- Requires only targeted consumer updates, unlike converting the card into a plain template helper everywhere.
+
+## Follow-on rule
+For any component that extends `BaseElement`, do not use slots for consumer-provided content. Use property-driven templates or helper functions for composition instead.
+
+
+---
+
+## Wash: admin auth flow rewrite (2026-03-18)
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented in commit 2c92ca3
+
+### Context
+
+After Kaylee added the admin-authenticated GET /v1/spaces endpoint, the frontend admin authentication flow required redesign. The previous approach validated credentials via a test space creation side effect and persisted state in localStorage; Marek explicitly requested ephemeral auth state and server-backed space listing.
+
+### Decision
+
+- Validate admin access by calling GET /v1/spaces with the submitted server URL and X-Admin-Secret header.
+- Treat the returned SpaceResponse[] as the initial in-memory space list.
+- Do not persist the admin secret, server URL, or spaces in localStorage; refreshing the page should return the admin UI to the login form.
+
+### Why
+
+- Kaylee added a proper admin-authenticated listing endpoint, so we no longer need the old create-space side effect to prove credentials.
+- Marek explicitly wants auth failures to stay inside the login form and successful login to land directly on the real server-backed space list.
+- Ephemeral state avoids leaving admin credentials behind in the browser and matches the intended admin-only flow.
+
+---
+
+## Wash: PR #41 shell chrome back navigation (2026-03-18)
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented in commit 7b8a1f5
+
+### Context
+
+PR #41 review feedback highlighted issues with navigation and error handling in the admin panel. One key issue: the admin view had no way to return to the join flow, potentially trapping users in a dead-end.
+
+### Decision
+
+Keep return navigation in the shell chrome rather than burying it inside admin-view. src/SharedSpaces.Client/src/app-shell.ts now shows a ← Back to join action whenever the current view is not 'join'.
+
+### Why
+
+- The shell owns top-level view switching, so back navigation belongs there.
+- This keeps admin and future non-join views from trapping the user in a dead-end flow.
+- It also gives us one consistent place to expose cross-view navigation as the SPA grows.
+
