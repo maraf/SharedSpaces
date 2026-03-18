@@ -4,11 +4,11 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [tailwindcss()],
   server: {
-    host: '127.0.0.1',
-    port: 5173,
+    host: 'localhost',
+    port: parseInt(process.env.PORT || '5173'),
   },
   preview: {
-    host: '127.0.0.1',
+    host: 'localhost',
     port: 4173,
   },
 });
