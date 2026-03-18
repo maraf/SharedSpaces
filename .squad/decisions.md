@@ -866,10 +866,11 @@ PR #41 review feedback highlighted issues with navigation and error handling in 
 
 ### Decision
 
-Keep return navigation in the shell chrome rather than burying it inside dmin-view. src/SharedSpaces.Client/src/app-shell.ts now shows a ← Back to join action whenever the current view is not 'join'.
+Keep return navigation in the shell chrome rather than burying it inside admin-view. src/SharedSpaces.Client/src/app-shell.ts now shows a ← Back to join action whenever the current view is not 'join'.
 
 ### Why
 
 - The shell owns top-level view switching, so back navigation belongs there.
 - This keeps admin and future non-join views from trapping the user in a dead-end flow.
 - It also gives us one consistent place to expose cross-view navigation as the SPA grows.
+

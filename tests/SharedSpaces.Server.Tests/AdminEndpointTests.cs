@@ -710,6 +710,58 @@ public class AdminEndpointTests
         return await client.SendAsync(request);
     }
 
+    private static Task<HttpResponseMessage> ExchangeTokenAsync(
+        HttpClient client,
+        Guid spaceId,
+        string pin,
+        string displayName)
+    {
+        return client.PostAsJsonAsync($"/v1/spaces/{spaceId}/tokens", new ExchangeTokenRequest(pin, displayName));
+    }
+
+    private static async Task<SpaceResponse> CreateSpaceViaAdminAsync(HttpClient client, string name)
+    {
+        var response = await CreateSpaceAsync(client, name, TestWebApplicationFactory.AdminSecret);
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var space = await ReadJsonAsync<SpaceResponse>(response);
+        space.Should().NotBeNull();
+        return space!;
+    }
+
+    private static async Task<InvitationResponse> CreateInvitationViaAdminAsync(
+        HttpClient client,
+        Guid spaceId,
+        string? clientAppUrl = null)
+    {
+        var response = await CreateInvitationAsync(client, spaceId, clientAppUrl, TestWebApplicationFactory.AdminSecret);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var invitation = await ReadJsonAsync<InvitationResponse>(response);
+        invitation.Should().NotBeNull();
+        return invitation!;
+    }
+
+    private static async Task<SpaceMember> CreateMemberViaTokenExchangeAsync(
+        TestWebApplicationFactory factory,
+        HttpClient client,
+        Guid spaceId,
+        string displayName)
+    {
+        var invitation = await CreateInvitationViaAdminAsync(client, spaceId);
+        var pin = ExtractPin(invitation.InvitationString);
+
+        var tokenResponse = await ExchangeTokenAsync(client, spaceId, pin, displayName);
+        tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        return await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync(member => member.SpaceId == spaceId && member.DisplayName == displayName));
+    }
+
+    private static string ExtractPin(string invitationString)
+    {
+        var parts = invitationString.Split('|');
+        parts.Should().HaveCount(3);
+        return parts[2];
+    }
+
     private static async Task<HttpResponseMessage> ListMembersAsync(
         HttpClient client,
         Guid spaceId,
@@ -793,6 +845,8 @@ public class AdminEndpointTests
     private sealed record SpaceResponse(Guid Id, string Name, DateTime CreatedAt);
 
     private sealed record CreateInvitationRequest(string? ClientAppUrl);
+
+    private sealed record ExchangeTokenRequest(string Pin, string DisplayName);
 
     private sealed record InvitationResponse(string InvitationString, string? QrCodeBase64);
 
