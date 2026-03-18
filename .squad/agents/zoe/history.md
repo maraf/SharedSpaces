@@ -114,3 +114,14 @@ Server structure now available to Zoe; test project can reference production ent
 - Follows existing test patterns: `TestWebApplicationFactory` with EF Core InMemory, same config overrides, consistent naming conventions
 - Admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header and constant-time comparison for security
 - Result: Admin panel frontend (Wash's work on #27) now has full backend test coverage to build against
+
+**Wash completed admin panel UI (#27):** Built full admin panel at `src/SharedSpaces.Client/src/features/admin/` with:
+- **admin-api.ts:** Typed API client with admin endpoints (space creation, invitation generation, QR code requests)
+- **admin-view.ts:** Full UI component with state management, localStorage persistence for admin secret and space cache
+- **Per-space invitation state:** Record<spaceId, InvitationState> for independent UI state per space
+- **QR code rendering:** base64 PNG data URLs rendered directly as img src, no external libraries
+- **Copy-to-clipboard:** navigator.clipboard API for invitation string copying
+- **Styling:** Consistent dark theme (slate-950/900/800 backgrounds, sky-400 primary actions, emerald-400 success states)
+- **TypeScript compliance:** Explicit class properties for erasableSyntaxOnly compatibility
+- **Security:** Admin secret validation via test space creation (no dedicated auth endpoint)
+- Branch: `squad/27-admin-panel-ui`, ready for code review. Your test suite provides full confidence for frontend integration.

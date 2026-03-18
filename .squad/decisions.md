@@ -726,3 +726,88 @@ The file preserves the current orchestration behavior:
 - Solution structure more focused (only shippable projects remain)
 - Aspire observability (Dashboard) remains available for local debugging
 - Foundation for Phase 5 Docker Compose generation still intact
+
+---
+
+### Issue #27 Admin Panel Implementation Patterns
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented in #27
+
+#### Context
+
+Issue #27 required building an admin panel UI for space and invitation management. The panel needed to authenticate via admin secret, manage spaces, and generate invitations with QR codes.
+
+#### Key Implementation Decisions
+
+##### 1. Admin Secret Storage and Validation
+- **Pattern:** Store admin secret in localStorage under `sharedspaces.admin-secret` key
+- **Validation:** Test the secret by attempting to create a test space (no dedicated auth endpoint)
+- **Rationale:** Simplifies implementation while still validating credentials against the server. The test space creation fails with 401 if secret is invalid, without creating actual data.
+
+##### 2. Space Caching Strategy
+- **Pattern:** Cache created spaces in localStorage under `sharedspaces.admin-spaces` key
+- **Rationale:** Server doesn't provide a GET /spaces endpoint, so we cache locally as spaces are created. This is admin-only data, so local persistence is acceptable.
+- **Limitation:** Spaces created in other sessions/browsers won't appear until they're re-created in this session.
+
+##### 3. Per-Space Invitation State Management
+- **Pattern:** Store invitation generation state in a Record<spaceId, InvitationState> component property
+- **State includes:** isGenerating flag, clientAppUrl input, generated invitation, error message
+- **Rationale:** Each space has independent invitation generation UI, so state is keyed by space ID. Component-local state avoids global state complexity for UI-only concerns.
+
+##### 4. QR Code Display
+- **Pattern:** Render base64-encoded PNG as data URL: `data:image/png;base64,${qrCodeBase64}`
+- **Size:** Fixed 200x200px with white background padding via inline style
+- **Rationale:** Server returns base64 PNG, so we render directly as an img src. No additional libraries needed.
+
+##### 5. TypeScript Configuration Constraint
+- **Issue:** `erasableSyntaxOnly` in tsconfig doesn't support constructor parameter properties (`public status?: number`)
+- **Solution:** Declare class properties separately, assign in constructor body
+- **Rationale:** Matches project's TypeScript configuration and maintains type safety.
+
+#### Styling Consistency
+
+Followed existing dark theme patterns from join-view and space-view:
+- **Backgrounds:** slate-950 (base), slate-900/70-80 (cards), slate-950/60 (forms)
+- **Borders:** slate-800 (solid), slate-700 (dashed/subtle)
+- **Text:** slate-50 (primary), slate-300 (secondary), slate-400 (labels)
+- **Primary actions:** sky-400 background, slate-950 text, hover to sky-300
+- **Success states:** emerald-400, emerald-900/950 backgrounds
+- **Errors:** red-900 border, red-950/50 background, red-300 text
+- **Small caps labels:** text-xs font-semibold uppercase tracking-[0.24em]
+- **Rounded corners:** rounded-2xl for cards, rounded-3xl for large containers, rounded-full for buttons
+
+#### Component Architecture
+
+- **API Client:** Separate `admin-api.ts` module with typed functions and custom error class
+- **Component:** Single `admin-view.ts` component managing all admin UI state
+- **Sub-components:** Not needed — conditional rendering keeps complexity manageable
+- **Error Handling:** Per-operation error states (space creation vs invitation generation) for precise user feedback
+
+#### Validation
+
+✅ Admin secret validation via test space creation  
+✅ Space caching in localStorage  
+✅ Invitation generation with QR codes (base64 PNG)  
+✅ Copy-to-clipboard via navigator.clipboard  
+✅ Styling consistent with existing UI patterns  
+✅ TypeScript compliance with erasableSyntaxOnly  
+✅ Integration tests written (16 new tests, all 64 passing)
+
+#### Consequences
+
+**Positive:**
+- Clean separation between API client and UI component
+- localStorage provides zero-setup persistence
+- Per-space state keeps UI responsive and isolated
+- Comprehensive error handling with specific messages
+- Styling consistent across admin, join, and space-view features
+
+**Negative:**
+- Space cache is session-local, not shared across browsers/devices
+- Test space creation for auth validation is a workaround (acceptable given no dedicated endpoint)
+
+**Mitigations:**
+- Document cache limitations in UI (future)
+- If GET /spaces endpoint is added, replace localStorage cache with API calls

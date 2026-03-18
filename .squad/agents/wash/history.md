@@ -120,3 +120,5 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 ## Team Updates (2026-03-18)
 
 **Kaylee completed single-file Aspire AppHost migration:** Moved from `src/SharedSpaces.AppHost/` project-based approach to single-file pattern at `src/AppHost.cs` using .NET 10 file-based app support. The dev command is now `dotnet run src/AppHost.cs` (no `--project` flag needed). This aligns with the Recollections-style minimal Aspire pattern and removes throwaway ceremony from the solution. All 46 tests pass. Your Phase 2 work can assume this is the canonical local dev environment.
+
+**Zoe completed admin endpoint integration tests (#27 support):** Wrote 16 comprehensive tests for POST /v1/spaces and POST /v1/spaces/{spaceId}/invitations covering auth failures, validation edge cases, QR code generation and format validation, PIN uniqueness, and happy paths. All 64 tests passing (48 existing + 16 new). Your admin panel UI can now integrate with confidence that backend endpoints behave as designed. Fixed a regression in auth validation (junk `__test_auth__` space creation during secret validation).
