@@ -57,7 +57,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError on 400 response (bad request)', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 400,
       });
@@ -72,7 +72,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError with statusCode 400', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 400,
       });
@@ -86,7 +86,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError on 401 response (invalid PIN)', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 401,
       });
@@ -101,7 +101,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError with statusCode 401', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 401,
       });
@@ -115,7 +115,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError on 404 response (space not found)', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
       });
@@ -130,7 +130,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError with statusCode 404', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
       });
@@ -144,7 +144,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError on network failure', async () => {
-      global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
       await expect(
         exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
@@ -156,7 +156,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError on non-JSON response', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => {
@@ -170,7 +170,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError when response is missing token field', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({ notAToken: 'value' }),
@@ -186,7 +186,7 @@ describe('api-client', () => {
     });
 
     it('throws TokenExchangeError when response token is not a string', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({ token: 12345 }),
@@ -203,7 +203,7 @@ describe('api-client', () => {
 
     it('preserves original error in TokenExchangeError on network failure', async () => {
       const networkError = new Error('Connection refused');
-      global.fetch = vi.fn().mockRejectedValue(networkError);
+      globalThis.fetch = vi.fn().mockRejectedValue(networkError);
 
       try {
         await exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice');
@@ -214,7 +214,7 @@ describe('api-client', () => {
     });
 
     it('handles 500 server error with generic message', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 500,
       });

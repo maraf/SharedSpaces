@@ -42,8 +42,8 @@ describe('invitation', () => {
     });
 
     it('returns null for null or undefined input', () => {
-      expect(parseInvitationString(null as any)).toBeNull();
-      expect(parseInvitationString(undefined as any)).toBeNull();
+      expect(parseInvitationString(null as unknown as string)).toBeNull();
+      expect(parseInvitationString(undefined as unknown as string)).toBeNull();
     });
 
     it('returns null for string with too few parts', () => {
