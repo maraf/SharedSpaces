@@ -115,6 +115,15 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 - **Friction research convergence (2026-03-17):** Both Mal and Wash independently verified ecosystem state and converged on React recommendation for SharedSpaces main SPA. Routing immaturity (Vaadin deprecated, Labs router experimental) is the core blocker. Tailwind friction is workable. Testing gap has narrowed. Team alignment achieved with explicit understanding of trade-offs; Lit remains viable for future isolated components.
 - **Issue #23 bootstrap (2026-03-18):** The standalone client now lives in `src/SharedSpaces.Client/` as a Vite + Lit SPA with vertical slices under `src/features/{join,space-view,admin}` plus shared UI in `src/components/` and utilities in `src/lib/`. All rendered components extend `src/lib/base-element.ts` to force light DOM for Tailwind, `src/app-shell.ts` owns the `'join' | 'space'` view switcher, and runtime API configuration comes from the `api-base-url` meta tag via `src/lib/app-context.ts`.
 - **Aspire AppHost integration (2026-03-18):** Kaylee deployed .NET Aspire as the local dev orchestration layer. Developers can now start server + client with one command: `dotnet run src/AppHost.cs`. The AppHost orchestrates the ASP.NET Core server and the Vite dev server (client), wires the client URL to the server via `Server__DefaultClientAppUrl` env var, and ensures the client waits for the server to be ready before starting. Aspire Dashboard (localhost:15888) provides observability. This unblocks your Phase 2 SignalR work — you can verify the hub integration both locally (via AppHost) and in CI, with the Aspire setup as the canonical dev environment.
+- **Join flow implementation (2026-03-18):** Issue #24 completed with full invitation parsing, JWT storage, and join form. Key patterns:
+  - **Pipe-delimited invitation format:** Server generates `serverUrl|spaceId|pin`, QR encodes as URL param `?invitation=...`
+  - **Multi-server JWT storage:** localStorage keyed by `serverUrl:spaceId` to support simultaneous connections to different servers
+  - **Primary display name:** Separate localStorage key for user's default/preferred name, pre-fills forms but doesn't override per-space identity
+  - **Token exchange flow:** Client calls `POST /v1/spaces/{spaceId}/tokens` with `{ pin, displayName }`, receives `{ token }`, decodes JWT claims client-side with `jwt-decode` library
+  - **TypeScript strict mode gotchas:** Can't use parameter properties in class constructors with `erasableSyntaxOnly: true`, use `globalThis` not `global` for browser APIs
+  - **Form UX pattern:** Toggle between "paste invitation string" and "manual entry" modes, auto-parse on paste, comprehensive error states
+  - File locations: `src/lib/{token-storage,invitation,api-client}.ts` for utilities, `src/features/join/join-view.ts` for UI component
+
 
 ## Team Updates (2026-03-18)
 

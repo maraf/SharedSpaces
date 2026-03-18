@@ -73,6 +73,12 @@ Server structure now available to Zoe; test project can reference production ent
 - SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
 - Test storage is now isolated at `./artifacts/storage-tests` per user directive (2026-03-17); ensure test hosts override `Storage:BasePath` to prevent cross-contamination with app storage at `./artifacts/storage`.
 - `SpaceHub` now auto-joins the route's space group during `OnConnectedAsync`; hub integration tests should connect to `/v1/spaces/{spaceId}/hub`, register handlers before `StartAsync()`, use `TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously)` + `TrySetResult`, and assert PUT/DELETE success before awaiting broadcast events.
+- Client-side tests use vitest 4.x with happy-dom environment for browser API simulation; tests are co-located with source files using `*.test.ts` naming convention in `src/SharedSpaces.Client/src/lib/`.
+- Client localStorage mocking requires explicit setup via `vitest.setup.ts` because happy-dom's default localStorage implementation lacks full API surface; custom mock provides `getItem`, `setItem`, `removeItem`, and `clear` methods.
+- Invitation parsing validates server URL protocol (http/https only) BEFORE trimming whitespace, so spaces in URL parts will cause validation to fail; tests should use clean strings without leading/trailing spaces for valid cases.
+- Token storage uses composite keys in format `serverUrl:spaceId` to support multi-server client scenarios; tests should verify token isolation across different server+space combinations.
+- API client tests mock global `fetch` with vitest's `vi.fn()` and should verify both success responses and typed error handling for HTTP status codes (400/401/404) plus network failures.
+- Client test scripts in package.json: `npm test` runs vitest once, `npm run test:watch` runs vitest in watch mode for TDD workflow.
 
 ## Team Updates (2026-03-17)
 
@@ -100,3 +106,14 @@ Server structure now available to Zoe; test project can reference production ent
 - Verified test storage paths isolated at `./artifacts/storage-tests`
 - Branch: `squad/pr-feedback`, commit: 0a93ad9
 - All 46 tests passing; ready for merge after backend changes (Kaylee complete)
+
+## Team Updates (2026-03-17 Evening)
+
+**Zoe completed Issue #24 client tests:** Set up vitest infrastructure and wrote comprehensive tests for Wash's join flow utilities:
+- Installed vitest + happy-dom for client-side testing with localStorage mock
+- Added vitest.config.ts and vitest.setup.ts for test environment configuration
+- Wrote 17 token-storage tests covering store, retrieve, remove, multi-server scenarios, and corrupted data handling
+- Wrote 17 invitation parsing tests covering valid formats, validation failures, and edge cases
+- Wrote 14 API client tests covering success, HTTP error codes (400/401/404/500), network failures, and malformed responses
+- All 48 tests passing on branch `squad/24-join-flow`
+- Branch: `squad/24-join-flow`, commit: a88dba1
