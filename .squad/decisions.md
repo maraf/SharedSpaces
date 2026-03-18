@@ -668,3 +668,61 @@ Use a standalone Vite + Lit + TypeScript app with:
 - Frontend infrastructure ready for feature development
 - Client communicates via HTTP to .NET API
 - Established patterns for component architecture and styling
+
+---
+
+### Single-File Aspire AppHost Migration
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Kaylee (Backend Dev), Marek Fišera (User Directive)  
+**Status:** Complete  
+
+#### Context
+
+The local-development AppHost was originally introduced as a standalone project under `src/SharedSpaces.AppHost/`. Marek requested alignment with .NET 10 file-based app support and the Recollections-style single-file Aspire pattern to reduce ceremony and maintain a focused solution.
+
+#### Decision
+
+Migrate the AppHost from a project-based approach to a single-file Aspire application at `src/AppHost.cs` using:
+- `#:sdk Aspire.AppHost.Sdk@13.0.2`
+- `#:project .\SharedSpaces.Server\SharedSpaces.Server.csproj`
+- `#:package Aspire.Hosting.NodeJs@9.5.2`
+
+The file preserves the current orchestration behavior:
+- `AddProject<Projects.SharedSpaces_Server>("server")`
+- `AddNpmApp("client", "./SharedSpaces.Client", "dev")`
+- `WithHttpEndpoint(port: 5173, env: "PORT")`
+- `WithEnvironment("BROWSER", "none")`
+- `WaitFor(server)`
+- `server.WithEnvironment("Server__DefaultClientAppUrl", client.GetEndpoint("http"))`
+
+#### Implementation
+
+**Files Removed:**
+- `src/SharedSpaces.AppHost/` (entire directory: .csproj, Program.cs, bin/, obj/)
+
+**Files Produced:**
+- `src/AppHost.cs` (single-file Aspire app)
+
+**Files Modified:**
+- `SharedSpaces.sln` (removed AppHost project entry)
+
+#### Rationale
+
+- **Matches .NET 10 patterns:** Aligns with modern file-based app support (neptuo/Recollections style)
+- **Reduces ceremony:** Removes otherwise throwaway `.csproj`; solution focused on shippable projects
+- **Preserves one-command dev:** Local-dev workflow now via `dotnet run src/AppHost.cs`
+- **Maintains orchestration semantics:** No changes to how server and client interact or wait for each other
+
+#### Validation
+
+✅ `dotnet build src/AppHost.cs` — SUCCESS  
+✅ `dotnet build SharedSpaces.sln` — SUCCESS  
+✅ `dotnet test SharedSpaces.sln --no-build` — All 46 tests PASS  
+
+#### Impact
+
+- Development environment setup simplified to single command
+- Solution structure more focused (only shippable projects remain)
+- Aspire observability (Dashboard) remains available for local debugging
+- Foundation for Phase 5 Docker Compose generation still intact
