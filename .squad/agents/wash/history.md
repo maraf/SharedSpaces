@@ -123,8 +123,10 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
   - **TypeScript strict mode gotchas:** Can't use parameter properties in class constructors with `erasableSyntaxOnly: true`, use `globalThis` not `global` for browser APIs
   - **Form UX pattern:** Toggle between "paste invitation string" and "manual entry" modes, auto-parse on paste, comprehensive error states
   - File locations: `src/lib/{token-storage,invitation,api-client}.ts` for utilities, `src/features/join/join-view.ts` for UI component
-
+- **Client test infrastructure established (2026-03-18):** Zoe set up vitest + happy-dom with co-located test files in `src/SharedSpaces.Client/src/lib/`. Custom localStorage mock in vitest.setup.ts handles test isolation. Test patterns: fetch mocking with `vi.fn()`, multiline token/invitation validation, error handling for all HTTP status codes. All 48 join flow tests passing. Future component tests can reuse this infrastructure. See Zoe's history for complete patterns.
 
 ## Team Updates (2026-03-18)
 
 **Kaylee completed single-file Aspire AppHost migration:** Moved from `src/SharedSpaces.AppHost/` project-based approach to single-file pattern at `src/AppHost.cs` using .NET 10 file-based app support. The dev command is now `dotnet run src/AppHost.cs` (no `--project` flag needed). This aligns with the Recollections-style minimal Aspire pattern and removes throwaway ceremony from the solution. All 46 tests pass. Your Phase 2 work can assume this is the canonical local dev environment.
+
+**Wash + Zoe completed Issue #24 (Join Flow):** Wash delivered invitation parsing, token storage, API client, and join form UI component; Zoe delivered client test infrastructure (vitest + happy-dom) with 48 passing tests covering all utilities. PR #40 opened and ready for review. Key decisions captured in `.squad/decisions.md`. Infrastructure established for Phase 3 remaining work (space view, file upload). See orchestration logs for detailed outcome summary.

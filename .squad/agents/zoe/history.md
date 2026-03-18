@@ -117,3 +117,21 @@ Server structure now available to Zoe; test project can reference production ent
 - Wrote 14 API client tests covering success, HTTP error codes (400/401/404/500), network failures, and malformed responses
 - All 48 tests passing on branch `squad/24-join-flow`
 - Branch: `squad/24-join-flow`, commit: a88dba1
+
+## Team Updates (2026-03-18)
+
+**Wash + Zoe completed Issue #24 (Join Flow):** Collaborative delivery with infrastructure + implementation:
+- **Wash delivered:** Invitation parsing (pipe-delimited `serverUrl|spaceId|pin`), multi-server JWT storage (`serverUrl:spaceId` composite keys), token exchange API client, join form UI with toggle between paste/manual entry, auth context wiring
+- **Zoe delivered:** vitest 4.x + happy-dom test environment, custom localStorage mock, 48 passing tests across token-storage/invitation/api-client utilities
+- **Key architectural decisions:** Recorded in `.squad/decisions.md` with rationale, alternatives, and consequences
+- **Quality gates:** PR #40 opened, build clean, lint pass, zero type errors, all tests passing
+- **Infrastructure impact:** Client test infrastructure now established for future feature work (space view, file upload, components)
+- **Cross-team learning:** Wash's patterns documented in Zoe's history; Zoe's test infrastructure patterns documented in Wash's history
+- See orchestration logs for detailed session summary and technical outcomes
+
+**Scribe captured session state:** 
+- Created orchestration logs (Wash + Zoe) with outcome summaries
+- Created session log with collaborative summary
+- Merged decision inbox files into `.squad/decisions.md`, deduplicated
+- Updated both agent histories with cross-team learnings
+- Ready for git commit and merge workflow
