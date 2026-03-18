@@ -73,6 +73,9 @@ Server structure now available to Zoe; test project can reference production ent
 - SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
 - Test storage is now isolated at `./artifacts/storage-tests` per user directive (2026-03-17); ensure test hosts override `Storage:BasePath` to prevent cross-contamination with app storage at `./artifacts/storage`.
 - `SpaceHub` now auto-joins the route's space group during `OnConnectedAsync`; hub integration tests should connect to `/v1/spaces/{spaceId}/hub`, register handlers before `StartAsync()`, use `TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously)` + `TrySetResult`, and assert PUT/DELETE success before awaiting broadcast events.
+- Admin endpoint tests (`AdminEndpointTests.cs`) verify POST /v1/spaces and POST /v1/spaces/{spaceId}/invitations with comprehensive auth failure, validation edge cases, and happy path coverage; all admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header validation.
+- Admin invitation generation creates 6-digit PINs, hashes them for storage, and returns both invitation string (server_url|space_id|pin format) and base64 PNG QR code; tests verify QR code PNG signature (0x89504E47) and PIN uniqueness across multiple invitations.
+- TestWebApplicationFactory requires `Microsoft.EntityFrameworkCore.Infrastructure` using statement to access `IDbContextOptionsConfiguration<>` for proper DbContext service removal during test setup.
 
 ## Team Updates (2026-03-17)
 
@@ -100,3 +103,14 @@ Server structure now available to Zoe; test project can reference production ent
 - Verified test storage paths isolated at `./artifacts/storage-tests`
 - Branch: `squad/pr-feedback`, commit: 0a93ad9
 - All 46 tests passing; ready for merge after backend changes (Kaylee complete)
+
+## Team Updates (2026-03-17 Continued)
+
+**Zoe completed admin endpoint tests (Issue #27 support):** Wrote 18 comprehensive integration tests for admin API endpoints:
+- Test file: `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs`
+- Space creation coverage: happy path (201), missing/wrong admin secret (401), empty name (400), very long name edge case (400), max length (201), name trimming
+- Invitation generation coverage: happy path (200 with QR code), custom clientAppUrl, missing/wrong admin secret (401), non-existent space (404), QR code validation (PNG signature), invitation string format validation, hashed PIN storage, unique PINs for multiple invitations
+- All 64 tests passing (46 existing + 18 new admin tests)
+- Follows existing test patterns: `TestWebApplicationFactory` with EF Core InMemory, same config overrides, consistent naming conventions
+- Admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header and constant-time comparison for security
+- Result: Admin panel frontend (Wash's work on #27) now has full backend test coverage to build against
