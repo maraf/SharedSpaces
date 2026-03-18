@@ -245,8 +245,7 @@ export class AdminView extends BaseElement {
         headline="Admin Panel"
         supporting-text="Manage spaces and generate invitation links"
       >
-        ${this.renderAuthenticatedHeader()} ${this.renderCreateSpaceForm()}
-        ${this.renderSpacesList()}
+        ${this.renderAuthenticatedHeader()} ${this.renderSpacesSection()}
       </view-card>
     `;
   }
@@ -344,77 +343,76 @@ export class AdminView extends BaseElement {
     `;
   }
 
-  private renderCreateSpaceForm() {
+  private renderSpacesSection() {
     return html`
-      <form
-        @submit=${this.handleCreateSpace}
-        class="rounded-2xl border border-slate-800 bg-slate-950/60 p-6 space-y-4"
-      >
-        <div class="space-y-2">
-          <label
-            for="space-name"
-            class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+      <section class="space-y-6 rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
+        <div class="space-y-1">
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
           >
-            Create New Space
-          </label>
-          <div class="flex gap-3">
-            <input
-              id="space-name"
-              type="text"
-              .value=${this.newSpaceName}
-              @input=${(e: InputEvent) =>
-                (this.newSpaceName = (e.target as HTMLInputElement).value)}
-              placeholder="Space name"
-              class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              ?disabled=${this.isCreatingSpace}
-            />
-            <button
-              type="submit"
-              ?disabled=${this.isCreatingSpace || !this.newSpaceName.trim()}
-              class="rounded-full bg-emerald-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ${this.isCreatingSpace ? 'Creating...' : 'Create'}
-            </button>
-          </div>
-        </div>
-
-        ${this.errorMessage
-          ? html`
-              <div
-                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-              >
-                ${this.errorMessage}
-              </div>
-            `
-          : null}
-      </form>
-    `;
-  }
-
-  private renderSpacesList() {
-    if (this.spaces.length === 0) {
-      return html`
-        <div
-          class="rounded-2xl border border-dashed border-slate-700 bg-slate-950/60 p-8 text-center"
-        >
+            Spaces (${this.spaces.length})
+          </p>
           <p class="text-sm text-slate-400">
-            No spaces yet. Create one to get started.
+            Create and manage spaces from one place.
           </p>
         </div>
-      `;
-    }
 
-    return html`
-      <div class="space-y-4">
-        <p
-          class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-        >
-          Spaces (${this.spaces.length})
-        </p>
-        <div class="space-y-3">
-          ${this.spaces.map((space) => this.renderSpaceCard(space))}
-        </div>
-      </div>
+        <form @submit=${this.handleCreateSpace} class="space-y-4">
+          <div class="space-y-2">
+            <label
+              for="space-name"
+              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            >
+              Create New Space
+            </label>
+            <div class="flex gap-3">
+              <input
+                id="space-name"
+                type="text"
+                .value=${this.newSpaceName}
+                @input=${(e: InputEvent) =>
+                  (this.newSpaceName = (e.target as HTMLInputElement).value)}
+                placeholder="Space name"
+                class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+                ?disabled=${this.isCreatingSpace}
+              />
+              <button
+                type="submit"
+                ?disabled=${this.isCreatingSpace || !this.newSpaceName.trim()}
+                class="rounded-full bg-emerald-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ${this.isCreatingSpace ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+
+          ${this.errorMessage
+            ? html`
+                <div
+                  class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+                >
+                  ${this.errorMessage}
+                </div>
+              `
+            : null}
+        </form>
+
+        ${this.spaces.length === 0
+          ? html`
+              <div
+                class="rounded-2xl border border-dashed border-slate-700 bg-slate-950/60 p-8 text-center"
+              >
+                <p class="text-sm text-slate-400">
+                  No spaces yet. Create one to get started.
+                </p>
+              </div>
+            `
+          : html`
+              <div class="space-y-3">
+                ${this.spaces.map((space) => this.renderSpaceCard(space))}
+              </div>
+            `}
+      </section>
     `;
   }
 
