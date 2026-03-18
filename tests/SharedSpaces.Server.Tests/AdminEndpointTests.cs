@@ -134,6 +134,62 @@ public class AdminEndpointTests
         space!.Name.Should().Be("My Space");
     }
 
+    // ========== Space Listing Tests ==========
+
+    [Fact]
+    public async Task ListSpaces_WithValidSecret_ReturnsAllSpaces()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var baseline = DateTime.UtcNow;
+        var firstSpace = new Space { Id = Guid.NewGuid(), Name = "First Space", CreatedAt = baseline.AddMinutes(-2) };
+        var secondSpace = new Space { Id = Guid.NewGuid(), Name = "Second Space", CreatedAt = baseline.AddMinutes(-1) };
+        var thirdSpace = new Space { Id = Guid.NewGuid(), Name = "Third Space", CreatedAt = baseline };
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.Spaces.AddRange(firstSpace, secondSpace, thirdSpace);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await ListSpacesAsync(client, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var spaces = await ReadJsonAsync<SpaceResponse[]>(response);
+        spaces.Should().NotBeNull();
+        var actualSpaces = spaces!;
+        actualSpaces.Should().HaveCount(3);
+        actualSpaces.Should().OnlyContain(space => space.CreatedAt != default);
+        actualSpaces.Select(space => space.Id).Should().Equal(thirdSpace.Id, secondSpace.Id, firstSpace.Id);
+        actualSpaces.Select(space => space.Name).Should().Equal("Third Space", "Second Space", "First Space");
+    }
+
+    [Fact]
+    public async Task ListSpaces_WithInvalidSecret_Returns401()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await ListSpacesAsync(client, "wrong-secret");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ListSpaces_WhenEmpty_ReturnsEmptyArray()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await ListSpacesAsync(client, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var spaces = await ReadJsonAsync<SpaceResponse[]>(response);
+        spaces.Should().NotBeNull();
+        spaces!.Should().BeEmpty();
+    }
+
     // ========== Invitation Generation Tests ==========
 
     [Fact]
@@ -163,7 +219,7 @@ public class AdminEndpointTests
     }
 
     [Fact]
-    public async Task CreateInvitation_WithCustomClientAppUrl_UsesCustomUrlInQrCode()
+    public async Task CreateInvitation_WithCustomClientAppUrl_ReturnsInvitationStringAndQrCode()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -180,7 +236,12 @@ public class AdminEndpointTests
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
         invitation.Should().NotBeNull();
         invitation!.QrCodeBase64.Should().NotBeNullOrWhiteSpace();
-        invitation.InvitationString.Should().Contain(TestWebApplicationFactory.ServerUrl);
+
+        var parts = invitation.InvitationString.Split('|');
+        parts.Should().HaveCount(3);
+        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl);
+        parts[1].Should().Be(space.Id.ToString());
+        parts[2].Should().MatchRegex(@"^\d{6}$");
     }
 
     [Fact]
@@ -384,6 +445,19 @@ public class AdminEndpointTests
             request.Headers.Add("X-Admin-Secret", adminSecret);
         }
         request.Content = JsonContent.Create(new CreateInvitationRequest(clientAppUrl));
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> ListSpacesAsync(
+        HttpClient client,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/v1/spaces");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
         return await client.SendAsync(request);
     }
 

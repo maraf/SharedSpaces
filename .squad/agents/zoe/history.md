@@ -76,6 +76,7 @@ Server structure now available to Zoe; test project can reference production ent
 - Admin endpoint tests (`AdminEndpointTests.cs`) verify POST /v1/spaces and POST /v1/spaces/{spaceId}/invitations with comprehensive auth failure, validation edge cases, and happy path coverage; all admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header validation.
 - Admin invitation generation creates 6-digit PINs, hashes them for storage, and returns both invitation string (server_url|space_id|pin format) and base64 PNG QR code; tests verify QR code PNG signature (0x89504E47) and PIN uniqueness across multiple invitations.
 - TestWebApplicationFactory requires `Microsoft.EntityFrameworkCore.Infrastructure` using statement to access `IDbContextOptionsConfiguration<>` for proper DbContext service removal during test setup.
+- `GET /v1/spaces` is an admin-protected endpoint that returns all spaces as the shared `SpaceResponse` shape ordered by `CreatedAt` descending; integration tests should cover empty-state, auth failure, and newest-first listing.
 
 ## Team Updates (2026-03-17)
 
