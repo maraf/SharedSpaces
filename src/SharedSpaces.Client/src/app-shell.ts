@@ -24,6 +24,10 @@ export class AppShell extends BaseElement {
     this.view = event.detail.view;
   };
 
+  private handleBackToJoin = () => {
+    this.view = 'join';
+  };
+
   override render() {
     return html`
       <div
@@ -36,6 +40,17 @@ export class AppShell extends BaseElement {
             class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
           >
             <div>
+              ${this.view !== 'join'
+                ? html`
+                    <button
+                      type="button"
+                      @click=${this.handleBackToJoin}
+                      class="mb-3 inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                    >
+                      ← Back to join
+                    </button>
+                  `
+                : null}
               <p
                 class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300"
               >

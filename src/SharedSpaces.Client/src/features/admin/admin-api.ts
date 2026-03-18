@@ -19,13 +19,24 @@ export class AdminApiError extends Error {
   }
 }
 
+type BadRequestResponse = {
+  Error?: string;
+  message?: string;
+};
+
+async function readBadRequestMessage(response: Response) {
+  const error = (await response.json().catch(() => ({}))) as BadRequestResponse;
+  return error.Error || error.message || 'Bad request';
+}
+
 export async function createSpace(
   apiBaseUrl: string,
   adminSecret: string,
   name: string,
 ): Promise<SpaceResponse> {
   try {
-    const response = await fetch(`${apiBaseUrl}/v1/spaces`, {
+    const base = apiBaseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/v1/spaces`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -39,8 +50,7 @@ export async function createSpace(
         throw new AdminApiError('Invalid admin secret', 401);
       }
       if (response.status === 400) {
-        const error = await response.json().catch(() => ({ message: 'Bad request' }));
-        throw new AdminApiError(error.message || 'Invalid space name', 400);
+        throw new AdminApiError(await readBadRequestMessage(response), 400);
       }
       throw new AdminApiError(`Server error: ${response.statusText}`, response.status);
     }
@@ -61,7 +71,8 @@ export async function createInvitation(
   clientAppUrl?: string,
 ): Promise<InvitationResponse> {
   try {
-    const response = await fetch(`${apiBaseUrl}/v1/spaces/${spaceId}/invitations`, {
+    const base = apiBaseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${base}/v1/spaces/${spaceId}/invitations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -78,8 +89,7 @@ export async function createInvitation(
         throw new AdminApiError('Space not found', 404);
       }
       if (response.status === 400) {
-        const error = await response.json().catch(() => ({ message: 'Bad request' }));
-        throw new AdminApiError(error.message || 'Invalid request', 400);
+        throw new AdminApiError(await readBadRequestMessage(response), 400);
       }
       throw new AdminApiError(`Server error: ${response.statusText}`, response.status);
     }

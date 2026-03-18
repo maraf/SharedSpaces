@@ -15,6 +15,13 @@ const ADMIN_SECRET_KEY = 'sharedspaces.admin-secret';
 const ADMIN_SERVER_URL_KEY = 'sharedspaces.admin-server-url';
 const SPACES_CACHE_KEY = 'sharedspaces.admin-spaces';
 
+type InvitationFormState = {
+  isGenerating: boolean;
+  clientAppUrl: string;
+  invitation: InvitationResponse | null;
+  error: string;
+};
+
 @customElement('admin-view')
 export class AdminView extends BaseElement {
   @property({ type: String, attribute: 'api-base-url' })
@@ -29,15 +36,7 @@ export class AdminView extends BaseElement {
   @state() private isCreatingSpace = false;
   @state() private errorMessage = '';
 
-  @state() private invitationFormState: Record<
-    string,
-    {
-      isGenerating: boolean;
-      clientAppUrl: string;
-      invitation: InvitationResponse | null;
-      error: string;
-    }
-  > = {};
+  @state() private invitationFormState: Record<string, InvitationFormState> = {};
 
   override connectedCallback() {
     super.connectedCallback();
@@ -54,6 +53,56 @@ export class AdminView extends BaseElement {
 
   private getDefaultServerUrl() {
     return this.normalizeServerUrl(this.apiBaseUrl) || '/';
+  }
+
+  private createInvitationState(): InvitationFormState {
+    return {
+      isGenerating: false,
+      clientAppUrl: window.location.origin,
+      invitation: null,
+      error: '',
+    };
+  }
+
+  private setSpaces(spaces: SpaceResponse[]) {
+    this.spaces = spaces;
+    this.invitationFormState = Object.fromEntries(
+      spaces.map((space) => [
+        space.id,
+        this.invitationFormState[space.id] ?? this.createInvitationState(),
+      ]),
+    ) as Record<string, InvitationFormState>;
+  }
+
+  private ensureInvitationState(spaceId: string) {
+    if (this.invitationFormState[spaceId]) {
+      return this.invitationFormState[spaceId];
+    }
+
+    const nextState = {
+      ...this.invitationFormState,
+      [spaceId]: this.createInvitationState(),
+    };
+
+    this.invitationFormState = nextState;
+    return nextState[spaceId];
+  }
+
+  private updateInvitationState(
+    spaceId: string,
+    updates: Partial<InvitationFormState>,
+  ) {
+    const current = this.invitationFormState[spaceId] ?? this.createInvitationState();
+    const nextState = {
+      ...this.invitationFormState,
+      [spaceId]: {
+        ...current,
+        ...updates,
+      },
+    };
+
+    this.invitationFormState = nextState;
+    return nextState[spaceId];
   }
 
   private loadAdminSession() {
@@ -76,20 +125,20 @@ export class AdminView extends BaseElement {
   private loadSpaces(serverUrl = this.adminServerUrl ?? this.serverUrlInput) {
     const normalizedServerUrl = this.normalizeServerUrl(serverUrl);
     if (!normalizedServerUrl) {
-      this.spaces = [];
+      this.setSpaces([]);
       return;
     }
 
     try {
       const cached = localStorage.getItem(SPACES_CACHE_KEY);
       if (!cached) {
-        this.spaces = [];
+        this.setSpaces([]);
         return;
       }
 
       const parsed: unknown = JSON.parse(cached);
       if (Array.isArray(parsed)) {
-        this.spaces = parsed;
+        this.setSpaces(parsed);
         localStorage.setItem(
           SPACES_CACHE_KEY,
           JSON.stringify({ [normalizedServerUrl]: parsed }),
@@ -98,15 +147,16 @@ export class AdminView extends BaseElement {
       }
 
       if (parsed && typeof parsed === 'object') {
-        this.spaces =
-          (parsed as Record<string, SpaceResponse[]>)[normalizedServerUrl] ?? [];
+        this.setSpaces(
+          (parsed as Record<string, SpaceResponse[]>)[normalizedServerUrl] ?? [],
+        );
         return;
       }
     } catch {
       // Ignore malformed cache and reset below.
     }
 
-    this.spaces = [];
+    this.setSpaces([]);
   }
 
   private saveSpaces() {
@@ -171,7 +221,7 @@ export class AdminView extends BaseElement {
         this.adminSecret,
         this.newSpaceName,
       );
-      this.spaces = [space, ...this.spaces];
+      this.setSpaces([space, ...this.spaces]);
       this.saveSpaces();
       this.newSpaceName = '';
     } catch (error) {
@@ -188,24 +238,14 @@ export class AdminView extends BaseElement {
   };
 
   private getInvitationState(spaceId: string) {
-    if (!this.invitationFormState[spaceId]) {
-      this.invitationFormState[spaceId] = {
-        isGenerating: false,
-        clientAppUrl: window.location.origin,
-        invitation: null,
-        error: '',
-      };
-    }
-    return this.invitationFormState[spaceId];
+    return this.invitationFormState[spaceId] ?? this.createInvitationState();
   }
 
   private handleGenerateInvitation = async (spaceId: string) => {
     if (!this.adminSecret || !this.adminServerUrl) return;
 
-    const state = this.getInvitationState(spaceId);
-    state.isGenerating = true;
-    state.error = '';
-    this.requestUpdate();
+    const state = this.ensureInvitationState(spaceId);
+    this.updateInvitationState(spaceId, { isGenerating: true, error: '' });
 
     try {
       const invitation = await createInvitation(
@@ -214,18 +254,22 @@ export class AdminView extends BaseElement {
         spaceId,
         state.clientAppUrl.trim() || undefined,
       );
-      state.invitation = invitation;
+      this.updateInvitationState(spaceId, {
+        invitation,
+        error: '',
+        isGenerating: false,
+      });
     } catch (error) {
       if (error instanceof AdminApiError && error.status === 401) {
         this.handleLogout();
         this.errorMessage = 'Invalid admin secret. Please re-enter.';
         return;
       }
-      state.error =
-        error instanceof Error ? error.message : 'Failed to generate invitation';
-    } finally {
-      state.isGenerating = false;
-      this.requestUpdate();
+      this.updateInvitationState(spaceId, {
+        error:
+          error instanceof Error ? error.message : 'Failed to generate invitation',
+        isGenerating: false,
+      });
     }
   };
 
@@ -450,10 +494,10 @@ export class AdminView extends BaseElement {
             <input
               type="url"
               .value=${state.clientAppUrl}
-              @input=${(e: InputEvent) => {
-                state.clientAppUrl = (e.target as HTMLInputElement).value;
-                this.requestUpdate();
-              }}
+              @input=${(e: InputEvent) =>
+                this.updateInvitationState(space.id, {
+                  clientAppUrl: (e.target as HTMLInputElement).value,
+                })}
               placeholder="Client app URL (optional)"
               class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
               ?disabled=${state.isGenerating}
