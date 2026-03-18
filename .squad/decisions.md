@@ -747,9 +747,9 @@ Issue #27 required building an admin panel UI for space and invitation managemen
 - **Rationale:** Ephemeral state avoids leaving admin credentials in the browser and ensures the session resets on page refresh. The dedicated GET /v1/spaces admin endpoint provides secure, non-destructive credential validation without side effects.
 
 ##### 2. Space Caching Strategy
-- **Pattern:** Cache created spaces in localStorage under `sharedspaces.admin-spaces` key
-- **Rationale:** Server doesn't provide a GET /spaces endpoint, so we cache locally as spaces are created. This is admin-only data, so local persistence is acceptable.
-- **Limitation:** Spaces created in other sessions/browsers won't appear until they're re-created in this session.
+- **Pattern:** Spaces are fetched on login via `GET /v1/spaces` and stored in ephemeral in-memory state only.
+- **Rationale:** Since ephemeral credentials are validated by calling GET /v1/spaces, the response doubles as the source of truth. No localStorage persistence needed—consistent with the ephemeral auth design.
+- **Benefit:** Spaces are always current per session, no stale cache issues across browser tabs or sessions.
 
 ##### 3. Per-Space Invitation State Management
 - **Pattern:** Store invitation generation state in a Record<spaceId, InvitationState> component property
