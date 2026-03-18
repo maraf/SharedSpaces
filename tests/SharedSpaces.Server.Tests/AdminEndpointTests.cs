@@ -465,6 +465,19 @@ public class AdminEndpointTests
     }
 
     [Fact]
+    public async Task ListMembers_WithWrongAdminSecret_Returns401()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+
+        var response = await ListMembersAsync(client, space.Id, "wrong-secret");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task RevokeMember_WithValidSecret_Returns204AndRevokesMember()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -569,6 +582,19 @@ public class AdminEndpointTests
         var error = await ReadJsonAsync<ErrorResponse>(response);
         error.Should().NotBeNull();
         error!.Error.Should().Contain("Space not found");
+    }
+
+    [Fact]
+    public async Task ListInvitations_WithWrongAdminSecret_Returns401()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+
+        var response = await ListInvitationsAsync(client, space.Id, "wrong-secret");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

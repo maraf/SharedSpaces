@@ -93,6 +93,7 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - The file-based AppHost uses `Aspire.AppHost.Sdk@13.0.2`, `Aspire.Hosting.NodeJs@9.5.2`, and a `#:project` directive to `src/SharedSpaces.Server/SharedSpaces.Server.csproj`.
 - The Vite client is registered from `./SharedSpaces.Client` with `AddNpmApp("client", "./SharedSpaces.Client", "dev")`, waits for the server, wires `Server__DefaultClientAppUrl`, and should be started with `dotnet run src/AppHost.cs`.
 - Admin space management lives in `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`, where both `POST /v1/spaces` and `GET /v1/spaces` use `AdminAuthenticationFilter`, and listing returns `SpaceResponse` ordered newest-first for admin space selection.
+- Admin space management now also covers `/v1/spaces/{spaceId}/members` and `/v1/spaces/{spaceId}/invitations`: member listings return `MemberResponse` newest-first, revocation is idempotent via `POST .../members/{memberId}/revoke`, and invitation listings/deletes never expose hashed PIN values.
 
 ## Team Updates (2026-03-17 Continued)
 
