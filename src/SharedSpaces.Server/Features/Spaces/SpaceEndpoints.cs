@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -10,10 +11,24 @@ public static class SpaceEndpoints
     {
         var group = app.MapGroup("/v1/spaces");
 
+        group.MapGet("/", GetSpaces)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
         group.MapPost("/", CreateSpace)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
         return app;
+    }
+
+    private static async Task<IResult> GetSpaces(AppDbContext db)
+    {
+        var response = await db.Spaces
+            .AsNoTracking()
+            .OrderByDescending(space => space.CreatedAt)
+            .Select(space => new SpaceResponse(space.Id, space.Name, space.CreatedAt))
+            .ToListAsync();
+
+        return Results.Ok(response);
     }
 
     private static async Task<IResult> CreateSpace(
