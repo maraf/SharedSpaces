@@ -7,16 +7,30 @@ import {
   AdminApiError,
   createInvitation,
   createSpace,
+  deleteInvitation,
+  listInvitations,
+  listMembers,
   listSpaces,
+  revokeMember,
+  type InvitationListResponse,
   type InvitationResponse,
+  type MemberResponse,
   type SpaceResponse,
 } from './admin-api';
 
-type InvitationFormState = {
-  isGenerating: boolean;
+type SpaceCardState = {
   clientAppUrl: string;
-  invitation: InvitationResponse | null;
-  error: string;
+  generatedInvitation: InvitationResponse | null;
+  invitationGenerationError: string;
+  invitations: InvitationListResponse[];
+  invitationsError: string;
+  isGeneratingInvitation: boolean;
+  isLoadingInvitations: boolean;
+  isLoadingMembers: boolean;
+  members: MemberResponse[];
+  membersError: string;
+  pendingInvitationDeletions: Record<string, boolean>;
+  pendingMemberRevocations: Record<string, boolean>;
 };
 
 @customElement('admin-view')
@@ -34,11 +48,7 @@ export class AdminView extends BaseElement {
   @state() private isConnecting = false;
   @state() private errorMessage = '';
 
-  @state() private invitationFormState: Record<string, InvitationFormState> = {};
-
-  override connectedCallback() {
-    super.connectedCallback();
-  }
+  @state() private spaceCardState: Record<string, SpaceCardState> = {};
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     if (
@@ -61,54 +71,174 @@ export class AdminView extends BaseElement {
     return this.normalizeServerUrl(this.apiBaseUrl) || '/';
   }
 
-  private createInvitationState(): InvitationFormState {
+  private formatDate(value: string) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
+  }
+
+  private createSpaceCardState(): SpaceCardState {
     return {
-      isGenerating: false,
       clientAppUrl: window.location.origin,
-      invitation: null,
-      error: '',
+      generatedInvitation: null,
+      invitationGenerationError: '',
+      invitations: [],
+      invitationsError: '',
+      isGeneratingInvitation: false,
+      isLoadingInvitations: false,
+      isLoadingMembers: false,
+      members: [],
+      membersError: '',
+      pendingInvitationDeletions: {},
+      pendingMemberRevocations: {},
     };
   }
 
   private setSpaces(spaces: SpaceResponse[]) {
     this.spaces = spaces;
-    this.invitationFormState = Object.fromEntries(
+    this.spaceCardState = Object.fromEntries(
       spaces.map((space) => [
         space.id,
-        this.invitationFormState[space.id] ?? this.createInvitationState(),
+        this.spaceCardState[space.id] ?? this.createSpaceCardState(),
       ]),
-    ) as Record<string, InvitationFormState>;
+    ) as Record<string, SpaceCardState>;
   }
 
-  private ensureInvitationState(spaceId: string) {
-    if (this.invitationFormState[spaceId]) {
-      return this.invitationFormState[spaceId];
-    }
-
-    const nextState = {
-      ...this.invitationFormState,
-      [spaceId]: this.createInvitationState(),
-    };
-
-    this.invitationFormState = nextState;
-    return nextState[spaceId];
+  private getSpaceCardState(spaceId: string) {
+    return this.spaceCardState[spaceId] ?? this.createSpaceCardState();
   }
 
-  private updateInvitationState(
+  private updateSpaceCardState(
     spaceId: string,
-    updates: Partial<InvitationFormState>,
+    updates: Partial<SpaceCardState>,
   ) {
-    const current = this.invitationFormState[spaceId] ?? this.createInvitationState();
+    const current = this.getSpaceCardState(spaceId);
     const nextState = {
-      ...this.invitationFormState,
+      ...this.spaceCardState,
       [spaceId]: {
         ...current,
         ...updates,
       },
     };
 
-    this.invitationFormState = nextState;
+    this.spaceCardState = nextState;
     return nextState[spaceId];
+  }
+
+  private getPendingState(record: Record<string, boolean>, key: string, isPending: boolean) {
+    if (isPending) {
+      return { ...record, [key]: true };
+    }
+
+    const nextState = { ...record };
+    delete nextState[key];
+    return nextState;
+  }
+
+  private isCurrentSession(serverUrl: string, adminSecret: string) {
+    return this.adminServerUrl === serverUrl && this.adminSecret === adminSecret;
+  }
+
+  private isUnauthorizedError(error: unknown) {
+    return error instanceof AdminApiError && error.status === 401;
+  }
+
+  private handleUnauthorized() {
+    this.handleLogout();
+    this.errorMessage = 'Invalid admin secret. Please re-enter.';
+  }
+
+  private async loadSpaceCollectionsForAll(
+    spaces: SpaceResponse[],
+    serverUrl: string,
+    adminSecret: string,
+  ) {
+    await Promise.all(
+      spaces.map((space) =>
+        this.loadSpaceCollections(space.id, serverUrl, adminSecret),
+      ),
+    );
+  }
+
+  private async loadSpaceCollections(
+    spaceId: string,
+    serverUrl: string,
+    adminSecret: string,
+    options: { invitations?: boolean; members?: boolean } = {},
+  ) {
+    if (!this.isCurrentSession(serverUrl, adminSecret)) {
+      return;
+    }
+
+    const shouldLoadMembers = options.members ?? true;
+    const shouldLoadInvitations = options.invitations ?? true;
+    const currentState = this.getSpaceCardState(spaceId);
+
+    this.updateSpaceCardState(spaceId, {
+      ...(shouldLoadMembers
+        ? {
+            isLoadingMembers: true,
+            membersError: '',
+          }
+        : {}),
+      ...(shouldLoadInvitations
+        ? {
+            invitationsError: '',
+            isLoadingInvitations: true,
+          }
+        : {}),
+    });
+
+    const [membersResult, invitationsResult] = await Promise.allSettled([
+      shouldLoadMembers
+        ? listMembers(serverUrl, adminSecret, spaceId)
+        : Promise.resolve(currentState.members),
+      shouldLoadInvitations
+        ? listInvitations(serverUrl, adminSecret, spaceId)
+        : Promise.resolve(currentState.invitations),
+    ]);
+
+    if (!this.isCurrentSession(serverUrl, adminSecret)) {
+      return;
+    }
+
+    const errors = [membersResult, invitationsResult]
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason);
+
+    if (errors.some((error) => this.isUnauthorizedError(error))) {
+      this.handleUnauthorized();
+      return;
+    }
+
+    const nextState: Partial<SpaceCardState> = {};
+
+    if (shouldLoadMembers) {
+      nextState.isLoadingMembers = false;
+      if (membersResult.status === 'fulfilled') {
+        nextState.members = membersResult.value;
+        nextState.membersError = '';
+      } else {
+        nextState.membersError =
+          membersResult.reason instanceof Error
+            ? membersResult.reason.message
+            : 'Failed to load members';
+      }
+    }
+
+    if (shouldLoadInvitations) {
+      nextState.isLoadingInvitations = false;
+      if (invitationsResult.status === 'fulfilled') {
+        nextState.invitations = invitationsResult.value;
+        nextState.invitationsError = '';
+      } else {
+        nextState.invitationsError =
+          invitationsResult.reason instanceof Error
+            ? invitationsResult.reason.message
+            : 'Failed to load invitations';
+      }
+    }
+
+    this.updateSpaceCardState(spaceId, nextState);
   }
 
   private handleSecretSubmit = async (e: Event) => {
@@ -127,11 +257,12 @@ export class AdminView extends BaseElement {
       this.serverUrlInput = serverUrl;
       this.setSpaces(spaces);
       this.errorMessage = '';
+      void this.loadSpaceCollectionsForAll(spaces, serverUrl, secret);
     } catch (error) {
       this.adminSecret = null;
       this.adminServerUrl = null;
       this.setSpaces([]);
-      this.invitationFormState = {};
+      this.spaceCardState = {};
       this.errorMessage =
         error instanceof Error ? error.message : 'Failed to connect to server';
     } finally {
@@ -148,7 +279,7 @@ export class AdminView extends BaseElement {
     this.serverUrlInput = nextServerUrl;
     this.spaces = [];
     this.newSpaceName = '';
-    this.invitationFormState = {};
+    this.spaceCardState = {};
     this.errorMessage = '';
   };
 
@@ -158,21 +289,25 @@ export class AdminView extends BaseElement {
       return;
     }
 
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+
     this.isCreatingSpace = true;
     this.errorMessage = '';
 
     try {
-      const space = await createSpace(
-        this.adminServerUrl,
-        this.adminSecret,
-        this.newSpaceName,
-      );
+      const space = await createSpace(serverUrl, adminSecret, this.newSpaceName);
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
       this.setSpaces([space, ...this.spaces]);
       this.newSpaceName = '';
+      void this.loadSpaceCollections(space.id, serverUrl, adminSecret);
     } catch (error) {
-      if (error instanceof AdminApiError && error.status === 401) {
-        this.handleLogout();
-        this.errorMessage = 'Invalid admin secret. Please re-enter.';
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
         return;
       }
       this.errorMessage =
@@ -182,38 +317,170 @@ export class AdminView extends BaseElement {
     }
   };
 
-  private getInvitationState(spaceId: string) {
-    return this.invitationFormState[spaceId] ?? this.createInvitationState();
-  }
-
   private handleGenerateInvitation = async (spaceId: string) => {
     if (!this.adminSecret || !this.adminServerUrl) return;
 
-    const state = this.ensureInvitationState(spaceId);
-    this.updateInvitationState(spaceId, { isGenerating: true, error: '' });
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const state = this.getSpaceCardState(spaceId);
+
+    this.updateSpaceCardState(spaceId, {
+      invitationGenerationError: '',
+      isGeneratingInvitation: true,
+    });
 
     try {
       const invitation = await createInvitation(
-        this.adminServerUrl,
-        this.adminSecret,
+        serverUrl,
+        adminSecret,
         spaceId,
         state.clientAppUrl.trim() || undefined,
       );
-      this.updateInvitationState(spaceId, {
-        invitation,
-        error: '',
-        isGenerating: false,
-      });
-    } catch (error) {
-      if (error instanceof AdminApiError && error.status === 401) {
-        this.handleLogout();
-        this.errorMessage = 'Invalid admin secret. Please re-enter.';
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
         return;
       }
-      this.updateInvitationState(spaceId, {
-        error:
+
+      this.updateSpaceCardState(spaceId, {
+        generatedInvitation: invitation,
+        invitationGenerationError: '',
+        isGeneratingInvitation: false,
+      });
+      void this.loadSpaceCollections(spaceId, serverUrl, adminSecret, {
+        invitations: true,
+        members: false,
+      });
+    } catch (error) {
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
+        return;
+      }
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      this.updateSpaceCardState(spaceId, {
+        invitationGenerationError:
           error instanceof Error ? error.message : 'Failed to generate invitation',
-        isGenerating: false,
+        isGeneratingInvitation: false,
+      });
+    }
+  };
+
+  private handleRevokeMember = async (spaceId: string, memberId: string) => {
+    if (!this.adminSecret || !this.adminServerUrl) return;
+
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const currentState = this.getSpaceCardState(spaceId);
+
+    this.updateSpaceCardState(spaceId, {
+      membersError: '',
+      pendingMemberRevocations: this.getPendingState(
+        currentState.pendingMemberRevocations,
+        memberId,
+        true,
+      ),
+    });
+
+    try {
+      await revokeMember(serverUrl, adminSecret, spaceId, memberId);
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        members: latestState.members.map((member) =>
+          member.id === memberId ? { ...member, isRevoked: true } : member,
+        ),
+        pendingMemberRevocations: this.getPendingState(
+          latestState.pendingMemberRevocations,
+          memberId,
+          false,
+        ),
+      });
+    } catch (error) {
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
+        return;
+      }
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        membersError:
+          error instanceof Error ? error.message : 'Failed to revoke member',
+        pendingMemberRevocations: this.getPendingState(
+          latestState.pendingMemberRevocations,
+          memberId,
+          false,
+        ),
+      });
+    }
+  };
+
+  private handleDeleteInvitation = async (
+    spaceId: string,
+    invitationId: string,
+  ) => {
+    if (!this.adminSecret || !this.adminServerUrl) return;
+
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const currentState = this.getSpaceCardState(spaceId);
+
+    this.updateSpaceCardState(spaceId, {
+      invitationsError: '',
+      pendingInvitationDeletions: this.getPendingState(
+        currentState.pendingInvitationDeletions,
+        invitationId,
+        true,
+      ),
+    });
+
+    try {
+      await deleteInvitation(serverUrl, adminSecret, spaceId, invitationId);
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        invitations: latestState.invitations.filter(
+          (invitation) => invitation.id !== invitationId,
+        ),
+        pendingInvitationDeletions: this.getPendingState(
+          latestState.pendingInvitationDeletions,
+          invitationId,
+          false,
+        ),
+      });
+    } catch (error) {
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
+        return;
+      }
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        invitationsError:
+          error instanceof Error ? error.message : 'Failed to delete invitation',
+        pendingInvitationDeletions: this.getPendingState(
+          latestState.pendingInvitationDeletions,
+          invitationId,
+          false,
+        ),
       });
     }
   };
@@ -236,7 +503,7 @@ export class AdminView extends BaseElement {
     return html`
       <view-card
         headline="Admin Panel"
-        supporting-text="Manage spaces and generate invitation links"
+        supporting-text="Manage spaces, members, and pending invitations"
         .body=${body}
       ></view-card>
     `;
@@ -329,6 +596,7 @@ export class AdminView extends BaseElement {
           <p class="break-all text-sm text-slate-50">${this.adminServerUrl}</p>
         </div>
         <button
+          type="button"
           @click=${this.handleLogout}
           class="rounded-full border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
         >
@@ -412,18 +680,18 @@ export class AdminView extends BaseElement {
   }
 
   private renderSpaceCard(space: SpaceResponse) {
-    const state = this.getInvitationState(space.id);
+    const state = this.getSpaceCardState(space.id);
 
     return html`
       <div
-        class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-4"
+        class="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"
       >
         <div class="flex items-start justify-between">
           <div class="flex-1">
             <h3 class="text-lg font-semibold text-white">${space.name}</h3>
-            <p class="mt-1 text-xs text-slate-400 font-mono">${space.id}</p>
+            <p class="mt-1 font-mono text-xs text-slate-400">${space.id}</p>
             <p class="mt-1 text-xs text-slate-500">
-              Created ${new Date(space.createdAt).toLocaleString()}
+              Created ${this.formatDate(space.createdAt)}
             </p>
           </div>
         </div>
@@ -440,41 +708,209 @@ export class AdminView extends BaseElement {
               type="url"
               .value=${state.clientAppUrl}
               @input=${(e: InputEvent) =>
-                this.updateInvitationState(space.id, {
+                this.updateSpaceCardState(space.id, {
                   clientAppUrl: (e.target as HTMLInputElement).value,
                 })}
               placeholder="Client app URL (optional)"
               class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              ?disabled=${state.isGenerating}
+              ?disabled=${state.isGeneratingInvitation}
             />
             <button
+              type="button"
               @click=${() => this.handleGenerateInvitation(space.id)}
-              ?disabled=${state.isGenerating}
+              ?disabled=${state.isGeneratingInvitation}
               class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              ${state.isGenerating ? 'Generating...' : 'Generate'}
+              ${state.isGeneratingInvitation ? 'Generating...' : 'Generate'}
             </button>
           </div>
 
-          ${state.error
+          ${state.invitationGenerationError
             ? html`
                 <div
                   class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
                 >
-                  ${state.error}
+                  ${state.invitationGenerationError}
                 </div>
               `
             : null}
-          ${state.invitation ? this.renderInvitation(state.invitation) : null}
+          ${state.generatedInvitation
+            ? this.renderGeneratedInvitation(state.generatedInvitation)
+            : null}
         </div>
+
+        ${this.renderMembersSection(space.id, state)}
+        ${this.renderInvitationsSection(space.id, state)}
       </div>
     `;
   }
 
-  private renderInvitation(invitation: InvitationResponse) {
+  private renderMembersSection(spaceId: string, state: SpaceCardState) {
+    return html`
+      <section
+        class="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+          >
+            Members (${state.members.length})
+          </p>
+          ${state.isLoadingMembers
+            ? html`<span class="text-xs text-slate-500">Loading...</span>`
+            : null}
+        </div>
+
+        ${state.membersError
+          ? html`
+              <div
+                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+              >
+                ${state.membersError}
+              </div>
+            `
+          : null}
+
+        ${state.members.length === 0 && !state.isLoadingMembers && !state.membersError
+          ? html`
+              <div
+                class="rounded-lg border border-dashed border-slate-800 bg-slate-950/60 px-4 py-5 text-sm text-slate-400"
+              >
+                No members yet.
+              </div>
+            `
+          : html`
+              <div class="space-y-3">
+                ${state.members.map((member) => {
+                  const isPending = !!state.pendingMemberRevocations[member.id];
+                  return html`
+                    <div
+                      class="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div class="space-y-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <p
+                            class=${member.isRevoked
+                              ? 'text-sm font-medium text-slate-500 line-through'
+                              : 'text-sm font-medium text-slate-100'}
+                          >
+                            ${member.displayName}
+                          </p>
+                          ${member.isRevoked
+                            ? html`
+                                <span
+                                  class="rounded-full border border-rose-800 bg-rose-950/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200"
+                                >
+                                  Revoked
+                                </span>
+                              `
+                            : null}
+                        </div>
+                        <p
+                          class=${member.isRevoked
+                            ? 'text-xs text-slate-500'
+                            : 'text-xs text-slate-400'}
+                        >
+                          Joined ${this.formatDate(member.joinedAt)}
+                        </p>
+                      </div>
+
+                      ${member.isRevoked
+                        ? null
+                        : html`
+                            <button
+                              type="button"
+                              @click=${() => this.handleRevokeMember(spaceId, member.id)}
+                              ?disabled=${isPending}
+                              class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              ${isPending ? 'Revoking...' : 'Revoke'}
+                            </button>
+                          `}
+                    </div>
+                  `;
+                })}
+              </div>
+            `}
+      </section>
+    `;
+  }
+
+  private renderInvitationsSection(spaceId: string, state: SpaceCardState) {
+    return html`
+      <section
+        class="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+          >
+            Pending Invitations (${state.invitations.length})
+          </p>
+          ${state.isLoadingInvitations
+            ? html`<span class="text-xs text-slate-500">Loading...</span>`
+            : null}
+        </div>
+
+        ${state.invitationsError
+          ? html`
+              <div
+                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+              >
+                ${state.invitationsError}
+              </div>
+            `
+          : null}
+
+        ${state.invitations.length === 0 &&
+        !state.isLoadingInvitations &&
+        !state.invitationsError
+          ? html`
+              <div
+                class="rounded-lg border border-dashed border-slate-800 bg-slate-950/60 px-4 py-5 text-sm text-slate-400"
+              >
+                No pending invitations
+              </div>
+            `
+          : html`
+              <div class="space-y-3">
+                ${state.invitations.map((invitation) => {
+                  const isPending =
+                    !!state.pendingInvitationDeletions[invitation.id];
+                  return html`
+                    <div
+                      class="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div class="space-y-1">
+                        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                          Invitation ID
+                        </p>
+                        <p class="break-all font-mono text-sm text-slate-100">
+                          ${invitation.id}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        @click=${() =>
+                          this.handleDeleteInvitation(spaceId, invitation.id)}
+                        ?disabled=${isPending}
+                        class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        ${isPending ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
+                  `;
+                })}
+              </div>
+            `}
+      </section>
+    `;
+  }
+
+  private renderGeneratedInvitation(invitation: InvitationResponse) {
     return html`
       <div
-        class="rounded-xl border border-emerald-900 bg-emerald-950/30 p-4 space-y-4"
+        class="space-y-4 rounded-xl border border-emerald-900 bg-emerald-950/30 p-4"
       >
         <div class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
@@ -488,6 +924,7 @@ export class AdminView extends BaseElement {
               class="flex-1 rounded border border-emerald-800 bg-emerald-950/50 px-3 py-2 font-mono text-xs text-emerald-300"
             />
             <button
+              type="button"
               @click=${() => this.handleCopyInvitation(invitation.invitationString)}
               class="rounded-full border border-emerald-700 bg-emerald-900/50 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900"
               title="Copy to clipboard"

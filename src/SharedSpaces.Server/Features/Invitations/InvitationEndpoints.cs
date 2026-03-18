@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore;
 using QRCoder;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
@@ -12,10 +13,39 @@ public static class InvitationEndpoints
     {
         var group = app.MapGroup("/v1/spaces/{spaceId:guid}/invitations");
 
+        group.MapGet("/", GetInvitations)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
         group.MapPost("/", CreateInvitation)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
+        group.MapDelete("/{invitationId:guid}", DeleteInvitation)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
         return app;
+    }
+
+    private static async Task<IResult> GetInvitations(
+        Guid spaceId,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
+        var response = await db.SpaceInvitations
+            .AsNoTracking()
+            .Where(invitation => invitation.SpaceId == spaceId)
+            .Select(invitation => new InvitationListResponse(invitation.Id, invitation.SpaceId))
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(response);
     }
 
     private static async Task<IResult> CreateInvitation(
@@ -58,6 +88,26 @@ public static class InvitationEndpoints
 
         var response = new InvitationResponse(invitationString, qrCodeBase64);
         return Results.Ok(response);
+    }
+
+    private static async Task<IResult> DeleteInvitation(
+        Guid spaceId,
+        Guid invitationId,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var invitation = await db.SpaceInvitations
+            .SingleOrDefaultAsync(existingInvitation => existingInvitation.SpaceId == spaceId && existingInvitation.Id == invitationId, cancellationToken);
+
+        if (invitation is null)
+        {
+            return Results.NotFound(new { Error = "Invitation not found" });
+        }
+
+        db.SpaceInvitations.Remove(invitation);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return Results.NoContent();
     }
 
     private static string GeneratePin()

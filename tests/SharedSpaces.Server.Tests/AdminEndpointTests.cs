@@ -417,6 +417,199 @@ public class AdminEndpointTests
         pin1.Should().NotBe(pin2);
     }
 
+    // ========== Member Management Tests ==========
+
+    [Fact]
+    public async Task ListMembers_WithValidSecret_ReturnsMembersOrderedByJoinedAtDescending()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+        var otherSpace = await factory.CreateSpaceAsync("Other Space");
+        var baseline = DateTime.UtcNow;
+        var oldestMember = new SpaceMember { Id = Guid.NewGuid(), SpaceId = space.Id, DisplayName = "Oldest", JoinedAt = baseline.AddMinutes(-3) };
+        var newestMember = new SpaceMember { Id = Guid.NewGuid(), SpaceId = space.Id, DisplayName = "Newest", JoinedAt = baseline.AddMinutes(-1) };
+        var revokedMember = new SpaceMember { Id = Guid.NewGuid(), SpaceId = space.Id, DisplayName = "Revoked", JoinedAt = baseline, IsRevoked = true };
+        var otherSpaceMember = new SpaceMember { Id = Guid.NewGuid(), SpaceId = otherSpace.Id, DisplayName = "Other", JoinedAt = baseline.AddMinutes(1) };
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.SpaceMembers.AddRange(oldestMember, newestMember, revokedMember, otherSpaceMember);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await ListMembersAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var members = await ReadJsonAsync<MemberResponse[]>(response);
+        members.Should().NotBeNull();
+        var actualMembers = members!;
+        actualMembers.Select(member => member.Id).Should().Equal(revokedMember.Id, newestMember.Id, oldestMember.Id);
+        actualMembers.Should().ContainSingle(member => member.Id == revokedMember.Id && member.IsRevoked);
+        actualMembers.Select(member => member.DisplayName).Should().Equal("Revoked", "Newest", "Oldest");
+    }
+
+    [Fact]
+    public async Task ListMembers_WithMissingSpace_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await ListMembersAsync(client, Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Space not found");
+    }
+
+    [Fact]
+    public async Task RevokeMember_WithValidSecret_Returns204AndRevokesMember()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+        var member = new SpaceMember { Id = Guid.NewGuid(), SpaceId = space.Id, DisplayName = "Taylor" };
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.SpaceMembers.Add(member);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var memberInDb = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync(existingMember => existingMember.Id == member.Id));
+        memberInDb.IsRevoked.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RevokeMember_WhenAlreadyRevoked_Returns204()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+        var member = new SpaceMember { Id = Guid.NewGuid(), SpaceId = space.Id, DisplayName = "Taylor", IsRevoked = true };
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.SpaceMembers.Add(member);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task RevokeMember_WithMissingMember_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+
+        var response = await RevokeMemberAsync(client, space.Id, Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Member not found");
+    }
+
+    // ========== Invitation Management Tests ==========
+
+    [Fact]
+    public async Task ListInvitations_WithValidSecret_ReturnsInvitationMetadataOnly()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+        var otherSpace = await factory.CreateSpaceAsync("Other Space");
+        var firstInvitation = new SpaceInvitation { Id = Guid.NewGuid(), SpaceId = space.Id, Pin = "hashed-1" };
+        var secondInvitation = new SpaceInvitation { Id = Guid.NewGuid(), SpaceId = space.Id, Pin = "hashed-2" };
+        var otherInvitation = new SpaceInvitation { Id = Guid.NewGuid(), SpaceId = otherSpace.Id, Pin = "hashed-3" };
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.SpaceInvitations.AddRange(firstInvitation, secondInvitation, otherInvitation);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await ListInvitationsAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        var invitations = JsonSerializer.Deserialize<InvitationListResponse[]>(responseContent, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        invitations.Should().NotBeNull();
+        var actualInvitations = invitations!;
+        actualInvitations.Select(invitation => invitation.Id).Should().BeEquivalentTo([firstInvitation.Id, secondInvitation.Id]);
+        actualInvitations.Select(invitation => invitation.SpaceId).Should().OnlyContain(spaceId => spaceId == space.Id);
+
+        using var payload = JsonDocument.Parse(responseContent);
+        payload.RootElement.EnumerateArray().Any(item => item.TryGetProperty("pin", out _)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ListInvitations_WithMissingSpace_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await ListInvitationsAsync(client, Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Space not found");
+    }
+
+    [Fact]
+    public async Task DeleteInvitation_WithValidSecret_Returns204AndRemovesInvitation()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+        var invitation = new SpaceInvitation { Id = Guid.NewGuid(), SpaceId = space.Id, Pin = "hashed-pin" };
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.SpaceInvitations.Add(invitation);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await DeleteInvitationAsync(client, space.Id, invitation.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var invitationExists = await factory.WithDbContextAsync(db => db.SpaceInvitations.AnyAsync(existingInvitation => existingInvitation.Id == invitation.Id));
+        invitationExists.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteInvitation_WithMissingInvitation_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+
+        var response = await DeleteInvitationAsync(client, space.Id, Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Invitation not found");
+    }
+
     // ========== Helper Methods ==========
 
     private static async Task<HttpResponseMessage> CreateSpaceAsync(
@@ -448,6 +641,64 @@ public class AdminEndpointTests
         return await client.SendAsync(request);
     }
 
+    private static async Task<HttpResponseMessage> ListMembersAsync(
+        HttpClient client,
+        Guid spaceId,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/spaces/{spaceId}/members");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> RevokeMemberAsync(
+        HttpClient client,
+        Guid spaceId,
+        Guid memberId,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/members/{memberId}/revoke");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> ListInvitationsAsync(
+        HttpClient client,
+        Guid spaceId,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/spaces/{spaceId}/invitations");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> DeleteInvitationAsync(
+        HttpClient client,
+        Guid spaceId,
+        Guid invitationId,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/v1/spaces/{spaceId}/invitations/{invitationId}");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
+        return await client.SendAsync(request);
+    }
+
     private static async Task<HttpResponseMessage> ListSpacesAsync(
         HttpClient client,
         string? adminSecret)
@@ -475,6 +726,10 @@ public class AdminEndpointTests
     private sealed record CreateInvitationRequest(string? ClientAppUrl);
 
     private sealed record InvitationResponse(string InvitationString, string? QrCodeBase64);
+
+    private sealed record MemberResponse(Guid Id, string DisplayName, DateTime JoinedAt, bool IsRevoked);
+
+    private sealed record InvitationListResponse(Guid Id, Guid SpaceId);
 
     private sealed record ErrorResponse(string Error);
 
