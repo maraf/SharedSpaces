@@ -126,3 +126,21 @@ Server structure now available to Zoe; test project can reference production ent
 - **TypeScript compliance:** Explicit class properties for erasableSyntaxOnly compatibility
 - **Security:** Admin secret validation via test space creation (no dedicated auth endpoint)
 - Branch: `squad/27-admin-panel-ui`, ready for code review. Your test suite provides full confidence for frontend integration.
+
+## Team Updates (2026-03-18)
+
+**Coordinated PR #41 feedback resolution (2026-03-18T17:27:29Z):**
+
+Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comments and implement auth flow changes:
+
+- **Kaylee** (commit b130fc0): Added `GET /v1/spaces` admin endpoint, enabling credential validation without side effects. Returns `SpaceResponse[]` on success; 401 on invalid secret.
+- **Wash** (commits 7b8a1f5 & 2c92ca3): Fixed 5 frontend PR review comments (disabled async inputs, error parsing, URL normalization, render-side effects, navigation). Then rewrote admin auth flow—removed localStorage, validate-by-fetching `GET /v1/spaces`, in-memory state only. Page refresh returns to login form. Moved back navigation to shell chrome.
+- **Zoe** (commit af96c28): Fixed QR test naming convention; added 3 new `GET /v1/spaces` tests (valid/invalid/format). Test suite now 67 total.
+
+**Key outcomes:**
+- Admin auth is now ephemeral (no localStorage) and validates via GET /v1/spaces instead of test space creation
+- All PR #41 frontend review feedback resolved
+- Admin backend has dedicated listing endpoint with proper auth
+- Test coverage expanded (67 total, 3 new GET /v1/spaces tests)
+
+**Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.

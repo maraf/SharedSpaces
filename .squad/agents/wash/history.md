@@ -125,3 +125,19 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 **Kaylee completed single-file Aspire AppHost migration:** Moved from `src/SharedSpaces.AppHost/` project-based approach to single-file pattern at `src/AppHost.cs` using .NET 10 file-based app support. The dev command is now `dotnet run src/AppHost.cs` (no `--project` flag needed). This aligns with the Recollections-style minimal Aspire pattern and removes throwaway ceremony from the solution. All 46 tests pass. Your Phase 2 work can assume this is the canonical local dev environment.
 
 **Zoe completed admin endpoint integration tests (#27 support):** Wrote 16 comprehensive tests for POST /v1/spaces and POST /v1/spaces/{spaceId}/invitations covering auth failures, validation edge cases, QR code generation and format validation, PIN uniqueness, and happy paths. All 64 tests passing (48 existing + 16 new). Your admin panel UI can now integrate with confidence that backend endpoints behave as designed. Fixed a regression in auth validation (junk `__test_auth__` space creation during secret validation).
+
+## Team Updates (2026-03-18 Continued)
+
+**Coordinated PR #41 feedback resolution (2026-03-18T17:27:29Z):**
+
+Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comments and implement auth flow changes:
+
+- **Kaylee** (commit b130fc0): Added `GET /v1/spaces` admin endpoint, enabling credential validation without side effects. Returns `SpaceResponse[]` on success; 401 on invalid secret.
+- **Wash** (commits 7b8a1f5 & 2c92ca3): Fixed 5 frontend PR review comments (disabled async inputs, error parsing, URL normalization, render-side effects, navigation). Then rewrote admin auth flow—removed localStorage, validate-by-fetching `GET /v1/spaces`, in-memory state only. Page refresh returns to login form. Moved back navigation to shell chrome.
+- **Zoe** (commit af96c28): Fixed QR test naming convention; added 3 new `GET /v1/spaces` tests (valid/invalid/format). Test suite now 67 total.
+
+**New decisions documented:**
+- `wash-admin-auth-flow.md`: Ephemeral in-memory state, validate via `GET /v1/spaces`, 401 bounces to login.
+- `wash-pr-feedback.md`: Back navigation in shell chrome (app-shell.ts) for cross-view consistency.
+
+**Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.

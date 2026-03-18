@@ -742,9 +742,9 @@ Issue #27 required building an admin panel UI for space and invitation managemen
 #### Key Implementation Decisions
 
 ##### 1. Admin Secret Storage and Validation
-- **Pattern:** Store admin secret in localStorage under `sharedspaces.admin-secret` key
-- **Validation:** Test the secret by attempting to create a test space (no dedicated auth endpoint)
-- **Rationale:** Simplifies implementation while still validating credentials against the server. The test space creation fails with 401 if secret is invalid, without creating actual data.
+- **Pattern:** Admin credentials (secret, server URL, spaces) are kept in ephemeral in-memory state only. No localStorage persistence.
+- **Validation:** Credentials are validated by calling `GET /v1/spaces` with the submitted server URL and `X-Admin-Secret` header. A successful response returns the space list; 401 bounces back to the login form.
+- **Rationale:** Ephemeral state avoids leaving admin credentials in the browser and ensures the session resets on page refresh. The dedicated GET /v1/spaces admin endpoint provides secure, non-destructive credential validation without side effects.
 
 ##### 2. Space Caching Strategy
 - **Pattern:** Cache created spaces in localStorage under `sharedspaces.admin-spaces` key
@@ -827,3 +827,49 @@ Keep `view-card` as a custom element, but move its variable body content to a no
 ## Follow-on rule
 For any component that extends `BaseElement`, do not use slots for consumer-provided content. Use property-driven templates or helper functions for composition instead.
 
+
+---
+
+## Wash: admin auth flow rewrite (2026-03-18)
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented in commit 2c92ca3
+
+### Context
+
+After Kaylee added the admin-authenticated GET /v1/spaces endpoint, the frontend admin authentication flow required redesign. The previous approach validated credentials via a test space creation side effect and persisted state in localStorage; Marek explicitly requested ephemeral auth state and server-backed space listing.
+
+### Decision
+
+- Validate admin access by calling GET /v1/spaces with the submitted server URL and X-Admin-Secret header.
+- Treat the returned SpaceResponse[] as the initial in-memory space list.
+- Do not persist the admin secret, server URL, or spaces in localStorage; refreshing the page should return the admin UI to the login form.
+
+### Why
+
+- Kaylee added a proper admin-authenticated listing endpoint, so we no longer need the old create-space side effect to prove credentials.
+- Marek explicitly wants auth failures to stay inside the login form and successful login to land directly on the real server-backed space list.
+- Ephemeral state avoids leaving admin credentials behind in the browser and matches the intended admin-only flow.
+
+---
+
+## Wash: PR #41 shell chrome back navigation (2026-03-18)
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented in commit 7b8a1f5
+
+### Context
+
+PR #41 review feedback highlighted issues with navigation and error handling in the admin panel. One key issue: the admin view had no way to return to the join flow, potentially trapping users in a dead-end.
+
+### Decision
+
+Keep return navigation in the shell chrome rather than burying it inside dmin-view. src/SharedSpaces.Client/src/app-shell.ts now shows a ← Back to join action whenever the current view is not 'join'.
+
+### Why
+
+- The shell owns top-level view switching, so back navigation belongs there.
+- This keeps admin and future non-join views from trapping the user in a dead-end flow.
+- It also gives us one consistent place to expose cross-view navigation as the SPA grows.

@@ -124,3 +124,20 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - All 46 tests passing
 
 **Decision documented:** PR #37 feedback decision captured in `.squad/decisions.md` with context, rationale, and validation.
+
+## Team Updates (2026-03-18)
+
+**Coordinated PR #41 feedback resolution (2026-03-18T17:27:29Z):**
+
+Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comments and implement auth flow changes:
+
+- **Kaylee** (commit b130fc0): Added `GET /v1/spaces` admin endpoint, enabling credential validation without side effects. Returns `SpaceResponse[]` on success; 401 on invalid secret.
+- **Wash** (commit 7b8a1f5): Fixed 5 frontend PR review comments—disabled async inputs, fixed error parsing/display, normalized server URL, eliminated render-side effects, corrected back navigation.
+- **Zoe** (commit af96c28): Fixed QR test naming convention; added 3 new `GET /v1/spaces` tests (valid/invalid/format). Test suite now 67 total.
+- **Wash** (commit 2c92ca3): Rewrote admin auth flow—removed localStorage, validate-by-fetching `GET /v1/spaces`, in-memory state only. Page refresh returns to login form. Moved back navigation to shell chrome.
+
+**New decisions documented:**
+- `wash-admin-auth-flow.md`: Ephemeral in-memory state, validate via `GET /v1/spaces`, 401 bounces to login.
+- `wash-pr-feedback.md`: Back navigation in shell chrome (app-shell.ts) for cross-view consistency.
+
+**Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.
