@@ -12,6 +12,7 @@ import {
 } from './admin-api';
 
 const ADMIN_SECRET_KEY = 'sharedspaces.admin-secret';
+const ADMIN_SERVER_URL_KEY = 'sharedspaces.admin-server-url';
 const SPACES_CACHE_KEY = 'sharedspaces.admin-spaces';
 
 @customElement('admin-view')
@@ -20,6 +21,8 @@ export class AdminView extends BaseElement {
   apiBaseUrl = '/';
 
   @state() private adminSecret: string | null = null;
+  @state() private adminServerUrl: string | null = null;
+  @state() private serverUrlInput = '/';
   @state() private secretInput = '';
   @state() private spaces: SpaceResponse[] = [];
   @state() private newSpaceName = '';
@@ -38,55 +41,133 @@ export class AdminView extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.loadAdminSecret();
+    this.loadAdminSession();
     this.loadSpaces();
   }
 
-  private loadAdminSecret() {
-    this.adminSecret = localStorage.getItem(ADMIN_SECRET_KEY);
+  private normalizeServerUrl(serverUrl: string) {
+    const trimmed = serverUrl.trim();
+    if (!trimmed) return '';
+    if (trimmed === '/') return '/';
+    return trimmed.replace(/\/+$/, '');
   }
 
-  private loadSpaces() {
-    try {
-      const cached = localStorage.getItem(SPACES_CACHE_KEY);
-      if (cached) {
-        this.spaces = JSON.parse(cached);
-      }
-    } catch {
-      this.spaces = [];
+  private getDefaultServerUrl() {
+    return this.normalizeServerUrl(this.apiBaseUrl) || '/';
+  }
+
+  private loadAdminSession() {
+    const storedSecret = localStorage.getItem(ADMIN_SECRET_KEY);
+    const storedServerUrl = this.normalizeServerUrl(
+      localStorage.getItem(ADMIN_SERVER_URL_KEY) ?? '',
+    );
+    const activeServerUrl = storedServerUrl || this.getDefaultServerUrl();
+
+    this.secretInput = storedSecret ?? '';
+    this.serverUrlInput = activeServerUrl;
+    this.adminSecret = storedSecret;
+    this.adminServerUrl = storedSecret ? activeServerUrl : null;
+
+    if (storedSecret && !storedServerUrl) {
+      localStorage.setItem(ADMIN_SERVER_URL_KEY, activeServerUrl);
     }
   }
 
+  private loadSpaces(serverUrl = this.adminServerUrl ?? this.serverUrlInput) {
+    const normalizedServerUrl = this.normalizeServerUrl(serverUrl);
+    if (!normalizedServerUrl) {
+      this.spaces = [];
+      return;
+    }
+
+    try {
+      const cached = localStorage.getItem(SPACES_CACHE_KEY);
+      if (!cached) {
+        this.spaces = [];
+        return;
+      }
+
+      const parsed: unknown = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        this.spaces = parsed;
+        localStorage.setItem(
+          SPACES_CACHE_KEY,
+          JSON.stringify({ [normalizedServerUrl]: parsed }),
+        );
+        return;
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        this.spaces =
+          (parsed as Record<string, SpaceResponse[]>)[normalizedServerUrl] ?? [];
+        return;
+      }
+    } catch {
+      // Ignore malformed cache and reset below.
+    }
+
+    this.spaces = [];
+  }
+
   private saveSpaces() {
-    localStorage.setItem(SPACES_CACHE_KEY, JSON.stringify(this.spaces));
+    if (!this.adminServerUrl) return;
+
+    try {
+      const cached = localStorage.getItem(SPACES_CACHE_KEY);
+      const parsed: unknown = cached ? JSON.parse(cached) : {};
+      const spacesByServer =
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as Record<string, SpaceResponse[]>)
+          : {};
+
+      spacesByServer[this.adminServerUrl] = this.spaces;
+      localStorage.setItem(SPACES_CACHE_KEY, JSON.stringify(spacesByServer));
+    } catch {
+      localStorage.setItem(
+        SPACES_CACHE_KEY,
+        JSON.stringify({ [this.adminServerUrl]: this.spaces }),
+      );
+    }
   }
 
   private handleSecretSubmit = (e: Event) => {
     e.preventDefault();
-    if (!this.secretInput.trim()) return;
+    const serverUrl = this.normalizeServerUrl(this.serverUrlInput);
+    if (!this.secretInput.trim() || !serverUrl) return;
 
     localStorage.setItem(ADMIN_SECRET_KEY, this.secretInput);
+    localStorage.setItem(ADMIN_SERVER_URL_KEY, serverUrl);
     this.adminSecret = this.secretInput;
+    this.adminServerUrl = serverUrl;
+    this.serverUrlInput = serverUrl;
+    this.invitationFormState = {};
+    this.loadSpaces(serverUrl);
     this.errorMessage = '';
   };
 
   private handleLogout = () => {
     localStorage.removeItem(ADMIN_SECRET_KEY);
+    localStorage.removeItem(ADMIN_SERVER_URL_KEY);
     this.adminSecret = null;
+    this.adminServerUrl = null;
     this.secretInput = '';
+    this.serverUrlInput = this.getDefaultServerUrl();
+    this.invitationFormState = {};
     this.errorMessage = '';
   };
 
   private handleCreateSpace = async (e: Event) => {
     e.preventDefault();
-    if (!this.newSpaceName.trim() || !this.adminSecret) return;
+    if (!this.newSpaceName.trim() || !this.adminSecret || !this.adminServerUrl) {
+      return;
+    }
 
     this.isCreatingSpace = true;
     this.errorMessage = '';
 
     try {
       const space = await createSpace(
-        this.apiBaseUrl,
+        this.adminServerUrl,
         this.adminSecret,
         this.newSpaceName,
       );
@@ -119,7 +200,7 @@ export class AdminView extends BaseElement {
   }
 
   private handleGenerateInvitation = async (spaceId: string) => {
-    if (!this.adminSecret) return;
+    if (!this.adminSecret || !this.adminServerUrl) return;
 
     const state = this.getInvitationState(spaceId);
     state.isGenerating = true;
@@ -128,7 +209,7 @@ export class AdminView extends BaseElement {
 
     try {
       const invitation = await createInvitation(
-        this.apiBaseUrl,
+        this.adminServerUrl,
         this.adminSecret,
         spaceId,
         state.clientAppUrl.trim() || undefined,
@@ -155,7 +236,7 @@ export class AdminView extends BaseElement {
   };
 
   override render() {
-    if (!this.adminSecret) {
+    if (!this.adminSecret || !this.adminServerUrl) {
       return this.renderSecretPrompt();
     }
 
@@ -164,15 +245,8 @@ export class AdminView extends BaseElement {
         headline="Admin Panel"
         supporting-text="Manage spaces and generate invitation links"
       >
-        ${this.renderCreateSpaceForm()} ${this.renderSpacesList()}
-        <div class="flex justify-end">
-          <button
-            @click=${this.handleLogout}
-            class="rounded-full border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
-          >
-            Log out
-          </button>
-        </div>
+        ${this.renderAuthenticatedHeader()} ${this.renderCreateSpaceForm()}
+        ${this.renderSpacesList()}
       </view-card>
     `;
   }
@@ -181,29 +255,48 @@ export class AdminView extends BaseElement {
     return html`
       <view-card
         headline="Admin Access"
-        supporting-text="Enter your admin secret to continue"
+        supporting-text="Enter a server URL and admin secret to continue"
       >
         <form
           @submit=${this.handleSecretSubmit}
-          class="rounded-2xl border border-slate-800 bg-slate-950/60 p-6 space-y-4"
+          class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-6"
         >
-          <div class="space-y-2">
-            <label
-              for="admin-secret"
-              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-            >
-              Admin Secret
-            </label>
-            <input
-              id="admin-secret"
-              type="password"
-              .value=${this.secretInput}
-              @input=${(e: InputEvent) =>
-                (this.secretInput = (e.target as HTMLInputElement).value)}
-              placeholder="Enter admin secret"
-              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              ?disabled=${!this.secretInput.trim()}
-            />
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="space-y-2">
+              <label
+                for="admin-server-url"
+                class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+              >
+                Server URL
+              </label>
+              <input
+                id="admin-server-url"
+                type="text"
+                .value=${this.serverUrlInput}
+                @input=${(e: InputEvent) =>
+                  (this.serverUrlInput = (e.target as HTMLInputElement).value)}
+                placeholder="https://api.example.com"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+              />
+            </div>
+
+            <div class="space-y-2">
+              <label
+                for="admin-secret"
+                class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+              >
+                Admin Secret
+              </label>
+              <input
+                id="admin-secret"
+                type="password"
+                .value=${this.secretInput}
+                @input=${(e: InputEvent) =>
+                  (this.secretInput = (e.target as HTMLInputElement).value)}
+                placeholder="Enter admin secret"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+              />
+            </div>
           </div>
 
           ${this.errorMessage
@@ -218,13 +311,36 @@ export class AdminView extends BaseElement {
 
           <button
             type="submit"
-            ?disabled=${!this.secretInput.trim()}
+            ?disabled=${!this.secretInput.trim() || !this.serverUrlInput.trim()}
             class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Continue
           </button>
         </form>
       </view-card>
+    `;
+  }
+
+  private renderAuthenticatedHeader() {
+    return html`
+      <div
+        class="flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 md:flex-row md:items-center md:justify-between"
+      >
+        <div class="space-y-2">
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+          >
+            Connected Server
+          </p>
+          <p class="break-all text-sm text-slate-50">${this.adminServerUrl}</p>
+        </div>
+        <button
+          @click=${this.handleLogout}
+          class="rounded-full border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+        >
+          Log out
+        </button>
+      </div>
     `;
   }
 
