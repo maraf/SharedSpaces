@@ -811,3 +811,19 @@ Followed existing dark theme patterns from join-view and space-view:
 **Mitigations:**
 - Document cache limitations in UI (future)
 - If GET /spaces endpoint is added, replace localStorage cache with API calls
+# Wash: view-card light DOM fix
+
+## Context
+`view-card` lives in `src/SharedSpaces.Client/src/components/view-card.ts` and extends `BaseElement`, so it renders in light DOM for Tailwind compatibility. That made its `<slot></slot>` ineffective: Lit re-rendering replaced any child content passed by `admin-view`, `join-view`, and `space-view`.
+
+## Decision
+Keep `view-card` as a custom element, but move its variable body content to a non-attribute property (`.body=${html`...`}`) instead of relying on children/slots.
+
+## Why
+- Preserves the existing component API shape (`headline`, `supporting-text`) and styling wrapper.
+- Fits the project's light-DOM + Tailwind architecture without introducing shadow DOM styling issues.
+- Requires only targeted consumer updates, unlike converting the card into a plain template helper everywhere.
+
+## Follow-on rule
+For any component that extends `BaseElement`, do not use slots for consumer-provided content. Use property-driven templates or helper functions for composition instead.
+
