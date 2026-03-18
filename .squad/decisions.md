@@ -571,3 +571,47 @@ Copilot reviewer raised feedback on PR #37 addressing SignalR hub integration de
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+---
+
+### Issue #23 Frontend Client Bootstrap
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Issue:** #23  
+**Status:** Complete  
+
+#### Context
+
+Issue #23 established the first client scaffold under src/SharedSpaces.Client/.
+
+#### Decision
+
+Use a standalone Vite + Lit + TypeScript app with:
+- Vertical slices in src/features/ (join, space-view, admin)
+- Shared UI in src/components/
+- Shared utilities and context in src/lib/
+- A BaseElement light DOM base class for every rendered component
+- Runtime API configuration sourced from <meta name="api-base-url"> in index.html
+- Temporary in-component state switching in src/app-shell.ts instead of adding a router now
+- Tailwind CSS v4 wired through @tailwindcss/vite with light DOM rendering
+- ESLint + Prettier for code quality
+
+#### Notes
+
+- Current setup uses Vite 7.x because @tailwindcss/vite 4.2.x peers with Vite 5-7; revisit once the plugin supports Vite 8+
+- Placeholder files for future auth and SignalR work live in src/lib/auth-context.ts and src/lib/signalr-client.ts
+- Dev tooling and build validated; ready for feature development
+
+#### Validation
+
+✅ Dev server operational  
+✅ Linting passed  
+✅ Build successful  
+✅ .NET tests passed  
+
+#### Impact
+
+- Frontend infrastructure ready for feature development
+- Client communicates via HTTP to .NET API
+- Established patterns for component architecture and styling

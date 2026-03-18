@@ -1,0 +1,33 @@
+{
+  "name": "sharedspaces-client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "engine-strict": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier . --write"
+  },
+  "dependencies": {
+    "@lit/context": "^1.1.6",
+    "lit": "^3.3.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.2.1",
+    "eslint": "^10.0.3",
+    "eslint-plugin-lit": "^2.2.1",
+    "prettier": "^3.8.1",
+    "tailwindcss": "^4.2.1",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vite": "^7.3.1"
+  }
+}

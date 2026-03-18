@@ -194,3 +194,19 @@ Marek asked both Mal and Wash to dive deeper into friction points to resolve the
 **Final recommendation:** Keep **React** for the main SharedSpaces SPA. Both agents agree this minimizes friction while maintaining shipping velocity. Lite remains viable for future isolated components with understood constraints.
 
 **Status:** Decision documented in `.squad/decisions.md` as "Pending — awaiting user decision" with team consensus noted.
+
+### Wash's Lit Client Bootstrap Complete (2026-03-18)
+
+**Status:** ✅ Issue #23 completed successfully.
+
+**Deliverables:**
+- `src/SharedSpaces.Client/` bootstrapped with Vite + Lit + TypeScript
+- Tailwind CSS v4 (light DOM)
+- Vertical slice architecture (features/join, features/space-view, features/admin, components/, lib/)
+- App shell with state-based view switching
+- ESLint + Prettier + `@lit/context` for runtime config
+- All validations passed (dev server, lint, build, .NET tests)
+
+**Branch:** `squad/23-lit-vite-setup` (commit 2a493e7)
+
+**Impact:** Frontend infrastructure now ready for feature development. Client framework and tooling are stable and can accept HTTP requests to backend APIs. Mal can now proceed with any frontend-backend integration planning.
