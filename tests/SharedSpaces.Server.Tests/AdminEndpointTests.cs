@@ -433,10 +433,11 @@ public class AdminEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var members = await ReadJsonAsync<MemberResponse[]>(response);
         members.Should().NotBeNull();
-        members!.Should().HaveCount(2);
-        members.Select(member => member.Id).Should().BeEquivalentTo([firstMember.Id, secondMember.Id]);
-        members.Select(member => member.DisplayName).Should().BeEquivalentTo(["Taylor", "Jordan"]);
-        members.Should().OnlyContain(member => !member.IsRevoked && member.JoinedAt != default);
+        var actualMembers = members!;
+        actualMembers.Should().HaveCount(2);
+        actualMembers.Select(member => member.Id).Should().BeEquivalentTo([firstMember.Id, secondMember.Id]);
+        actualMembers.Select(member => member.DisplayName).Should().BeEquivalentTo(["Taylor", "Jordan"]);
+        actualMembers.Should().OnlyContain(member => !member.IsRevoked && member.JoinedAt != default);
     }
 
     [Fact]
@@ -570,9 +571,10 @@ public class AdminEndpointTests
         var responseContent = await response.Content.ReadAsStringAsync();
         var invitations = JsonSerializer.Deserialize<InvitationListResponse[]>(responseContent, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         invitations.Should().NotBeNull();
-        invitations!.Should().HaveCount(2);
-        invitations.Select(invitation => invitation.Id).Should().BeEquivalentTo(expectedInvitationIds);
-        invitations.Select(invitation => invitation.SpaceId).Should().OnlyContain(spaceId => spaceId == space.Id);
+        var actualInvitations = invitations!;
+        actualInvitations.Should().HaveCount(2);
+        actualInvitations.Select(invitation => invitation.Id).Should().BeEquivalentTo(expectedInvitationIds);
+        actualInvitations.Select(invitation => invitation.SpaceId).Should().OnlyContain(spaceId => spaceId == space.Id);
 
         using var payload = JsonDocument.Parse(responseContent);
         payload.RootElement.EnumerateArray().Any(item => item.TryGetProperty("pin", out _)).Should().BeFalse();

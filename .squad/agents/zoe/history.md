@@ -77,6 +77,8 @@ Server structure now available to Zoe; test project can reference production ent
 - Admin invitation generation creates 6-digit PINs, hashes them for storage, and returns both invitation string (server_url|space_id|pin format) and base64 PNG QR code; tests verify QR code PNG signature (0x89504E47) and PIN uniqueness across multiple invitations.
 - TestWebApplicationFactory requires `Microsoft.EntityFrameworkCore.Infrastructure` using statement to access `IDbContextOptionsConfiguration<>` for proper DbContext service removal during test setup.
 - `GET /v1/spaces` is an admin-protected endpoint that returns all spaces as the shared `SpaceResponse` shape ordered by `CreatedAt` descending; integration tests should cover empty-state, auth failure, and newest-first listing.
+- Admin member-management coverage is strongest when tests create `SpaceMember` rows through the real invitation + token exchange flow (create space → create invitation → POST `/v1/spaces/{id}/tokens`) instead of seeding members directly, so member listing/revocation scenarios exercise the join pipeline end to end.
+- Admin invitation-management list responses are metadata-only (`InvitationListResponse` = `Id` + `SpaceId`) and must never expose hashed PINs; tests should deserialize the array shape and also inspect raw JSON to confirm no `pin` property leaks.
 
 ## Team Updates (2026-03-17)
 
