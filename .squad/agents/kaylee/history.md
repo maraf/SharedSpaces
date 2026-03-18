@@ -89,6 +89,10 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - CORS is configured in `Program.cs` to allow SignalR connections from the client app origin (`Server:DefaultClientAppUrl`), with credentials, any header, and any method.
 - SignalR hub methods validate that the JWT's `space_id` claim matches the requested `spaceId` before adding the connection to the space group, preventing cross-space subscriptions.
 - SignalR connections now auto-join their per-space group during `SpaceHub.OnConnectedAsync`, and HTTP item endpoints publish through `ISpaceHubNotifier` so broadcast failures stay best-effort and only log warnings.
+- .NET Aspire AppHost integration lives in `src/SharedSpaces.AppHost/` and orchestrates both Server and Client for local development with automatic CORS URL wiring via `Server__DefaultClientAppUrl` environment variable.
+- Aspire AppHost uses `Aspire.AppHost.Sdk/13.0.2` targeting net10.0, with `Aspire.Hosting.NodeJs/9.5.2` for npm app hosting (latest available; Aspire 13.x hosting packages not yet released).
+- The Vite client is registered as an npm app with `AddNpmApp("client", "../SharedSpaces.Client", "dev")` and waits for the server via `WaitFor(server)` before starting.
+
 
 ## Team Updates (2026-03-17 Continued)
 

@@ -442,6 +442,59 @@ Move application storage to `./artifacts/storage` and test storage to `./artifac
 
 #### Impact
 
+- Test artifacts isolated from application runtime state
+- Single `.gitignore` rule excludes all build/storage artifacts
+- CI and local builds have consistent artifact paths
+
+---
+
+### Aspire AppHost for Local Development Orchestration
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active
+
+#### Context
+
+SharedSpaces has a .NET server (`SharedSpaces.Server`) and a Vite/Lit client (`SharedSpaces.Client`) that developers need to run simultaneously during local development. The server's CORS depends on knowing the client's origin URL, and the client needs the server's URL. Manually coordinating these in separate terminal windows is error-prone.
+
+#### Decision
+
+Introduce .NET Aspire as the local dev orchestration layer via a minimal AppHost project:
+
+- **Project:** `src/SharedSpaces.AppHost/SharedSpaces.AppHost.csproj`
+- **SDK:** `Aspire.AppHost.Sdk/13.0.2` (current stable for .NET 10)
+- **Target:** net10.0
+- **Orchestrates:**
+  - Server: `AddProject<Projects.SharedSpaces_Server>("server")` — references existing Server project
+  - Client: `AddNpmApp("client", "../SharedSpaces.Client", "dev")` — runs Vite dev server
+- **Key wiring:**
+  - Client gets explicit HTTP endpoint on port 5173 via `WithHttpEndpoint(port: 5173, env: "PORT")`
+  - Client sets `BROWSER=none` to prevent auto-opening browser
+  - Client waits for server to be ready via `WaitFor(server)`
+  - Server receives client URL via `Server__DefaultClientAppUrl` environment variable pointing at client's HTTP endpoint
+- **No ServiceDefaults project** — keeping it minimal per user request for "single file" orchestration
+
+#### Rationale
+
+- **Zero config startup:** One `dotnet run --project src/SharedSpaces.AppHost` starts both server and client with correct URLs
+- **CORS works automatically:** Server's `Server:DefaultClientAppUrl` is set to the actual client endpoint, so CORS policy matches reality
+- **Dependency awareness:** Client waits for server to be ready before starting
+- **Aspire Dashboard included:** Free observability/logs/metrics UI for debugging
+- **Minimal footprint:** Just one .csproj + one Program.cs, no extra abstractions
+
+#### Impact
+
+- **Positive:** Local dev becomes one command; URL mismatches eliminated; observability via Aspire Dashboard; foundation for Docker Compose generation in Phase 5
+- **Negative:** Adds Aspire SDK as a dev dependency (but doesn't affect production deployment)
+- **Migration:** Developers can continue using `dotnet run` for Server + `npm run dev` for Client if they prefer; AppHost is opt-in
+
+#### Alternatives Considered
+
+1. **Docker Compose only** — Rejected: requires Docker Desktop; Aspire provides better .NET integration and will generate Docker Compose in Phase 5
+2. **Custom shell scripts** — Rejected: platform-specific (Windows vs Linux); no observability; no dependency management
+3. **ServiceDefaults + AppHost** — Rejected: user requested minimal "single file" approach; ServiceDefaults adds ceremony without value for this simple scenario
+
 - 46 tests passing (verified post-migration)
 - Storage paths now isolated per environment
 - Commit: ffed621
