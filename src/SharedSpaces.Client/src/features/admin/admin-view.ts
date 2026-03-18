@@ -1,4 +1,4 @@
-import { html } from 'lit';
+import { html, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import '../../components/view-card';
@@ -7,13 +7,10 @@ import {
   AdminApiError,
   createInvitation,
   createSpace,
+  listSpaces,
   type InvitationResponse,
   type SpaceResponse,
 } from './admin-api';
-
-const ADMIN_SECRET_KEY = 'sharedspaces.admin-secret';
-const ADMIN_SERVER_URL_KEY = 'sharedspaces.admin-server-url';
-const SPACES_CACHE_KEY = 'sharedspaces.admin-spaces';
 
 type InvitationFormState = {
   isGenerating: boolean;
@@ -34,14 +31,23 @@ export class AdminView extends BaseElement {
   @state() private spaces: SpaceResponse[] = [];
   @state() private newSpaceName = '';
   @state() private isCreatingSpace = false;
+  @state() private isConnecting = false;
   @state() private errorMessage = '';
 
   @state() private invitationFormState: Record<string, InvitationFormState> = {};
 
   override connectedCallback() {
     super.connectedCallback();
-    this.loadAdminSession();
-    this.loadSpaces();
+  }
+
+  override willUpdate(changedProperties: PropertyValues<this>) {
+    if (
+      changedProperties.has('apiBaseUrl') &&
+      !this.adminServerUrl &&
+      (this.serverUrlInput === '/' || !this.serverUrlInput.trim())
+    ) {
+      this.serverUrlInput = this.getDefaultServerUrl();
+    }
   }
 
   private normalizeServerUrl(serverUrl: string) {
@@ -105,103 +111,43 @@ export class AdminView extends BaseElement {
     return nextState[spaceId];
   }
 
-  private loadAdminSession() {
-    const storedSecret = localStorage.getItem(ADMIN_SECRET_KEY);
-    const storedServerUrl = this.normalizeServerUrl(
-      localStorage.getItem(ADMIN_SERVER_URL_KEY) ?? '',
-    );
-    const activeServerUrl = storedServerUrl || this.getDefaultServerUrl();
-
-    this.secretInput = storedSecret ?? '';
-    this.serverUrlInput = activeServerUrl;
-    this.adminSecret = storedSecret;
-    this.adminServerUrl = storedSecret ? activeServerUrl : null;
-
-    if (storedSecret && !storedServerUrl) {
-      localStorage.setItem(ADMIN_SERVER_URL_KEY, activeServerUrl);
-    }
-  }
-
-  private loadSpaces(serverUrl = this.adminServerUrl ?? this.serverUrlInput) {
-    const normalizedServerUrl = this.normalizeServerUrl(serverUrl);
-    if (!normalizedServerUrl) {
-      this.setSpaces([]);
-      return;
-    }
-
-    try {
-      const cached = localStorage.getItem(SPACES_CACHE_KEY);
-      if (!cached) {
-        this.setSpaces([]);
-        return;
-      }
-
-      const parsed: unknown = JSON.parse(cached);
-      if (Array.isArray(parsed)) {
-        this.setSpaces(parsed);
-        localStorage.setItem(
-          SPACES_CACHE_KEY,
-          JSON.stringify({ [normalizedServerUrl]: parsed }),
-        );
-        return;
-      }
-
-      if (parsed && typeof parsed === 'object') {
-        this.setSpaces(
-          (parsed as Record<string, SpaceResponse[]>)[normalizedServerUrl] ?? [],
-        );
-        return;
-      }
-    } catch {
-      // Ignore malformed cache and reset below.
-    }
-
-    this.setSpaces([]);
-  }
-
-  private saveSpaces() {
-    if (!this.adminServerUrl) return;
-
-    try {
-      const cached = localStorage.getItem(SPACES_CACHE_KEY);
-      const parsed: unknown = cached ? JSON.parse(cached) : {};
-      const spacesByServer =
-        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-          ? (parsed as Record<string, SpaceResponse[]>)
-          : {};
-
-      spacesByServer[this.adminServerUrl] = this.spaces;
-      localStorage.setItem(SPACES_CACHE_KEY, JSON.stringify(spacesByServer));
-    } catch {
-      localStorage.setItem(
-        SPACES_CACHE_KEY,
-        JSON.stringify({ [this.adminServerUrl]: this.spaces }),
-      );
-    }
-  }
-
-  private handleSecretSubmit = (e: Event) => {
+  private handleSecretSubmit = async (e: Event) => {
     e.preventDefault();
     const serverUrl = this.normalizeServerUrl(this.serverUrlInput);
-    if (!this.secretInput.trim() || !serverUrl) return;
+    const secret = this.secretInput.trim();
+    if (!secret || !serverUrl) return;
 
-    localStorage.setItem(ADMIN_SECRET_KEY, this.secretInput);
-    localStorage.setItem(ADMIN_SERVER_URL_KEY, serverUrl);
-    this.adminSecret = this.secretInput;
-    this.adminServerUrl = serverUrl;
-    this.serverUrlInput = serverUrl;
-    this.invitationFormState = {};
-    this.loadSpaces(serverUrl);
+    this.isConnecting = true;
     this.errorMessage = '';
+
+    try {
+      const spaces = await listSpaces(serverUrl, secret);
+      this.adminSecret = secret;
+      this.adminServerUrl = serverUrl;
+      this.serverUrlInput = serverUrl;
+      this.setSpaces(spaces);
+      this.errorMessage = '';
+    } catch (error) {
+      this.adminSecret = null;
+      this.adminServerUrl = null;
+      this.setSpaces([]);
+      this.invitationFormState = {};
+      this.errorMessage =
+        error instanceof Error ? error.message : 'Failed to connect to server';
+    } finally {
+      this.isConnecting = false;
+    }
   };
 
   private handleLogout = () => {
-    localStorage.removeItem(ADMIN_SECRET_KEY);
-    localStorage.removeItem(ADMIN_SERVER_URL_KEY);
+    const nextServerUrl = this.adminServerUrl ?? this.getDefaultServerUrl();
+
     this.adminSecret = null;
     this.adminServerUrl = null;
     this.secretInput = '';
-    this.serverUrlInput = this.getDefaultServerUrl();
+    this.serverUrlInput = nextServerUrl;
+    this.spaces = [];
+    this.newSpaceName = '';
     this.invitationFormState = {};
     this.errorMessage = '';
   };
@@ -222,7 +168,6 @@ export class AdminView extends BaseElement {
         this.newSpaceName,
       );
       this.setSpaces([space, ...this.spaces]);
-      this.saveSpaces();
       this.newSpaceName = '';
     } catch (error) {
       if (error instanceof AdminApiError && error.status === 401) {
@@ -353,10 +298,10 @@ export class AdminView extends BaseElement {
 
         <button
           type="submit"
-          ?disabled=${!this.secretInput.trim() || !this.serverUrlInput.trim()}
+          ?disabled=${this.isConnecting || !this.secretInput.trim() || !this.serverUrlInput.trim()}
           class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Continue
+          ${this.isConnecting ? 'Connecting...' : 'Continue'}
         </button>
       </form>
     `;
