@@ -15,35 +15,57 @@ The app is orchestrated via .NET Aspire (`dotnet run .\src\AppHost.cs`), which s
 
 Use a dedicated SQLite database and storage path for screenshot runs to prevent test data from mixing with real data.
 
+**⚠️ MANDATORY: Always delete the existing screenshot database before every run.** Leftover data from previous runs will pollute screenshots with duplicate spaces, extra members, and stale items.
+
+```bash
+# ALWAYS run this first — before starting any server
+rm -rf artifacts/screenshots.db* artifacts/screenshots-storage/
+mkdir -p artifacts/screenshots-storage
+```
+
 **AppHost.cs** supports optional configuration overrides via environment variables:
 
 ```bash
-# Set before running AppHost
-$env:ConnectionStrings__DefaultConnection = "Data Source=D:\path\to\artifacts\screenshots.db"
-$env:Storage__BasePath = "D:\path\to\artifacts\screenshots-storage"
+# Set before running AppHost or the server directly
+ConnectionStrings__DefaultConnection="Data Source=/absolute/path/to/artifacts/screenshots.db"
+Storage__BasePath="/absolute/path/to/artifacts/screenshots-storage"
 ```
 
 These are forwarded to the server project only when set. Without them, the server uses its default `sharedspaces.db`.
 
-**Cleanup:** Delete `artifacts/screenshots.db*` files (`.db`, `.db-wal`, `.db-shm`) and `artifacts/screenshots-storage/` before each run for a clean slate.
+### 2. App Startup
 
-### 2. App Startup via Aspire
+Launch the full stack from the `src/` directory. Try Aspire first; if the dashboard port conflicts, fall back to starting server and client directly.
 
-Launch the full stack with Aspire from the `src/` directory:
+**Option A — Aspire (preferred):**
 
 ```bash
 cd src
 
-# For isolated screenshot runs:
-$env:ConnectionStrings__DefaultConnection = "Data Source=<repo-root>\artifacts\screenshots.db"
-$env:Storage__BasePath = "<repo-root>\artifacts\screenshots-storage"
-
+ConnectionStrings__DefaultConnection="Data Source=/absolute/path/to/artifacts/screenshots.db" \
+Storage__BasePath="/absolute/path/to/artifacts/screenshots-storage" \
 dotnet run AppHost.cs
 ```
 
+**Option B — Direct startup (fallback when Aspire dashboard port conflicts):**
+
+```bash
+# Terminal 1: Server
+cd src/SharedSpaces.Server
+ConnectionStrings__DefaultConnection="Data Source=/absolute/path/to/artifacts/screenshots.db" \
+Storage__BasePath="/absolute/path/to/artifacts/screenshots-storage" \
+Cors__Origins="http://localhost:5173" \
+ASPNETCORE_URLS="http://localhost:5165" \
+dotnet run
+
+# Terminal 2: Client
+cd src/SharedSpaces.Client
+npx vite --port 5173
+```
+
 **Ports:**
-- Client (Vite): `http://localhost:5173` (fixed via `WithHttpEndpoint(port: 5173)`)
-- Server (ASP.NET Core): `http://localhost:5165` (from `launchSettings.json` http profile)
+- Client (Vite): `http://localhost:5173`
+- Server (ASP.NET Core): `http://localhost:5165`
 
 **Wait pattern:** Poll `http://localhost:5165/` (server health endpoint) and `http://localhost:5173/` until both respond before running tests.
 
@@ -192,10 +214,12 @@ Create the directory if it doesn't exist before capturing.
 
 ### 6. Cleanup
 
-The server uses SQLite (`sharedspaces.db`). After screenshot capture:
-- Stop the Aspire host
+After screenshot capture:
+- Stop the server and client (or Aspire host)
 - Delete any test database files if an isolated database was used
 - Screenshots in `docs/screenshots/` are the persistent output
+
+**Before the next run:** Always delete `artifacts/screenshots.db*` and `artifacts/screenshots-storage/` — see step 1. This is the most common cause of garbage in screenshots.
 
 ### 7. Test Execution
 

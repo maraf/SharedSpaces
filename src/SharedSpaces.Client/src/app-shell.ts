@@ -79,7 +79,7 @@ export class AppShell extends BaseElement {
   }
 
   private handleViewChange = (event: CustomEvent<AppViewChangeDetail>) => {
-    const { view, spaceId, serverUrl, token, displayName } = event.detail;
+    const { view, spaceId, serverUrl, token, displayName, reloadSpaces } = event.detail;
 
     this.view = view;
 
@@ -91,6 +91,9 @@ export class AppShell extends BaseElement {
         displayName: displayName ?? this.authState.displayName,
       };
       // Refresh space list after joining
+      this.loadSpacesFromStorage();
+    } else if (reloadSpaces) {
+      // Reload spaces when explicitly requested (e.g., after removing a space)
       this.loadSpacesFromStorage();
     }
   };
@@ -120,10 +123,9 @@ export class AppShell extends BaseElement {
           <header class="flex flex-col gap-4">
             <button
               type="button"
-              class="flex items-center gap-2 w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
+              class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
               @click=${() => { this.view = 'home'; }}
             >
-              <img src="/favicon.svg" alt="" class="w-6 h-6" />
               SharedSpaces
             </button>
 

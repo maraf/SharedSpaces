@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  SignalRClient,
-  type ItemAddedPayload,
-  type ItemDeletedPayload,
-} from './signalr-client';
+import { SignalRClient } from './signalr-client';
 
 // Mock @microsoft/signalr
 const mockConnection = {
@@ -45,7 +41,21 @@ vi.mock('@microsoft/signalr', () => {
   };
 });
 
+interface ItemAddedPayload {
+  id: string;
+  spaceId: string;
+  memberId: string;
+  displayName: string;
+  contentType: 'text' | 'file';
+  content: string;
+  fileSize: number;
+  sharedAt: string;
+}
 
+interface ItemDeletedPayload {
+  id: string;
+  spaceId: string;
+}
 
 describe('SignalRClient', () => {
   const serverUrl = 'http://localhost:5000';

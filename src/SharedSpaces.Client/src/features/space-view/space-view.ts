@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
 import type { AppViewChangeDetail } from '../../lib/navigation';
-import { getToken } from '../../lib/token-storage';
+import { getToken, removeToken } from '../../lib/token-storage';
 import {
   SignalRClient,
   type ConnectionState,
@@ -37,6 +37,7 @@ export class SpaceView extends BaseElement {
   @state() private items: SpaceItemResponse[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
+  @state() private connectionErrorType: 'none' | 'auth' | 'network' = 'none';
   @state() private textInput = '';
   @state() private isUploading = false;
   @state() private uploadError = '';
@@ -48,7 +49,6 @@ export class SpaceView extends BaseElement {
   private token?: string;
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
-  private pendingItemIds = new Set<string>();
 
   override updated(changed: Map<string, unknown>) {
     if (changed.has('spaceId') || changed.has('serverUrl')) {
@@ -62,9 +62,7 @@ export class SpaceView extends BaseElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    void this.stopSignalR().catch((error) => {
-      console.error('Failed to stop SignalR connection during disconnect', error);
-    });
+    this.stopSignalR();
   }
 
   private resolveToken(): string | undefined {
@@ -84,6 +82,25 @@ export class SpaceView extends BaseElement {
     );
   }
 
+  private async removeSpace() {
+    if (!this.serverUrl || !this.spaceId) return;
+    
+    // Clean up SignalR connection
+    await this.stopSignalR();
+    
+    // Remove token from storage
+    removeToken(this.serverUrl, this.spaceId);
+    
+    // Redirect to join view and tell app-shell to reload spaces
+    this.dispatchEvent(
+      new CustomEvent<AppViewChangeDetail>('view-change', {
+        bubbles: true,
+        composed: true,
+        detail: { view: 'join', reloadSpaces: true },
+      }),
+    );
+  }
+
   private async loadData() {
     if (!this.serverUrl || !this.spaceId) return;
 
@@ -95,6 +112,7 @@ export class SpaceView extends BaseElement {
 
     this.isLoading = true;
     this.errorMessage = '';
+    this.connectionErrorType = 'none';
 
     try {
       const [info, itemList] = await Promise.all([
@@ -104,15 +122,22 @@ export class SpaceView extends BaseElement {
       this.spaceInfo = info;
       this.items = itemList;
       
-      // Start SignalR connection after successful data load (non-blocking)
-      void this.startSignalR().catch((error) => {
-        console.error('Failed to start SignalR connection:', error);
-      });
+      // Start SignalR connection after successful data load
+      await this.startSignalR();
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
-        this.redirectToJoin();
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
+      
+      // Check if it's a network error
+      if (error instanceof SpaceApiError && !error.status) {
+        this.connectionErrorType = 'network';
+        this.errorMessage = 'Unable to connect to the server. The server may be offline or unreachable.';
+        return;
+      }
+      
       this.errorMessage =
         error instanceof SpaceApiError
           ? error.message
@@ -142,9 +167,11 @@ export class SpaceView extends BaseElement {
       },
       onStateChange: (state: ConnectionState) => {
         this.connectionState = state;
-      },
-      onReconnected: () => {
-        this.refreshItemsAfterReconnect();
+        
+        // On reconnect, refresh items to catch any missed events
+        if (state === 'connected') {
+          this.refreshItemsAfterReconnect();
+        }
       },
     });
 
@@ -168,7 +195,7 @@ export class SpaceView extends BaseElement {
   private handleItemAdded(payload: ItemAddedPayload) {
     // Check if item already exists (race with optimistic add)
     const exists = this.items.some((item) => item.id === payload.id);
-    if (exists || this.pendingItemIds.has(payload.id)) return;
+    if (exists) return;
 
     // Prepend new item to the list
     const newItem: SpaceItemResponse = {
@@ -213,10 +240,8 @@ export class SpaceView extends BaseElement {
     this.isUploading = true;
     this.uploadError = '';
 
-    const itemId = crypto.randomUUID();
-    this.pendingItemIds.add(itemId);
-
     try {
+      const itemId = crypto.randomUUID();
       const item = await shareText(
         this.serverUrl,
         this.spaceId,
@@ -227,8 +252,9 @@ export class SpaceView extends BaseElement {
       this.items = [item, ...this.items];
       this.textInput = '';
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
-        this.redirectToJoin();
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       this.uploadError =
@@ -236,7 +262,6 @@ export class SpaceView extends BaseElement {
           ? error.message
           : 'Failed to share text.';
     } finally {
-      this.pendingItemIds.delete(itemId);
       this.isUploading = false;
     }
   };
@@ -282,23 +307,19 @@ export class SpaceView extends BaseElement {
     try {
       for (const file of files) {
         const itemId = crypto.randomUUID();
-        this.pendingItemIds.add(itemId);
-        try {
-          const item = await shareFile(
-            this.serverUrl,
-            this.spaceId,
-            itemId,
-            file,
-            this.token,
-          );
-          this.items = [item, ...this.items];
-        } finally {
-          this.pendingItemIds.delete(itemId);
-        }
+        const item = await shareFile(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          file,
+          this.token,
+        );
+        this.items = [item, ...this.items];
       }
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
-        this.redirectToJoin();
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       this.uploadError =
@@ -333,8 +354,9 @@ export class SpaceView extends BaseElement {
     try {
       await deleteItem(this.serverUrl, this.spaceId, item.id, this.token);
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
-        this.redirectToJoin();
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       // Revert on failure
@@ -364,8 +386,9 @@ export class SpaceView extends BaseElement {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
-        this.redirectToJoin();
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       // Download failures are non-critical; could surface as a toast later.
@@ -421,6 +444,33 @@ export class SpaceView extends BaseElement {
       return html`
         <div class="flex w-full items-center justify-center py-16">
           <p class="text-sm text-slate-400">Loading space…</p>
+        </div>
+      `;
+    }
+
+    if (this.errorMessage && (this.connectionErrorType === 'auth' || this.connectionErrorType === 'network')) {
+      return html`
+        <div class="mx-auto max-w-lg space-y-4 py-8">
+          <div class="rounded-lg border border-red-900/60 bg-red-950/40 p-4">
+            <p class="mb-1 text-sm font-semibold text-red-300">
+              ${this.connectionErrorType === 'auth' ? 'Access Denied' : 'Connection Failed'}
+            </p>
+            <p class="text-sm text-red-400">${this.errorMessage}</p>
+          </div>
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <button
+              @click=${() => this.loadData()}
+              class="flex-1 rounded-full border border-sky-700 bg-sky-900/30 px-5 py-2 text-sm font-semibold text-sky-300 transition hover:border-sky-600 hover:bg-sky-900/50"
+            >
+              Reconnect
+            </button>
+            <button
+              @click=${() => this.removeSpace()}
+              class="flex-1 rounded-full border border-red-700 bg-red-900/30 px-5 py-2 text-sm font-semibold text-red-300 transition hover:border-red-600 hover:bg-red-900/50"
+            >
+              Remove Space
+            </button>
+          </div>
         </div>
       `;
     }

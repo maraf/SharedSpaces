@@ -145,6 +145,8 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 - **Admin per-space state pattern (2026-03-18):** `src/SharedSpaces.Client/src/features/admin/admin-view.ts` should keep one in-memory state record per space card that combines invitation generation UI with fetched members, pending invitations, and destructive-action loading flags. Load those collections right after `GET /v1/spaces`, refetch pending invitations after generating a new invitation because `InvitationResponse` does not expose the list item ID, and treat any 401 from these follow-up admin calls as a full bounce back to the login form.
 - **Screenshot seed file uploads (2026-03-19):** The items PUT endpoint (`/v1/spaces/{spaceId}/items/{itemId}`) accepts `multipart/form-data` for both text and file items. For file items: fields `id` (UUID), `contentType` = `"file"`, and `file` (Blob with filename). The endpoint returns JSON (the item object), so the `apiCall` helper's `res.json()` works without modification. Node.js `Blob` and `FormData` are available natively in Playwright's Node.js runtime. See `src/SharedSpaces.Client/e2e/screenshots.spec.ts` `seedSpace()` for the pattern.
 - **Delete item pattern (2026-03-19):** `deleteItem()` in `space-api.ts` calls `DELETE /v1/spaces/{spaceId}/items/{itemId}` and returns void (204 No Content). `throwForFailed()` checks `response.ok` first and only reads the body on error, so no adjustment needed for void endpoints. In `space-view.ts`, delete uses optimistic removal (filter item from `this.items` immediately) with revert-on-failure (re-insert and re-sort by `sharedAt`). No SignalR `item-deleted` handler exists yet — local removal is the only mechanism. Delete button uses a trash SVG icon with `hover:text-red-400` to signal destructive action, placed between the copy/download button and the timestamp.
+- **Lit updated() dedup pattern (2026-03-19):** When using `updated(changed)` to trigger async work like data fetching, always track a `lastLoadedKey` to prevent redundant calls. Lit fires `updated()` on every render cycle where reactive properties changed, which can cause duplicate fetches if `connectedCallback()` also triggers loading. Canonical pattern: remove the `connectedCallback()` data call, rely solely on `updated()`, and compare a composite key (e.g., `${serverUrl}|${spaceId}`) against the last loaded key. Applied in `space-view.ts`.
+- **Consistent 401 → redirect pattern (2026-03-19):** All API-calling handlers in `space-view.ts` (`loadData`, `handleTextSubmit`, `uploadFiles`, `handleDelete`, `handleDownload`) now check for `SpaceApiError` with status 401 and call `redirectToJoin()`. Previously only `loadData` did this — other handlers showed error messages on 401, which left users stuck on a broken view. This mirrors the admin panel's 401 → login bounce pattern.
 
 ## Team Updates (2026-03-18)
 
@@ -178,6 +180,59 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 4. **Removed extra left padding** — Text content now flush with card edge (respects card `px-4` but no extra gap/indent)
 
 Pattern established for light-DOM modals: `@state() private modalItem` with `fixed inset-0 z-50 bg-black/80` overlay, `stopPropagation()` on inner card to prevent click-through, and simple close handler. File items keep 📄 icon + filename + size on first row, same action row below.
+- **SignalR client integration (2026-03-19, Issue #26):** Implemented real-time item updates using `@microsoft/signalr` in `src/SharedSpaces.Client/src/lib/signalr-client.ts`. Key patterns:
+  - **HubConnectionBuilder with accessTokenFactory** — Pass JWT via function returning `Promise<string>`, not raw token, to support dynamic token refresh
+  - **Automatic reconnection** — Built-in `.withAutomaticReconnect()` handles connection drops with exponential backoff
+  - **Connection lifecycle in Lit components** — Start SignalR after initial data load (not in constructor/connectedCallback to avoid race with auth), stop in `disconnectedCallback()` for cleanup
+  - **Event deduplication** — Check if item.id already exists before adding (handles race between optimistic local add and SignalR broadcast)
+  - **Reconnection refresh** — On `onreconnected` callback, fetch full item list to catch missed events during disconnection
+  - **Dynamic connection status badge** — Map SignalR's `HubConnectionState` enum to UI-friendly `'connected' | 'disconnected' | 'reconnecting'` and drive badge color/label with reactive `@state()` property
+  - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
+  - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
+  - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
+- **Dead space removal feature (2026-03-19, Issue #48):** Implemented graceful handling of inaccessible spaces. Key patterns:
+  - **Connection error state tracking** — New `connectionErrorType: 'none' | 'auth' | 'network'` state distinguishes between authentication failures (401), network errors (no status code), and other errors
+  - **Error state UI** — Replaced automatic redirect-to-join with an error banner showing "Access Denied" or "Connection Failed" message plus two action buttons: "Reconnect" (retries loadData) and "Remove Space" (deletes token and returns to join screen)
+  - **Token removal pattern** — Use `removeToken(serverUrl, spaceId)` from token-storage utility to delete the localStorage entry, then emit `view-change` event with `reloadSpaces: true` flag
+  - **App-shell coordination** — Extended `AppViewChangeDetail` interface with optional `reloadSpaces?: boolean` flag. App-shell's `handleViewChange` now reloads spaces from storage when this flag is true (in addition to existing reload on new token)
+  - **Consistent error handling** — All 401 responses (in loadData, handleTextSubmit, uploadFiles, handleDelete, handleDownload) now set connectionErrorType instead of calling redirectToJoin()
+  - **SignalR cleanup** — removeSpace() calls stopSignalR() before deleting token to ensure clean disconnection
+  - **Mobile-first layout** — Error state uses `flex-col sm:flex-row` for button layout, stacks vertically on mobile (390×844) and side-by-side on desktop
+
+## Team Updates (2026-03-19)
+
+**Zoe completed SignalR client tests (Issue #26):** 23 comprehensive tests written concurrently with your implementation. Test patterns established:
+- Class-based mock for `new HubConnectionBuilder()` (function mocks don't work with `new`)
+- All state transitions, event handling, errors covered
+- Mock pattern documented for future SignalR testing
+
+**Coordinator fixed Tailwind dynamic class issue:** Your status badge used template literal interpolation (`` `bg-${colors[state]}` ``), which Tailwind v4 cannot purge. Refactored to conditional rendering with static class names (`'bg-emerald-400 text-emerald-900'` etc.). Builds now pass. Learning: Tailwind v4 requires statically analyzable class names.
+
+**Client test suite:** Now 84 total tests passing (token storage 17 + invitation parsing 17 + API client 14 + token validation 13 + SignalR 23).
+
+## Session 2026-03-19T20:26Z — Issue #48 Completion
+
+**Issue:** #48 — Remove Dead Spaces  
+**Branch:** squad/48-remove-dead-spaces  
+**Status:** ✅ COMPLETE (2 commits)
+
+Finalized dead space removal UI implementation:
+
+**Implementation details:**
+- **Space-view.ts** — Error state banner with Reconnect/Remove buttons, token cleanup on removal
+- **App-shell.ts** — Event listener for `reloadSpaces` flag, space list reload and view switching
+- **Navigation.ts** — State management for error conditions
+- **SignalR-client.ts** — Cleanup on space removal, proper disconnection
+
+**Validation:**
+- Lint: ✅ Pass
+- Build: ✅ Pass  
+- Server tests: 83 passing
+- Client tests: 84 passing (unchanged; no new client tests added)
+
+**Decision pattern:** "Dead Space Error Handling Pattern" merged to decisions.md. Establishes graceful degradation pattern for auth/network failures: track error type → provide recovery actions → let users clean up resources → coordinate with app-shell via event flags.
+
+**Next phase:** Ready for code review and merge to main.
 - **SignalR client integration (2026-03-19, Issue #26):** Implemented real-time item updates using `@microsoft/signalr` in `src/SharedSpaces.Client/src/lib/signalr-client.ts`. Key patterns:
   - **HubConnectionBuilder with accessTokenFactory** — Pass JWT via function returning `Promise<string>`, not raw token, to support dynamic token refresh
   - **Automatic reconnection** — Built-in `.withAutomaticReconnect()` handles connection drops with exponential backoff

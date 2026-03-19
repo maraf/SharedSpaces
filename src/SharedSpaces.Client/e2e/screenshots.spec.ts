@@ -21,6 +21,13 @@ const Viewports: ViewportSpec[] = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 
+/** Build a structurally valid JWT (decodable by jwt-decode) with arbitrary claims and garbage signature */
+function buildFakeJwt(claims: Record<string, string>): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  return `${header}.${payload}.fake-signature`;
+}
+
 async function apiCall(url: string, options: RequestInit = {}) {
   const res = await fetch(url, options);
   if (!res.ok) {
@@ -194,6 +201,39 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
       await capture(page, 'space', vp);
+    });
+
+    test(`space view - dead space (auth) - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      // Build a decodable JWT with wrong signature — server returns 401
+      const spaceId = Object.keys(tokenMap)[0].split(':')[1];
+      const fakeJwt = buildFakeJwt({ server_url: SERVER_URL, space_id: spaceId, space_name: 'Dead Space' });
+      const fakeTokenMap: Record<string, string> = {};
+      fakeTokenMap[`${SERVER_URL}:${spaceId}`] = fakeJwt;
+      await injectTokens(page, fakeTokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1500);
+      await capture(page, 'space-dead-auth', vp);
+    });
+
+    test(`space view - dead space (network) - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      // Build a decodable JWT pointing to a non-existent server
+      const deadServer = 'http://localhost:19999';
+      const deadSpaceId = '00000000-0000-0000-0000-000000000000';
+      const fakeJwt = buildFakeJwt({ server_url: deadServer, space_id: deadSpaceId, space_name: 'Offline Space' });
+      const fakeTokenMap: Record<string, string> = {};
+      fakeTokenMap[`${deadServer}:${deadSpaceId}`] = fakeJwt;
+      await injectTokens(page, fakeTokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(3000);
+      await capture(page, 'space-dead-network', vp);
     });
 
     test(`admin view signed-in - ${vp.name}`, async ({ page }) => {
