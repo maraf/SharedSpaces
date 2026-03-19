@@ -1,0 +1,47 @@
+{
+  "name": "SharedSpaces",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:1-10.0",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {},
+    "ghcr.io/devcontainers/features/copilot-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20.19.0"
+    }
+  },
+
+  // Smallest available Codespaces machine (2-core, 8 GB RAM).
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  // Restore NuGet packages and install npm dependencies for the client app.
+  "postCreateCommand": "dotnet restore SharedSpaces.sln && cd src/SharedSpaces.Client && npm ci",
+
+  "forwardPorts": [5173, 5165, 7218],
+  "portsAttributes": {
+    "5173": {
+      "label": "SharedSpaces Client",
+      "onAutoForward": "openBrowser"
+    },
+    "5165": {
+      "label": "SharedSpaces Server"
+    },
+    "7218": {
+      "label": "SharedSpaces Server (HTTPS)"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csdevkit",
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
+      ]
+    }
+  }
+}
