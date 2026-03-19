@@ -116,17 +116,12 @@ async function capture(page: Page, name: string, vp: ViewportSpec) {
 
 test.describe('Screenshot Capture', () => {
   let tokenMap: Record<string, string>;
-  let spaceId: string;
-  let token: string;
   let invitationString: string;
 
   test.beforeAll(async () => {
-    // Seed multiple spaces for a richer pill bar
     const space1 = await seedSpace('Project Alpha');
     const space2 = await seedSpace('Design Team');
 
-    spaceId = space1.space.id;
-    token = space1.token;
     invitationString = space1.invitation.invitationString;
 
     tokenMap = {
