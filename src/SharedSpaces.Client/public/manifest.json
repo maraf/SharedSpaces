@@ -14,6 +14,36 @@
       "purpose": "any"
     }
   ],
+  "screenshots": [
+    {
+      "src": "/screenshots/space--desktop.png",
+      "sizes": "1280x842",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Shared items in a collaborative space"
+    },
+    {
+      "src": "/screenshots/join--desktop.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Join a space with a PIN"
+    },
+    {
+      "src": "/screenshots/space--mobile.png",
+      "sizes": "390x888",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Shared items in a collaborative space"
+    },
+    {
+      "src": "/screenshots/join--mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Join a space with a PIN"
+    }
+  ],
   "share_target": {
     "action": "/_share",
     "method": "POST",
