@@ -118,12 +118,13 @@ export class AppShell extends BaseElement {
           class="mx-auto flex min-h-[calc(100svh-3rem)] w-full max-w-5xl flex-col gap-6"
         >
           <header class="flex flex-col gap-4">
-            <p
-              class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer"
+            <button
+              type="button"
+              class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
               @click=${() => { this.view = 'home'; }}
             >
               SharedSpaces
-            </p>
+            </button>
 
             <nav class="flex items-center gap-2 flex-wrap">
               ${this.spaces.map(
@@ -139,7 +140,7 @@ export class AppShell extends BaseElement {
               <button
                 @click=${() => { this.view = 'join'; }}
                 class="${this.pillBase} ${this.view === 'join' ? this.pillActive : this.pillDefault}"
-                title="Join a space"
+                aria-label="Join a space"
               >
                 +
               </button>

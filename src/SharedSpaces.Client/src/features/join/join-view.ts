@@ -199,6 +199,7 @@ export class JoinView extends BaseElement {
                     id="invitation"
                     type="text"
                     placeholder="https://server.com|space-id|123456"
+                    aria-label="Invitation string"
                     .value=${this.invitationString}
                     @input=${this.handleInvitationPaste}
                     ?disabled=${this.isLoading}
@@ -215,6 +216,7 @@ export class JoinView extends BaseElement {
                     id="serverUrl"
                     type="text"
                     placeholder="Server URL"
+                    aria-label="Server URL"
                     .value=${this.serverUrl}
                     @input=${this.handleServerUrlInput}
                     ?disabled=${this.isLoading}
@@ -224,6 +226,7 @@ export class JoinView extends BaseElement {
                     id="spaceId"
                     type="text"
                     placeholder="Space ID"
+                    aria-label="Space ID"
                     .value=${this.spaceId}
                     @input=${this.handleSpaceIdInput}
                     ?disabled=${this.isLoading}
@@ -233,6 +236,7 @@ export class JoinView extends BaseElement {
                     id="pin"
                     type="text"
                     placeholder="PIN"
+                    aria-label="PIN"
                     .value=${this.pin}
                     @input=${this.handlePinInput}
                     ?disabled=${this.isLoading}
@@ -254,6 +258,7 @@ export class JoinView extends BaseElement {
               id="displayName"
               type="text"
               placeholder="Your display name"
+              aria-label="Display name"
               .value=${this.displayName}
               @input=${this.handleDisplayNameInput}
               ?disabled=${this.isLoading}

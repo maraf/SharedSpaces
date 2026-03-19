@@ -264,23 +264,26 @@ test.describe('Screenshot Capture', () => {
     invitationString = invitation.invitationString;
 
     // Join as first member
+    const pin = invitation.invitationString.split('|')[2];
     const tokenRes = await fetch(`${SERVER_URL}/v1/spaces/${spaceId}/tokens`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: invitation.pin, displayName: 'Alice' }),
+      body: JSON.stringify({ pin, displayName: 'Alice' }),
     });
     const tokenData = await tokenRes.json();
     token = tokenData.token;
 
-    // Add sample items
+    // Add sample items (must use multipart/form-data, not JSON)
     for (const content of ['Welcome to SharedSpaces!', 'This is a shared note.']) {
-      await fetch(`${SERVER_URL}/v1/spaces/${spaceId}/items/${crypto.randomUUID()}`, {
+      const itemId = crypto.randomUUID();
+      const form = new FormData();
+      form.append('id', itemId);
+      form.append('contentType', 'text');
+      form.append('content', content);
+      await fetch(`${SERVER_URL}/v1/spaces/${spaceId}/items/${itemId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ content, contentType: 'text/plain' }),
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: form,
       });
     }
   });

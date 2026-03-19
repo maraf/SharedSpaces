@@ -498,11 +498,21 @@ export class AdminView extends BaseElement {
 
   private openModal(type: 'members' | 'invitations' | 'invite', spaceId: string) {
     this.activeModal = { type, spaceId };
+    this.handleEscapeKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') this.closeModal();
+    };
+    document.addEventListener('keydown', this.handleEscapeKey);
   }
 
   private closeModal = () => {
+    if (this.handleEscapeKey) {
+      document.removeEventListener('keydown', this.handleEscapeKey);
+      this.handleEscapeKey = null;
+    }
     this.activeModal = null;
   };
+
+  private handleEscapeKey: ((e: KeyboardEvent) => void) | null = null;
 
   private handleModalBackdropClick = (e: Event) => {
     if (e.target === e.currentTarget) {
@@ -730,13 +740,17 @@ export class AdminView extends BaseElement {
         @click=${this.handleModalBackdropClick}
       >
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-title"
           class="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
         >
           <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
-            <h3 class="text-sm font-semibold text-white">${title}</h3>
+            <h3 id="modal-title" class="text-sm font-semibold text-white">${title}</h3>
             <button
               type="button"
               @click=${this.closeModal}
+              aria-label="Close dialog"
               class="rounded-full p-1 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
             >
               ✕

@@ -1,12 +1,13 @@
 import { test, type Page } from '@playwright/test';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const SERVER_URL = 'http://localhost:5165';
-const CLIENT_URL = 'http://localhost:5173';
-const ADMIN_SECRET = 'change-this-in-production';
+const SERVER_URL = process.env.SERVER_URL || 'http://localhost:5165';
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 
 interface ViewportSpec {
@@ -109,6 +110,7 @@ async function navigateToAdminSignedIn(page: Page) {
 async function capture(page: Page, name: string, vp: ViewportSpec) {
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.waitForTimeout(300);
+  fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
   const filePath = path.join(SCREENSHOTS_DIR, `${name}--${vp.name}.png`);
   await page.screenshot({ path: filePath, fullPage: true });
   console.log(`  ✓ ${name}--${vp.name}.png`);
