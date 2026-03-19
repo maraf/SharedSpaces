@@ -900,7 +900,7 @@ public class AdminEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["AllowedHosts"] = "https://localhost:5173",
+                    ["Cors:Origins"] = "https://localhost:5173",
                     ["Storage:BasePath"] = "./artifacts/storage-tests"
                 });
             });
