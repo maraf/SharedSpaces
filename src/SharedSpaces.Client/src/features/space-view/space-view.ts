@@ -48,6 +48,7 @@ export class SpaceView extends BaseElement {
   private token?: string;
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
+  private pendingItemIds = new Set<string>();
 
   override updated(changed: Map<string, unknown>) {
     if (changed.has('spaceId') || changed.has('serverUrl')) {
@@ -165,7 +166,7 @@ export class SpaceView extends BaseElement {
   private handleItemAdded(payload: ItemAddedPayload) {
     // Check if item already exists (race with optimistic add)
     const exists = this.items.some((item) => item.id === payload.id);
-    if (exists) return;
+    if (exists || this.pendingItemIds.has(payload.id)) return;
 
     // Prepend new item to the list
     const newItem: SpaceItemResponse = {
@@ -210,8 +211,10 @@ export class SpaceView extends BaseElement {
     this.isUploading = true;
     this.uploadError = '';
 
+    const itemId = crypto.randomUUID();
+    this.pendingItemIds.add(itemId);
+
     try {
-      const itemId = crypto.randomUUID();
       const item = await shareText(
         this.serverUrl,
         this.spaceId,
@@ -231,6 +234,7 @@ export class SpaceView extends BaseElement {
           ? error.message
           : 'Failed to share text.';
     } finally {
+      this.pendingItemIds.delete(itemId);
       this.isUploading = false;
     }
   };
@@ -276,14 +280,19 @@ export class SpaceView extends BaseElement {
     try {
       for (const file of files) {
         const itemId = crypto.randomUUID();
-        const item = await shareFile(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          file,
-          this.token,
-        );
-        this.items = [item, ...this.items];
+        this.pendingItemIds.add(itemId);
+        try {
+          const item = await shareFile(
+            this.serverUrl,
+            this.spaceId,
+            itemId,
+            file,
+            this.token,
+          );
+          this.items = [item, ...this.items];
+        } finally {
+          this.pendingItemIds.delete(itemId);
+        }
       }
     } catch (error) {
       if (error instanceof SpaceApiError && error.status === 401) {
