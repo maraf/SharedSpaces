@@ -370,6 +370,39 @@ const ViewSelectors: Record<string, string> = {
 
 ## Anti-Patterns
 
+### ❌ Don't Touch UI Without Screenshot Verification
+
+**When making any UI change** (layout, styling, components, views), always:
+
+1. **Before** — Capture current screenshots as a baseline (`npx playwright test`)
+2. **Make your changes** — Edit component templates, styles, etc.
+3. **After** — Recapture screenshots and compare with the baseline
+4. **Review mobile** — Check mobile screenshots for layout issues (see below)
+
+This ensures regressions are caught visually, not just via lint/build.
+
+### ❌ Don't Ignore Mobile Layout Issues
+
+After capturing screenshots, inspect the mobile viewport (`390 × 844`) for:
+
+- **Text overflow** — Long strings (UUIDs, URLs, invitation strings) escaping their containers
+- **Button wrapping** — Action buttons pushed below inputs when there isn't enough horizontal space
+- **Pill bar overflow** — Too many space pills causing horizontal overflow or wrapping to a second row
+- **Truncated labels** — Uppercase tracking labels cut off on narrow screens
+- **Touch targets** — Buttons smaller than 44×44px on mobile (especially in modals)
+- **Modal overflow** — Modal content exceeding the viewport height without scrolling
+
+**How to check:** Open the mobile screenshot and visually scan for elements that look broken, misaligned, or clipped. If the Playwright test is set up, you can also add assertions:
+
+```typescript
+// Check no horizontal overflow on mobile
+const body = await page.evaluate(() => ({
+  scrollWidth: document.body.scrollWidth,
+  clientWidth: document.body.clientWidth,
+}));
+expect(body.scrollWidth).toBeLessThanOrEqual(body.clientWidth);
+```
+
 ### ❌ Don't Use URL-Based Navigation
 
 ```typescript
