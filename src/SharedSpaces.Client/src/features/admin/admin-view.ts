@@ -1,7 +1,6 @@
 import { html, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import '../../components/view-card';
 import { BaseElement } from '../../lib/base-element';
 import {
   AdminApiError,
@@ -496,105 +495,99 @@ export class AdminView extends BaseElement {
       return this.renderSecretPrompt();
     }
 
-    const body = html`
-      ${this.renderAuthenticatedHeader()} ${this.renderSpacesSection()}
-    `;
-
     return html`
-      <view-card
-        headline="Admin Panel"
-        supporting-text="Manage spaces, members, and pending invitations"
-        .body=${body}
-      ></view-card>
+      <div class="space-y-8">
+        <div>
+          <h2 class="text-xl font-semibold text-white">Admin Panel</h2>
+          <p class="mt-1 text-sm text-slate-400">
+            Manage spaces, members, and pending invitations
+          </p>
+        </div>
+        ${this.renderAuthenticatedHeader()} ${this.renderSpacesSection()}
+      </div>
     `;
   }
 
   private renderSecretPrompt() {
-    const body = html`
-      <form
-        @submit=${this.handleSecretSubmit}
-        class="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-6"
-      >
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="space-y-2">
-            <label
-              for="admin-server-url"
-              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-            >
-              Server URL
-            </label>
-            <input
-              id="admin-server-url"
-              type="text"
-              .value=${this.serverUrlInput}
-              @input=${(e: InputEvent) =>
-                (this.serverUrlInput = (e.target as HTMLInputElement).value)}
-              placeholder="https://api.example.com"
-              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <label
-              for="admin-secret"
-              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-            >
-              Admin Secret
-            </label>
-            <input
-              id="admin-secret"
-              type="password"
-              .value=${this.secretInput}
-              @input=${(e: InputEvent) =>
-                (this.secretInput = (e.target as HTMLInputElement).value)}
-              placeholder="Enter admin secret"
-              class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-            />
-          </div>
+    return html`
+      <div class="space-y-6">
+        <div>
+          <h2 class="text-xl font-semibold text-white">Admin Access</h2>
+          <p class="mt-1 text-sm text-slate-400">
+            Enter a server URL and admin secret to continue
+          </p>
         </div>
 
-        ${this.errorMessage
-          ? html`
-              <div
-                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+        <form @submit=${this.handleSecretSubmit} class="space-y-4">
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="space-y-2">
+              <label
+                for="admin-server-url"
+                class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
               >
-                ${this.errorMessage}
-              </div>
-            `
-          : null}
+                Server URL
+              </label>
+              <input
+                id="admin-server-url"
+                type="text"
+                .value=${this.serverUrlInput}
+                @input=${(e: InputEvent) =>
+                  (this.serverUrlInput = (e.target as HTMLInputElement).value)}
+                placeholder="https://api.example.com"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+              />
+            </div>
 
-        <button
-          type="submit"
-          ?disabled=${this.isConnecting || !this.secretInput.trim() || !this.serverUrlInput.trim()}
-          class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          ${this.isConnecting ? 'Connecting...' : 'Continue'}
-        </button>
-      </form>
-    `;
+            <div class="space-y-2">
+              <label
+                for="admin-secret"
+                class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+              >
+                Admin Secret
+              </label>
+              <input
+                id="admin-secret"
+                type="password"
+                .value=${this.secretInput}
+                @input=${(e: InputEvent) =>
+                  (this.secretInput = (e.target as HTMLInputElement).value)}
+                placeholder="Enter admin secret"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+              />
+            </div>
+          </div>
 
-    return html`
-      <view-card
-        headline="Admin Access"
-        supporting-text="Enter a server URL and admin secret to continue"
-        .body=${body}
-      ></view-card>
+          ${this.errorMessage
+            ? html`
+                <div
+                  class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+                >
+                  ${this.errorMessage}
+                </div>
+              `
+            : null}
+
+          <button
+            type="submit"
+            ?disabled=${this.isConnecting || !this.secretInput.trim() || !this.serverUrlInput.trim()}
+            class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ${this.isConnecting ? 'Connecting...' : 'Continue'}
+          </button>
+        </form>
+      </div>
     `;
   }
 
   private renderAuthenticatedHeader() {
     return html`
       <div
-        class="flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 md:flex-row md:items-center md:justify-between"
+        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
       >
-        <div class="space-y-2">
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
-          >
-            Connected Server
-          </p>
-          <p class="break-all text-sm text-slate-50">${this.adminServerUrl}</p>
-        </div>
+        <p class="text-sm text-slate-400">
+          Connected to
+          <span class="font-mono text-xs text-slate-300">${this.adminServerUrl}</span>
+        </p>
         <button
           type="button"
           @click=${this.handleLogout}
@@ -603,28 +596,27 @@ export class AdminView extends BaseElement {
           Log out
         </button>
       </div>
+
+      <hr class="border-slate-800/60" />
     `;
   }
 
   private renderSpacesSection() {
     return html`
-      <section class="space-y-6 rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
-        <div class="space-y-1">
+      <section class="space-y-6">
+        <div class="flex items-baseline justify-between">
           <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
           >
             Spaces (${this.spaces.length})
           </p>
-          <p class="text-sm text-slate-400">
-            Create and manage spaces from one place.
-          </p>
         </div>
 
-        <form @submit=${this.handleCreateSpace} class="space-y-4">
+        <form @submit=${this.handleCreateSpace}>
           <div class="space-y-2">
             <label
               for="space-name"
-              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
             >
               Create New Space
             </label>
@@ -652,7 +644,7 @@ export class AdminView extends BaseElement {
           ${this.errorMessage
             ? html`
                 <div
-                  class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+                  class="mt-4 rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
                 >
                   ${this.errorMessage}
                 </div>
@@ -661,44 +653,36 @@ export class AdminView extends BaseElement {
         </form>
 
         ${this.spaces.length === 0
-          ? html`
-              <div
-                class="rounded-2xl border border-dashed border-slate-700 bg-slate-950/60 p-8 text-center"
-              >
-                <p class="text-sm text-slate-400">
-                  No spaces yet. Create one to get started.
-                </p>
-              </div>
-            `
+          ? html`<p class="py-4 text-sm text-slate-500">
+              No spaces yet. Create one to get started.
+            </p>`
           : html`
-              <div class="space-y-3">
-                ${this.spaces.map((space) => this.renderSpaceCard(space))}
+              <div class="space-y-2">
+                ${this.spaces.map((space, index) =>
+                  this.renderSpaceCard(space, index < this.spaces.length - 1),
+                )}
               </div>
             `}
       </section>
     `;
   }
 
-  private renderSpaceCard(space: SpaceResponse) {
+  private renderSpaceCard(space: SpaceResponse, showDivider: boolean) {
     const state = this.getSpaceCardState(space.id);
 
     return html`
-      <div
-        class="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"
-      >
-        <div class="flex items-start justify-between">
-          <div class="flex-1">
-            <h3 class="text-lg font-semibold text-white">${space.name}</h3>
-            <p class="mt-1 font-mono text-xs text-slate-400">${space.id}</p>
-            <p class="mt-1 text-xs text-slate-500">
-              Created ${this.formatDate(space.createdAt)}
-            </p>
-          </div>
+      <div class="space-y-5 pt-4">
+        <div>
+          <h3 class="text-lg font-semibold text-white">${space.name}</h3>
+          <p class="mt-0.5 font-mono text-xs text-slate-500">${space.id}</p>
+          <p class="text-xs text-slate-500">
+            Created ${this.formatDate(space.createdAt)}
+          </p>
         </div>
 
-        <div class="space-y-3 border-t border-slate-800 pt-4">
+        <div class="space-y-3">
           <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
           >
             Generate Invitation
           </p>
@@ -741,18 +725,18 @@ export class AdminView extends BaseElement {
 
         ${this.renderMembersSection(space.id, state)}
         ${this.renderInvitationsSection(space.id, state)}
+
+        ${showDivider ? html`<hr class="border-slate-800/60" />` : null}
       </div>
     `;
   }
 
   private renderMembersSection(spaceId: string, state: SpaceCardState) {
     return html`
-      <section
-        class="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
-      >
+      <div class="space-y-3">
         <div class="flex items-center justify-between gap-3">
           <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
           >
             Members (${state.members.length})
           </p>
@@ -772,22 +756,16 @@ export class AdminView extends BaseElement {
           : null}
 
         ${state.members.length === 0 && !state.isLoadingMembers && !state.membersError
-          ? html`
-              <div
-                class="rounded-lg border border-dashed border-slate-800 bg-slate-950/60 px-4 py-5 text-sm text-slate-400"
-              >
-                No members yet.
-              </div>
-            `
+          ? html`<p class="text-sm text-slate-500">No members yet.</p>`
           : html`
-              <div class="space-y-3">
+              <div class="divide-y divide-slate-800/60">
                 ${state.members.map((member) => {
                   const isPending = !!state.pendingMemberRevocations[member.id];
                   return html`
                     <div
-                      class="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 md:flex-row md:items-center md:justify-between"
+                      class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
                     >
-                      <div class="space-y-1">
+                      <div class="space-y-0.5">
                         <div class="flex flex-wrap items-center gap-2">
                           <p
                             class=${member.isRevoked
@@ -799,7 +777,7 @@ export class AdminView extends BaseElement {
                           ${member.isRevoked
                             ? html`
                                 <span
-                                  class="rounded-full border border-rose-800 bg-rose-950/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200"
+                                  class="rounded-full border border-rose-800 bg-rose-950/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200"
                                 >
                                   Revoked
                                 </span>
@@ -808,8 +786,8 @@ export class AdminView extends BaseElement {
                         </div>
                         <p
                           class=${member.isRevoked
-                            ? 'text-xs text-slate-500'
-                            : 'text-xs text-slate-400'}
+                            ? 'text-xs text-slate-600'
+                            : 'text-xs text-slate-500'}
                         >
                           Joined ${this.formatDate(member.joinedAt)}
                         </p>
@@ -822,7 +800,7 @@ export class AdminView extends BaseElement {
                               type="button"
                               @click=${() => this.handleRevokeMember(spaceId, member.id)}
                               ?disabled=${isPending}
-                              class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                              class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-1.5 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               ${isPending ? 'Revoking...' : 'Revoke'}
                             </button>
@@ -832,18 +810,16 @@ export class AdminView extends BaseElement {
                 })}
               </div>
             `}
-      </section>
+      </div>
     `;
   }
 
   private renderInvitationsSection(spaceId: string, state: SpaceCardState) {
     return html`
-      <section
-        class="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
-      >
+      <div class="space-y-3">
         <div class="flex items-center justify-between gap-3">
           <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400"
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
           >
             Pending Invitations (${state.invitations.length})
           </p>
@@ -865,27 +841,19 @@ export class AdminView extends BaseElement {
         ${state.invitations.length === 0 &&
         !state.isLoadingInvitations &&
         !state.invitationsError
-          ? html`
-              <div
-                class="rounded-lg border border-dashed border-slate-800 bg-slate-950/60 px-4 py-5 text-sm text-slate-400"
-              >
-                No pending invitations
-              </div>
-            `
+          ? html`<p class="text-sm text-slate-500">No pending invitations</p>`
           : html`
-              <div class="space-y-3">
+              <div class="divide-y divide-slate-800/60">
                 ${state.invitations.map((invitation) => {
                   const isPending =
                     !!state.pendingInvitationDeletions[invitation.id];
                   return html`
                     <div
-                      class="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 md:flex-row md:items-center md:justify-between"
+                      class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
                     >
-                      <div class="space-y-1">
-                        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                          Invitation ID
-                        </p>
-                        <p class="break-all font-mono text-sm text-slate-100">
+                      <div class="space-y-0.5">
+                        <p class="text-xs text-slate-500">Invitation ID</p>
+                        <p class="break-all font-mono text-sm text-slate-300">
                           ${invitation.id}
                         </p>
                       </div>
@@ -894,7 +862,7 @@ export class AdminView extends BaseElement {
                         @click=${() =>
                           this.handleDeleteInvitation(spaceId, invitation.id)}
                         ?disabled=${isPending}
-                        class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                        class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-1.5 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         ${isPending ? 'Deleting...' : 'Delete'}
                       </button>
@@ -903,15 +871,13 @@ export class AdminView extends BaseElement {
                 })}
               </div>
             `}
-      </section>
+      </div>
     `;
   }
 
   private renderGeneratedInvitation(invitation: InvitationResponse) {
     return html`
-      <div
-        class="space-y-4 rounded-xl border border-emerald-900 bg-emerald-950/30 p-4"
-      >
+      <div class="space-y-3 border-l-2 border-emerald-800 pl-4">
         <div class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
             Invitation String
@@ -921,12 +887,12 @@ export class AdminView extends BaseElement {
               type="text"
               readonly
               .value=${invitation.invitationString}
-              class="flex-1 rounded border border-emerald-800 bg-emerald-950/50 px-3 py-2 font-mono text-xs text-emerald-300"
+              class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs text-emerald-300"
             />
             <button
               type="button"
               @click=${() => this.handleCopyInvitation(invitation.invitationString)}
-              class="rounded-full border border-emerald-700 bg-emerald-900/50 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900"
+              class="rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
               title="Copy to clipboard"
             >
               📋 Copy
