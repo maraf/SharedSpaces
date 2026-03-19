@@ -176,6 +176,14 @@ Pattern established for light-DOM modals: `@state() private modalItem` with `fix
   - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
   - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
   - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
+- **Dead space removal feature (2026-03-19, Issue #48):** Implemented graceful handling of inaccessible spaces. Key patterns:
+  - **Connection error state tracking** — New `connectionErrorType: 'none' | 'auth' | 'network'` state distinguishes between authentication failures (401), network errors (no status code), and other errors
+  - **Error state UI** — Replaced automatic redirect-to-join with an error banner showing "Access Denied" or "Connection Failed" message plus two action buttons: "Reconnect" (retries loadData) and "Remove Space" (deletes token and returns to join screen)
+  - **Token removal pattern** — Use `removeToken(serverUrl, spaceId)` from token-storage utility to delete the localStorage entry, then emit `view-change` event with `reloadSpaces: true` flag
+  - **App-shell coordination** — Extended `AppViewChangeDetail` interface with optional `reloadSpaces?: boolean` flag. App-shell's `handleViewChange` now reloads spaces from storage when this flag is true (in addition to existing reload on new token)
+  - **Consistent error handling** — All 401 responses (in loadData, handleTextSubmit, uploadFiles, handleDelete, handleDownload) now set connectionErrorType instead of calling redirectToJoin()
+  - **SignalR cleanup** — removeSpace() calls stopSignalR() before deleting token to ensure clean disconnection
+  - **Mobile-first layout** — Error state uses `flex-col sm:flex-row` for button layout, stacks vertically on mobile (390×844) and side-by-side on desktop
 
 ## Team Updates (2026-03-19)
 
