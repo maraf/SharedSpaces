@@ -247,3 +247,12 @@ Finalized dead space removal UI implementation:
 ## Learnings
 
 - **Item duplication race condition fix (2026-01):** Fixed race between HTTP PUT response and SignalR ItemAdded event in src/SharedSpaces.Client/src/features/space-view/space-view.ts. Pattern: track pending upload IDs in a private pendingItemIds = new Set<string>() field (not reactive—internal tracking only). In handleTextSubmit/uploadFiles, add generated UUID to set before API call, remove in finally block. In handleItemAdded, check both this.items.some(...) AND this.pendingItemIds.has(payload.id) before adding item. This prevents SignalR from adding items that are currently being uploaded by the same client. Simple O(1) Set lookups, no complex state machine needed. Cleanup in finally blocks ensures no leaked pending IDs even on error.
+
+- **UI tweaks batch (Issue #50):** Five small CSS/layout fixes across space-view, join-view, admin-view:
+  - Text modal `text-start` class ensures left-alignment regardless of parent flex context
+  - `cursor-pointer` on item action buttons (copy, download, delete) — Tailwind v4 doesn't auto-add cursor:pointer on buttons
+  - Join form: removed `mx-auto` to left-align instead of center
+  - Admin login: removed `md:grid-cols-2` to stack inputs vertically
+  - Space view header: removed duplicate space name (already in pill bar), kept only the compact connection status badge
+  - Cleaned up unused `spaceInfo` state and `SpaceDetailsResponse` import after header removal
+  - Key files: `space-view.ts` (renderHeader, renderModal, action buttons), `join-view.ts` (outer container), `admin-view.ts` (login form grid)
