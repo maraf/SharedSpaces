@@ -27,6 +27,7 @@ public static class ItemEndpoints
 
         var itemsGroup = spaceGroup.MapGroup("/items");
         itemsGroup.MapGet("/", GetItems);
+        itemsGroup.MapGet("/{itemId:guid}/download", DownloadFile);
         itemsGroup.MapPut("/{itemId:guid}", UpsertItem)
             .DisableAntiforgery();
         itemsGroup.MapDelete("/{itemId:guid}", DeleteItem);
@@ -91,6 +92,45 @@ public static class ItemEndpoints
             .ToListAsync(cancellationToken);
 
         return Results.Ok(items);
+    }
+
+    private static async Task<IResult> DownloadFile(
+        Guid spaceId,
+        Guid itemId,
+        HttpContext httpContext,
+        AppDbContext db,
+        IFileStorage fileStorage,
+        CancellationToken cancellationToken)
+    {
+        var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
+        if (authorizationResult is not null)
+        {
+            return authorizationResult;
+        }
+
+        var item = await db.SpaceItems
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                existing => existing.SpaceId == spaceId && existing.Id == itemId,
+                cancellationToken);
+
+        if (item is null || !string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.NotFound(new { Error = "Item not found" });
+        }
+
+        Stream stream;
+        try
+        {
+            stream = await fileStorage.ReadAsync(spaceId, itemId, cancellationToken);
+        }
+        catch (FileNotFoundException)
+        {
+            return Results.NotFound(new { Error = "Item not found" });
+        }
+
+        var fileName = !string.IsNullOrWhiteSpace(item.Content) ? item.Content : $"{itemId}.bin";
+        return Results.File(stream, "application/octet-stream", fileName);
     }
 
     private static async Task<IResult> UpsertItem(

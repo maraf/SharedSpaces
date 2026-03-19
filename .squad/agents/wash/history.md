@@ -129,6 +129,8 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 - **Admin view state + navigation guardrails (2026-03-18):** In `src/SharedSpaces.Client/src/features/admin/admin-view.ts`, initialize per-space invitation form state when the `spaces` list changes rather than lazily creating it during `render()`. For Lit `@state` maps, prefer whole-record replacement helpers (`updateInvitationState`) over nested object mutation so reactivity stays predictable. In `src/SharedSpaces.Client/src/app-shell.ts`, non-join views should expose an explicit route back to `'join'` from the shell header so users cannot get trapped in admin-only flows.
 - **Admin login is now fetch-based and ephemeral (2026-03-18):** The admin panel should validate credentials by calling `GET /v1/spaces` with `X-Admin-Secret` and treat the returned `SpaceResponse[]` as the initial source of truth. Do not persist admin secrets, server URLs, or cached spaces in `localStorage`; keep them only in Lit component state so a refresh returns the user to the login form.
 - **Admin per-space state pattern (2026-03-18):** `src/SharedSpaces.Client/src/features/admin/admin-view.ts` should keep one in-memory state record per space card that combines invitation generation UI with fetched members, pending invitations, and destructive-action loading flags. Load those collections right after `GET /v1/spaces`, refetch pending invitations after generating a new invitation because `InvitationResponse` does not expose the list item ID, and treat any 401 from these follow-up admin calls as a full bounce back to the login form.
+- **Screenshot seed file uploads (2026-03-19):** The items PUT endpoint (`/v1/spaces/{spaceId}/items/{itemId}`) accepts `multipart/form-data` for both text and file items. For file items: fields `id` (UUID), `contentType` = `"file"`, and `file` (Blob with filename). The endpoint returns JSON (the item object), so the `apiCall` helper's `res.json()` works without modification. Node.js `Blob` and `FormData` are available natively in Playwright's Node.js runtime. See `src/SharedSpaces.Client/e2e/screenshots.spec.ts` `seedSpace()` for the pattern.
+- **Delete item pattern (2026-03-19):** `deleteItem()` in `space-api.ts` calls `DELETE /v1/spaces/{spaceId}/items/{itemId}` and returns void (204 No Content). `throwForFailed()` checks `response.ok` first and only reads the body on error, so no adjustment needed for void endpoints. In `space-view.ts`, delete uses optimistic removal (filter item from `this.items` immediately) with revert-on-failure (re-insert and re-sort by `sharedAt`). No SignalR `item-deleted` handler exists yet — local removal is the only mechanism. Delete button uses a trash SVG icon with `hover:text-red-400` to signal destructive action, placed between the copy/download button and the timestamp.
 
 ## Team Updates (2026-03-18)
 
@@ -152,3 +154,13 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - `wash-pr-feedback.md`: Back navigation in shell chrome (app-shell.ts) for cross-view consistency.
 
 **Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.
+
+## Team Updates (2026-03-19)
+
+**Mobile-first item card redesign (2026-03-19):** Redesigned `src/SharedSpaces.Client/src/features/space-view/space-view.ts` item cards for better mobile layout at 390×844. Changes:
+1. **Relative timestamps** — Replaced full datetime with "just now", "Xm ago", "Xh ago", "Xd ago", or "Mar 19" for older items
+2. **Two-row layout** — Moved action icons (copy/download, delete) and timestamp to a second row below content to prevent cramming
+3. **Text truncation + modal** — Text items now truncate to single line with ellipsis. Clicking opens a modal with full content (dark overlay, centered card, click-outside-to-dismiss)
+4. **Removed extra left padding** — Text content now flush with card edge (respects card `px-4` but no extra gap/indent)
+
+Pattern established for light-DOM modals: `@state() private modalItem` with `fixed inset-0 z-50 bg-black/80` overlay, `stopPropagation()` on inner card to prevent click-through, and simple close handler. File items keep 📄 icon + filename + size on first row, same action row below.

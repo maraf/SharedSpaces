@@ -1,7 +1,20 @@
-import { html } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { html, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
+import type { AppViewChangeDetail } from '../../lib/navigation';
+import { getToken } from '../../lib/token-storage';
+import {
+  getSpaceInfo,
+  getItems,
+  shareText,
+  shareFile,
+  downloadFile,
+  deleteItem,
+  SpaceApiError,
+  type SpaceDetailsResponse,
+  type SpaceItemResponse,
+} from './space-api';
 
 @customElement('space-view')
 export class SpaceView extends BaseElement {
@@ -14,36 +27,556 @@ export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'server-url' })
   serverUrl?: string;
 
+  @state() private spaceInfo?: SpaceDetailsResponse;
+  @state() private items: SpaceItemResponse[] = [];
+  @state() private isLoading = true;
+  @state() private errorMessage = '';
+  @state() private textInput = '';
+  @state() private isUploading = false;
+  @state() private uploadError = '';
+  @state() private dragOver = false;
+  @state() private copiedItemIds = new Set<string>();
+  @state() private modalItem: SpaceItemResponse | null = null;
+
+  private token?: string;
+  private lastLoadedKey = '';
+
+  override updated(changed: Map<string, unknown>) {
+    if (changed.has('spaceId') || changed.has('serverUrl')) {
+      const key = `${this.serverUrl ?? ''}|${this.spaceId ?? ''}`;
+      if (key !== this.lastLoadedKey) {
+        this.lastLoadedKey = key;
+        this.loadData();
+      }
+    }
+  }
+
+  private resolveToken(): string | undefined {
+    if (this.serverUrl && this.spaceId) {
+      return getToken(this.serverUrl, this.spaceId);
+    }
+    return undefined;
+  }
+
+  private redirectToJoin() {
+    this.dispatchEvent(
+      new CustomEvent<AppViewChangeDetail>('view-change', {
+        bubbles: true,
+        composed: true,
+        detail: { view: 'join' },
+      }),
+    );
+  }
+
+  private async loadData() {
+    if (!this.serverUrl || !this.spaceId) return;
+
+    this.token = this.resolveToken();
+    if (!this.token) {
+      this.redirectToJoin();
+      return;
+    }
+
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    try {
+      const [info, itemList] = await Promise.all([
+        getSpaceInfo(this.serverUrl, this.spaceId, this.token),
+        getItems(this.serverUrl, this.spaceId, this.token),
+      ]);
+      this.spaceInfo = info;
+      this.items = itemList;
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
+      this.errorMessage =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to load space data.';
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  private handleTextInput = (e: Event) => {
+    this.textInput = (e.target as HTMLTextAreaElement).value;
+    this.uploadError = '';
+  };
+
+  private handleTextSubmit = async () => {
+    if (!this.textInput.trim() || !this.serverUrl || !this.spaceId || !this.token)
+      return;
+
+    this.isUploading = true;
+    this.uploadError = '';
+
+    try {
+      const itemId = crypto.randomUUID();
+      const item = await shareText(
+        this.serverUrl,
+        this.spaceId,
+        itemId,
+        this.textInput.trim(),
+        this.token,
+      );
+      this.items = [item, ...this.items];
+      this.textInput = '';
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
+      this.uploadError =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to share text.';
+    } finally {
+      this.isUploading = false;
+    }
+  };
+
+  private handleTextKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      this.handleTextSubmit();
+    }
+  };
+
+  private handleFileSelect = async (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+    await this.uploadFiles(Array.from(files));
+    input.value = '';
+  };
+
+  private handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    this.dragOver = true;
+  };
+
+  private handleDragLeave = () => {
+    this.dragOver = false;
+  };
+
+  private handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    this.dragOver = false;
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    await this.uploadFiles(Array.from(files));
+  };
+
+  private async uploadFiles(files: File[]) {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    this.isUploading = true;
+    this.uploadError = '';
+
+    try {
+      for (const file of files) {
+        const itemId = crypto.randomUUID();
+        const item = await shareFile(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          file,
+          this.token,
+        );
+        this.items = [item, ...this.items];
+      }
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
+      this.uploadError =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to upload file.';
+    } finally {
+      this.isUploading = false;
+    }
+  }
+
+  private handleCopy = async (item: SpaceItemResponse) => {
+    try {
+      await navigator.clipboard.writeText(item.content);
+      this.copiedItemIds = new Set([...this.copiedItemIds, item.id]);
+      setTimeout(() => {
+        const next = new Set(this.copiedItemIds);
+        next.delete(item.id);
+        this.copiedItemIds = next;
+      }, 1500);
+    } catch {
+      // Clipboard API may fail in insecure contexts; silently ignore.
+    }
+  };
+
+  private handleDelete = async (item: SpaceItemResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    // Optimistic removal
+    this.items = this.items.filter((i) => i.id !== item.id);
+
+    try {
+      await deleteItem(this.serverUrl, this.spaceId, item.id, this.token);
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
+      // Revert on failure
+      this.items = [...this.items, item].sort(
+        (a, b) =>
+          new Date(b.sharedAt).getTime() - new Date(a.sharedAt).getTime(),
+      );
+    }
+  };
+
+  private handleDownload = async (item: SpaceItemResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    try {
+      const blob = await downloadFile(
+        this.serverUrl,
+        this.spaceId,
+        item.id,
+        this.token,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = item.content;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
+      // Download failures are non-critical; could surface as a toast later.
+    }
+  };
+
+  private handleTextClick = (item: SpaceItemResponse) => {
+    this.modalItem = item;
+  };
+
+  private closeModal = () => {
+    this.modalItem = null;
+  };
+
+  private formatFileSize(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(
+      Math.floor(Math.log(bytes) / Math.log(1024)),
+      units.length - 1,
+    );
+    const size = bytes / Math.pow(1024, i);
+    return `${i === 0 ? size : size.toFixed(1)} ${units[i]}`;
+  }
+
+  private formatTime(iso: string): string {
+    try {
+      const now = Date.now();
+      const date = new Date(iso);
+      const diffMs = now - date.getTime();
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+
+      if (diffSec < 60) return 'just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      if (diffHour < 24) return `${diffHour}h ago`;
+      if (diffDay < 7) return `${diffDay}d ago`;
+
+      // Older than a week: show short date like "Mar 19"
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${months[date.getMonth()]} ${date.getDate()}`;
+    } catch {
+      return iso;
+    }
+  }
+
+  // --- Rendering ---
+
   override render() {
+    if (this.isLoading) {
+      return html`
+        <div class="flex w-full items-center justify-center py-16">
+          <p class="text-sm text-slate-400">Loading space…</p>
+        </div>
+      `;
+    }
+
+    if (this.errorMessage) {
+      return html`
+        <div class="mx-auto max-w-lg space-y-4 py-8">
+          <p class="text-sm text-red-400">${this.errorMessage}</p>
+          <button
+            @click=${() => this.loadData()}
+            class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+          >
+            Retry
+          </button>
+        </div>
+      `;
+    }
+
     return html`
       <div class="space-y-8">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-              Item feed
-            </p>
-            <h2 class="mt-1 text-xl font-semibold text-white">No items yet</h2>
-          </div>
-          <span
-            class="mt-1 shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300"
+        ${this.renderHeader()}
+        ${this.renderUploadArea()}
+        ${this.renderItemsList()}
+        ${this.modalItem ? this.renderModal() : nothing}
+      </div>
+    `;
+  }
+
+  private renderHeader() {
+    return html`
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
           >
-            Connected
-          </span>
+            Space
+          </p>
+          <h2 class="mt-1 text-xl font-semibold text-white">
+            ${this.spaceInfo?.name ?? this.spaceId}
+          </h2>
+        </div>
+        <span
+          class="mt-1 shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300"
+        >
+          Connected
+        </span>
+      </div>
+    `;
+  }
+
+  private renderUploadArea() {
+    return html`
+      <section class="space-y-4">
+        <!-- Text input -->
+        <div class="space-y-2">
+          <textarea
+            rows="3"
+            placeholder="Share some text…"
+            aria-label="Text to share"
+            .value=${this.textInput}
+            @input=${this.handleTextInput}
+            @keydown=${this.handleTextKeydown}
+            ?disabled=${this.isUploading}
+            class="w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20 disabled:opacity-50"
+          ></textarea>
+          <div class="flex items-center gap-3">
+            <button
+              @click=${this.handleTextSubmit}
+              ?disabled=${this.isUploading || !this.textInput.trim()}
+              class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              ${this.isUploading ? 'Sending…' : 'Share Text'}
+            </button>
+            <span class="text-xs text-slate-500">Ctrl/⌘+Enter to send</span>
+          </div>
         </div>
 
-        <p class="text-sm text-slate-400">
-          Uploaded files and shared text will appear here with real-time updates.
+        <!-- File upload / drag-and-drop -->
+        <div
+          @dragover=${this.handleDragOver}
+          @dragleave=${this.handleDragLeave}
+          @drop=${this.handleDrop}
+          class="relative rounded-lg border-2 border-dashed p-6 text-center transition ${this
+            .dragOver
+            ? 'border-sky-400 bg-sky-950/30'
+            : 'border-slate-700 hover:border-slate-600'}"
+        >
+          <input
+            type="file"
+            multiple
+            @change=${this.handleFileSelect}
+            ?disabled=${this.isUploading}
+            class="absolute inset-0 cursor-pointer opacity-0"
+            aria-label="Upload files"
+          />
+          <p class="text-sm text-slate-400">
+            ${this.dragOver
+              ? html`<span class="text-sky-300">Drop files here</span>`
+              : html`Drag & drop files here or
+                  <span class="font-medium text-sky-400">browse</span>`}
+          </p>
+        </div>
+
+        <!-- Upload error -->
+        ${this.uploadError
+          ? html`<p class="text-sm text-red-400">${this.uploadError}</p>`
+          : nothing}
+      </section>
+
+      <hr class="border-slate-800/60" />
+    `;
+  }
+
+  private renderItemsList() {
+    if (this.items.length === 0) {
+      return html`
+        <p class="py-4 text-center text-sm text-slate-500">
+          No items shared yet. Be the first!
+        </p>
+      `;
+    }
+
+    return html`
+      <section class="space-y-3">
+        <p
+          class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+        >
+          Shared items
+          <span class="ml-1 text-slate-600">(${this.items.length})</span>
         </p>
 
-        <hr class="border-slate-800/60" />
+        <ul class="space-y-2">
+          ${this.items.map((item) => this.renderItemCard(item))}
+        </ul>
+      </section>
+    `;
+  }
 
-        <div class="flex flex-wrap gap-x-8 gap-y-2 text-sm text-slate-500">
-          ${this.spaceId
-            ? html`<span>Space <span class="font-mono text-xs text-slate-400">${this.spaceId}</span></span>`
-            : ''}
-          ${this.serverUrl
-            ? html`<span>Server <span class="font-mono text-xs text-slate-400">${this.serverUrl}</span></span>`
-            : ''}
+  private renderItemCard(item: SpaceItemResponse) {
+    const isFile = item.contentType === 'file';
+
+    return html`
+      <li
+        class="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+      >
+        <div class="space-y-1">
+          <!-- Row 1: Content (single line, truncated, clickable for text) -->
+          <div class="min-w-0">
+            ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
+          </div>
+          <!-- Row 2: Actions + relative time -->
+          <div class="flex items-center gap-1">
+            ${isFile ? this.renderDownloadButton(item) : this.renderCopyButton(item)}
+            ${this.renderDeleteButton(item)}
+            <time
+              class="ml-auto text-xs text-slate-500"
+              datetime=${item.sharedAt}
+            >
+              ${this.formatTime(item.sharedAt)}
+            </time>
+          </div>
+        </div>
+      </li>
+    `;
+  }
+
+  private renderCopyButton(item: SpaceItemResponse) {
+    const copied = this.copiedItemIds.has(item.id);
+    return html`
+      <button
+        @click=${() => this.handleCopy(item)}
+        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        title=${copied ? 'Copied!' : 'Copy to clipboard'}
+        aria-label=${copied ? 'Copied to clipboard' : 'Copy text to clipboard'}
+      >
+        ${copied
+          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+          : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+      </button>
+    `;
+  }
+
+  private renderDeleteButton(item: SpaceItemResponse) {
+    return html`
+      <button
+        @click=${() => this.handleDelete(item)}
+        class="rounded p-2 text-slate-500 transition hover:text-red-400"
+        title="Delete item"
+        aria-label="Delete item"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+      </button>
+    `;
+  }
+
+  private renderDownloadButton(item: SpaceItemResponse) {
+    return html`
+      <button
+        @click=${() => this.handleDownload(item)}
+        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        title="Download file"
+        aria-label="Download file"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      </button>
+    `;
+  }
+
+  private renderTextContent(item: SpaceItemResponse) {
+    return html`
+      <p
+        class="cursor-pointer truncate text-sm text-slate-200 hover:text-slate-100"
+        @click=${() => this.handleTextClick(item)}
+        title="Click to view full text"
+      >
+        ${item.content}
+      </p>
+    `;
+  }
+
+  private renderFileContent(item: SpaceItemResponse) {
+    return html`
+      <div class="flex items-center gap-2">
+        <span class="text-base" aria-hidden="true">📄</span>
+        <div class="min-w-0">
+          <p
+            class="truncate text-sm font-medium text-slate-200"
+            title=${item.content}
+          >
+            ${item.content}
+          </p>
+          <p class="text-xs text-slate-500">
+            ${this.formatFileSize(item.fileSize)}
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderModal() {
+    if (!this.modalItem) return nothing;
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+        @click=${this.closeModal}
+      >
+        <div
+          class="relative mx-4 max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <h3 class="text-lg font-semibold text-white">Full Text</h3>
+            <button
+              @click=${this.closeModal}
+              class="rounded p-1 text-slate-400 transition hover:text-white"
+              aria-label="Close modal"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
+            ${this.modalItem.content}
+          </p>
         </div>
       </div>
     `;
