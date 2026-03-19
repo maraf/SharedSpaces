@@ -36,6 +36,7 @@ export class SpaceView extends BaseElement {
   @state() private uploadError = '';
   @state() private dragOver = false;
   @state() private copiedItemIds = new Set<string>();
+  @state() private modalItem: SpaceItemResponse | null = null;
 
   private token?: string;
 
@@ -247,6 +248,14 @@ export class SpaceView extends BaseElement {
     }
   };
 
+  private handleTextClick = (item: SpaceItemResponse) => {
+    this.modalItem = item;
+  };
+
+  private closeModal = () => {
+    this.modalItem = null;
+  };
+
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
@@ -260,7 +269,22 @@ export class SpaceView extends BaseElement {
 
   private formatTime(iso: string): string {
     try {
-      return new Date(iso).toLocaleString();
+      const now = Date.now();
+      const date = new Date(iso);
+      const diffMs = now - date.getTime();
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+
+      if (diffSec < 60) return 'just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      if (diffHour < 24) return `${diffHour}h ago`;
+      if (diffDay < 7) return `${diffDay}d ago`;
+
+      // Older than a week: show short date like "Mar 19"
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${months[date.getMonth()]} ${date.getDate()}`;
     } catch {
       return iso;
     }
@@ -296,6 +320,7 @@ export class SpaceView extends BaseElement {
         ${this.renderHeader()}
         ${this.renderUploadArea()}
         ${this.renderItemsList()}
+        ${this.modalItem ? this.renderModal() : nothing}
       </div>
     `;
   }
@@ -417,15 +442,17 @@ export class SpaceView extends BaseElement {
       <li
         class="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0 flex-1 space-y-1">
+        <div class="space-y-1">
+          <!-- Row 1: Content (single line, truncated, clickable for text) -->
+          <div class="min-w-0">
             ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
           </div>
-          <div class="flex shrink-0 items-center gap-1">
+          <!-- Row 2: Actions + relative time -->
+          <div class="flex items-center gap-1">
             ${isFile ? this.renderDownloadButton(item) : this.renderCopyButton(item)}
             ${this.renderDeleteButton(item)}
             <time
-              class="text-xs text-slate-500"
+              class="ml-auto text-xs text-slate-500"
               datetime=${item.sharedAt}
             >
               ${this.formatTime(item.sharedAt)}
@@ -480,7 +507,11 @@ export class SpaceView extends BaseElement {
 
   private renderTextContent(item: SpaceItemResponse) {
     return html`
-      <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
+      <p
+        class="cursor-pointer truncate text-sm text-slate-200 hover:text-slate-100"
+        @click=${() => this.handleTextClick(item)}
+        title="Click to view full text"
+      >
         ${item.content}
       </p>
     `;
@@ -499,6 +530,36 @@ export class SpaceView extends BaseElement {
           </p>
           <p class="text-xs text-slate-500">
             ${this.formatFileSize(item.fileSize)}
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderModal() {
+    if (!this.modalItem) return nothing;
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+        @click=${this.closeModal}
+      >
+        <div
+          class="relative mx-4 max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <h3 class="text-lg font-semibold text-white">Full Text</h3>
+            <button
+              @click=${this.closeModal}
+              class="rounded p-1 text-slate-400 transition hover:text-white"
+              aria-label="Close modal"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
+            ${this.modalItem.content}
           </p>
         </div>
       </div>
