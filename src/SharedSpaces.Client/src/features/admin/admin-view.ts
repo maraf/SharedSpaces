@@ -905,7 +905,7 @@ export class AdminView extends BaseElement {
 
   private renderGeneratedInvitation(invitation: InvitationResponse) {
     return html`
-      <div class="space-y-3 border-l-2 border-emerald-800 pl-4">
+      <div class="space-y-3">
         <div class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
             Invitation String
