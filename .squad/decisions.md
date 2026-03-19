@@ -743,8 +743,9 @@ Issue #24 required implementing the client-side join flow: parsing invitation li
 
 #### Invitation Format
 - **Server generates:** `serverUrl|spaceId|pin` (pipe-delimited, NOT colon-delimited)
-- **QR code URL:** `{clientAppUrl}/join?invitation={url_encoded_invitation_string}`
-- **Example:** `https://client.example.com/join?invitation=https%3A%2F%2Fserver.example.com%7C550e8400-e29b-41d4-a716-446655440000%7C123456`
+- **QR code URL:** `{clientAppUrl}/?join={url_encoded_invitation_string}`
+- **Example:** `https://client.example.com/?join=https%3A%2F%2Fserver.example.com%7C550e8400-e29b-41d4-a716-446655440000%7C123456`
+- After successful parse, the client strips the `join` query parameter via `history.replaceState`
 
 #### JWT Storage Strategy
 - **Multi-server support:** Client can connect to multiple servers simultaneously

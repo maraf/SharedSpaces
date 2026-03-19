@@ -40,13 +40,16 @@ export class JoinView extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     
-    // Check URL for invitation parameter
+    // Check URL for join query parameter
     const urlInvitation = parseInvitationFromUrl();
     if (urlInvitation) {
       this.serverUrl = urlInvitation.serverUrl;
       this.spaceId = urlInvitation.spaceId;
       this.pin = urlInvitation.pin;
       this.invitationString = `${urlInvitation.serverUrl}|${urlInvitation.spaceId}|${urlInvitation.pin}`;
+
+      // Strip join query parameter from URL
+      window.history.replaceState({}, '', window.location.pathname);
     }
 
     // Pre-fill display name from localStorage
@@ -64,6 +67,10 @@ export class JoinView extends BaseElement {
       this.serverUrl = parsed.serverUrl;
       this.spaceId = parsed.spaceId;
       this.pin = parsed.pin;
+    } else {
+      this.serverUrl = '';
+      this.spaceId = '';
+      this.pin = '';
     }
   };
 

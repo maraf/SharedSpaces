@@ -167,6 +167,10 @@ describe('api-client', () => {
       await expect(
         exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
+
+      await expect(
+        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+      ).rejects.toThrow('Invalid response from server');
     });
 
     it('throws TokenExchangeError when response is missing token field', async () => {

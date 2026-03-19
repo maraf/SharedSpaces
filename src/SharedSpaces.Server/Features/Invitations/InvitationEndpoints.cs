@@ -82,7 +82,7 @@ public static class InvitationEndpoints
 
         if (!string.IsNullOrWhiteSpace(clientAppUrl))
         {
-            var fullJoinUrl = $"{clientAppUrl}/join?invitation={Uri.EscapeDataString(invitationString)}";
+            var fullJoinUrl = $"{clientAppUrl}/?join={Uri.EscapeDataString(invitationString)}";
             qrCodeBase64 = GenerateQrCode(fullJoinUrl);
         }
 

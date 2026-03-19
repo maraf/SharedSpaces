@@ -46,12 +46,12 @@ export function parseInvitationString(invitation: string): InvitationData | null
 
 /**
  * Parse invitation data from current URL query parameters
- * Expects ?invitation=serverUrl|spaceId|pin
+ * Expects ?join=serverUrl|spaceId|pin
  * @returns Parsed invitation data or null if not present or invalid
  */
 export function parseInvitationFromUrl(): InvitationData | null {
   const params = new URLSearchParams(window.location.search);
-  const invitation = params.get('invitation');
+  const invitation = params.get('join');
   
   if (!invitation) {
     return null;
