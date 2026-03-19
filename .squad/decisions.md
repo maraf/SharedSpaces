@@ -1127,3 +1127,19 @@ Mobile screens (390px width) cannot afford horizontal layout density. Vertical s
 - Potential for relative time auto-refresh (update "2m ago" → "3m ago" every minute)
 - Screenshot tests should validate mobile layout and modal interaction
 
+# Space View Header Simplification
+
+**Decision Date:** 2026-06-18
+**Decided By:** Wash (Frontend Dev)
+**Status:** Active
+
+## Context
+Issue #50 requested removing the duplicate space name from the space view. The name was shown both in the pill bar (app-shell nav) and as a heading inside the space view body.
+
+## Decision
+Removed the "Space" label and space name `<h2>` from `renderHeader()` in space-view.ts. The connection status badge is now the only element rendered by `renderHeader()`. The `spaceInfo` state property and `SpaceDetailsResponse` import were removed as unused after this change. The `getSpaceInfo()` API call is kept (validates token/access on load).
+
+## Impact
+- The pill bar in app-shell.ts is now the single source of truth for which space is active
+- Space view gains ~60px of vertical space on mobile
+- `getSpaceInfo()` still fires to validate membership; future features needing space metadata should re-add state if needed
