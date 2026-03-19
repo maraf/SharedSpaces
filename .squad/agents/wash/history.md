@@ -26,6 +26,18 @@
   - hooks/ — useSignalR, useOfflineQueue
   - main.tsx
 
+## Team Updates (2026-03-19)
+
+**Wash + Zoe completed race condition fix (squad/26-signalr-client):** 
+- **Issue:** Uploader saw duplicate items due to SignalR `ItemAdded` events arriving before PUT responses
+- **Wash's fix:** Added `pendingItemIds: Set<string>` tracking in space-view.ts to block SignalR during upload window (commit 3502e56)
+- **Zoe's tests:** Wrote 7 integration + unit tests covering race condition, concurrent uploads, failed cleanup, cross-member events (commit be441b9)
+- **Verification:** Lint ✅, Build ✅, All 91 client tests pass ✅
+- **Decision recorded:** `.squad/decisions.md` — full implementation details, rationale, alternatives considered
+- **Related:** Orchestration logs at `.squad/orchestration-log/2026-03-19T20-30-wash.md` and `-zoe.md`
+
+This fix is a critical bug squash preventing data corruption for users. The `pendingItemIds` Set pattern is now established as the dedup strategy for async upload scenarios.
+
 ## Team Updates (2026-03-16)
 
 **Mal completed issue decomposition:** 14 GitHub issues (#17–#30) created spanning 5 phases:
@@ -111,6 +123,8 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+
+- **Web Share Target API requirements research (2026-03-19):** Chrome-only platform feature for registering app as share destination in OS share menu. Requires: (1) manifest.json with `share_target` entry specifying POST multipart endpoint, (2) service worker to intercept POST to `/share-receive`, extract form data, and redirect with 303 See Other, (3) new Lit component `share-accept-view` to show shared content + space selector + optional auth integration, (4) sessionStorage to pass share data from SW to client (IndexedDB migration in #28 offline work). Firefox has limited support; Safari has none. Key design decisions open: support unauthenticated shares (affects complexity), GET vs POST method (POST recommended for files), multi-server space routing, inline vs preview display of shared content. Architecture fits as Phase 4-5 polish (not blocking core functionality). Comprehensive decision doc created in `.squad/decisions/inbox/wash-share-target-frontend.md` with 7 open questions for Marek.
 - **Light DOM composition rule (2026-03-18):** Components extending `src/SharedSpaces.Client/src/lib/base-element.ts` cannot rely on `<slot>` because `createRenderRoot()` returns `this` and Lit will overwrite light-DOM children on render. Reusable wrappers like `src/SharedSpaces.Client/src/components/view-card.ts` should accept content through a property such as `.body=${html`...`}` or a template helper instead of child nodes. **Wash fixed this in commit 6e5c13a:** migrated `view-card.ts` and its 3 consumers (admin-view.ts, join-view.ts, space-view.ts) to use property-based body templates. Rule: any BaseElement-based component must use property-driven templates for composition, not slots.
 - Re-checking the Lit option in 2026 changed the risk profile: routing is still the weakest area (deprecated Vaadin Router, `@lit-labs/router` still Labs), but Tailwind, testing, and SignalR are no longer show-stoppers. Lit can render in light DOM for Tailwind, use Vitest + Playwright credibly, and consume the framework-agnostic SignalR JS client without special adapters.
 - **Friction research convergence (2026-03-17):** Both Mal and Wash independently verified ecosystem state and converged on React recommendation for SharedSpaces main SPA. Routing immaturity (Vaadin deprecated, Labs router experimental) is the core blocker. Tailwind friction is workable. Testing gap has narrowed. Team alignment achieved with explicit understanding of trade-offs; Lit remains viable for future isolated components.
@@ -164,3 +178,17 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 4. **Removed extra left padding** — Text content now flush with card edge (respects card `px-4` but no extra gap/indent)
 
 Pattern established for light-DOM modals: `@state() private modalItem` with `fixed inset-0 z-50 bg-black/80` overlay, `stopPropagation()` on inner card to prevent click-through, and simple close handler. File items keep 📄 icon + filename + size on first row, same action row below.
+- **SignalR client integration (2026-03-19, Issue #26):** Implemented real-time item updates using `@microsoft/signalr` in `src/SharedSpaces.Client/src/lib/signalr-client.ts`. Key patterns:
+  - **HubConnectionBuilder with accessTokenFactory** — Pass JWT via function returning `Promise<string>`, not raw token, to support dynamic token refresh
+  - **Automatic reconnection** — Built-in `.withAutomaticReconnect()` handles connection drops with exponential backoff
+  - **Connection lifecycle in Lit components** — Start SignalR after initial data load (not in constructor/connectedCallback to avoid race with auth), stop in `disconnectedCallback()` for cleanup
+  - **Event deduplication** — Check if item.id already exists before adding (handles race between optimistic local add and SignalR broadcast)
+  - **Reconnection refresh** — On `onreconnected` callback, fetch full item list to catch missed events during disconnection
+  - **Dynamic connection status badge** — Map SignalR's `HubConnectionState` enum to UI-friendly `'connected' | 'disconnected' | 'reconnecting'` and drive badge color/label with reactive `@state()` property
+  - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
+  - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
+  - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
+
+## Learnings
+
+- **Item duplication race condition fix (2026-01):** Fixed race between HTTP PUT response and SignalR ItemAdded event in src/SharedSpaces.Client/src/features/space-view/space-view.ts. Pattern: track pending upload IDs in a private pendingItemIds = new Set<string>() field (not reactive—internal tracking only). In handleTextSubmit/uploadFiles, add generated UUID to set before API call, remove in finally block. In handleItemAdded, check both this.items.some(...) AND this.pendingItemIds.has(payload.id) before adding item. This prevents SignalR from adding items that are currently being uploaded by the same client. Simple O(1) Set lookups, no complex state machine needed. Cleanup in finally blocks ensures no leaked pending IDs even on error.

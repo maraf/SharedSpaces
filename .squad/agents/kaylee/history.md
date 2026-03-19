@@ -143,3 +143,52 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - `wash-pr-feedback.md`: Back navigation in shell chrome (app-shell.ts) for cross-view consistency.
 
 **Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.
+
+## Research — Issue #42 (Share Target API Backend Requirements)
+
+**Kaylee completed research on Share Target backend needs (2026-03-20T)**
+
+### Key Findings:
+
+**Web Share Target API Mechanics:**
+- Browser invokes a POST (or GET for text-only) to a manifest-declared `action` URL
+- No JWT is auto-attached — the share target launch is a fresh app context (new window/tab)
+- Payload: `multipart/form-data` with form fields (title, text, url, files) as declared in manifest's `params`
+- Example: OS shares a photo → browser POSTs to `/share` with `title`, `text`, `url`, and a `files` form field
+
+**Current Backend Gaps:**
+- ItemEndpoints.cs requires JWT + member identity; share target has neither
+- Items require client-generated GUIDs; share target has none
+- All item endpoints are behind `RequireAuthorization()`
+
+**Architectural Decision: Dedicated Share Endpoint**
+- Reusing PUT /v1/spaces/{spaceId}/items/{itemId} is not feasible without breaking auth semantics
+- New endpoint needed: `POST /v1/spaces/{spaceId}/share` (or similar)
+- Decouples share target flow from member-based item creation
+
+**Authentication Options for Share Target:**
+1. **Option A (Automatic Anonymous Member):** PIN validation + auto-create temporary member
+   - Pros: Simple, no extra complexity
+   - Cons: Dilutes member list with ephemeral accounts
+2. **Option B (PIN-based, No Member):** Create item with MemberId=null or system ID
+   - Pros: No member creation overhead
+   - Cons: Breaks current domain model (items FK to member)
+3. **Option C (Share Token Exchange):** Client-side pre-share token for POST-only access
+   - Pros: Secure, explicit consent, audit-friendly
+   - Cons: Complex; requires client coordination
+
+**PWA Infrastructure:**
+- No manifest.json or service worker currently in client codebase
+- Backend has no static file serving (Program.cs doesn't call UseStaticFiles)
+- Manifest must declare share_target with action URL + multipart/form-data + file fields
+
+**Key Backend Unknowns for Marek:**
+1. Identity model: Should shares create real members, or be anonymous/system-attributed?
+2. Share flow entry: Should manifest action point to SPA or backend endpoint?
+3. PIN reusability: Can a single invitation PIN be used multiple times for sharing?
+4. File validation: Same quota/MIME rules as regular uploads, or relaxed for shares?
+5. Static manifest: Does backend need to serve manifest.json, or is Vite sufficient?
+
+**Recommendation:**
+- Phase 1 (MVP): Backend endpoint with PIN validation, auto-generated item ID, system/anonymous member
+- Phase 2 (Polish): Service worker for offline queuing and sync

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@lit/context": "^1.1.6",
+    "@microsoft/signalr": "^10.0.0",
     "jwt-decode": "^4.0.0",
     "lit": "^3.3.2"
   },

@@ -5,6 +5,12 @@ import { BaseElement } from '../../lib/base-element';
 import type { AppViewChangeDetail } from '../../lib/navigation';
 import { getToken } from '../../lib/token-storage';
 import {
+  SignalRClient,
+  type ConnectionState,
+  type ItemAddedPayload,
+  type ItemDeletedPayload,
+} from '../../lib/signalr-client';
+import {
   getSpaceInfo,
   getItems,
   shareText,
@@ -37,9 +43,12 @@ export class SpaceView extends BaseElement {
   @state() private dragOver = false;
   @state() private copiedItemIds = new Set<string>();
   @state() private modalItem: SpaceItemResponse | null = null;
+  @state() private connectionState: ConnectionState = 'disconnected';
 
   private token?: string;
   private lastLoadedKey = '';
+  private signalRClient?: SignalRClient;
+  private pendingItemIds = new Set<string>();
 
   override updated(changed: Map<string, unknown>) {
     if (changed.has('spaceId') || changed.has('serverUrl')) {
@@ -49,6 +58,13 @@ export class SpaceView extends BaseElement {
         this.loadData();
       }
     }
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    void this.stopSignalR().catch((error) => {
+      console.error('Failed to stop SignalR connection during disconnect', error);
+    });
   }
 
   private resolveToken(): string | undefined {
@@ -87,6 +103,11 @@ export class SpaceView extends BaseElement {
       ]);
       this.spaceInfo = info;
       this.items = itemList;
+      
+      // Start SignalR connection after successful data load (non-blocking)
+      void this.startSignalR().catch((error) => {
+        console.error('Failed to start SignalR connection:', error);
+      });
     } catch (error) {
       if (error instanceof SpaceApiError && error.status === 401) {
         this.redirectToJoin();
@@ -98,6 +119,85 @@ export class SpaceView extends BaseElement {
           : 'Failed to load space data.';
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  private async startSignalR() {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    // Stop existing connection if any
+    await this.stopSignalR();
+
+    const token = this.token; // Capture for closure
+
+    this.signalRClient = new SignalRClient({
+      serverUrl: this.serverUrl,
+      spaceId: this.spaceId,
+      accessTokenFactory: async () => token,
+      onItemAdded: (payload: ItemAddedPayload) => {
+        this.handleItemAdded(payload);
+      },
+      onItemDeleted: (payload: ItemDeletedPayload) => {
+        this.handleItemDeleted(payload);
+      },
+      onStateChange: (state: ConnectionState) => {
+        this.connectionState = state;
+      },
+      onReconnected: () => {
+        this.refreshItemsAfterReconnect();
+      },
+    });
+
+    try {
+      await this.signalRClient.start();
+    } catch (error) {
+      // SignalR connection failure is non-critical; UI still works with REST only
+      console.warn('SignalR connection failed:', error);
+      this.connectionState = 'disconnected';
+    }
+  }
+
+  private async stopSignalR() {
+    if (this.signalRClient) {
+      await this.signalRClient.stop();
+      this.signalRClient = undefined;
+      this.connectionState = 'disconnected';
+    }
+  }
+
+  private handleItemAdded(payload: ItemAddedPayload) {
+    // Check if item already exists (race with optimistic add)
+    const exists = this.items.some((item) => item.id === payload.id);
+    if (exists || this.pendingItemIds.has(payload.id)) return;
+
+    // Prepend new item to the list
+    const newItem: SpaceItemResponse = {
+      id: payload.id,
+      spaceId: payload.spaceId,
+      memberId: payload.memberId,
+      contentType: payload.contentType,
+      content: payload.content,
+      fileSize: payload.fileSize,
+      sharedAt: payload.sharedAt,
+    };
+
+    this.items = [newItem, ...this.items];
+  }
+
+  private handleItemDeleted(payload: ItemDeletedPayload) {
+    // Remove item from list (silently ignore if not found)
+    this.items = this.items.filter((item) => item.id !== payload.id);
+  }
+
+  private async refreshItemsAfterReconnect() {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    try {
+      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+      this.items = itemList;
+    } catch (error) {
+      // Refresh failure is non-critical; user can manually refresh
+      console.warn('Failed to refresh items after reconnect:', error);
     }
   }
 
@@ -113,8 +213,10 @@ export class SpaceView extends BaseElement {
     this.isUploading = true;
     this.uploadError = '';
 
+    const itemId = crypto.randomUUID();
+    this.pendingItemIds.add(itemId);
+
     try {
-      const itemId = crypto.randomUUID();
       const item = await shareText(
         this.serverUrl,
         this.spaceId,
@@ -134,6 +236,7 @@ export class SpaceView extends BaseElement {
           ? error.message
           : 'Failed to share text.';
     } finally {
+      this.pendingItemIds.delete(itemId);
       this.isUploading = false;
     }
   };
@@ -179,14 +282,19 @@ export class SpaceView extends BaseElement {
     try {
       for (const file of files) {
         const itemId = crypto.randomUUID();
-        const item = await shareFile(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          file,
-          this.token,
-        );
-        this.items = [item, ...this.items];
+        this.pendingItemIds.add(itemId);
+        try {
+          const item = await shareFile(
+            this.serverUrl,
+            this.spaceId,
+            itemId,
+            file,
+            this.token,
+          );
+          this.items = [item, ...this.items];
+        } finally {
+          this.pendingItemIds.delete(itemId);
+        }
       }
     } catch (error) {
       if (error instanceof SpaceApiError && error.status === 401) {
@@ -342,6 +450,25 @@ export class SpaceView extends BaseElement {
   }
 
   private renderHeader() {
+    const statusConfig = {
+      connected: {
+        label: 'Connected',
+        classes:
+          'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+      },
+      reconnecting: {
+        label: 'Reconnecting...',
+        classes:
+          'border-yellow-400/30 bg-yellow-400/10 text-yellow-300',
+      },
+      disconnected: {
+        label: 'Disconnected',
+        classes: 'border-red-400/30 bg-red-400/10 text-red-300',
+      },
+    };
+
+    const status = statusConfig[this.connectionState];
+
     return html`
       <div class="flex items-start justify-between gap-4">
         <div>
@@ -355,9 +482,9 @@ export class SpaceView extends BaseElement {
           </h2>
         </div>
         <span
-          class="mt-1 shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300"
+          class="mt-1 shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
         >
-          Connected
+          ${status.label}
         </span>
       </div>
     `;

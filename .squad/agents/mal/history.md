@@ -210,3 +210,55 @@ Marek asked both Mal and Wash to dive deeper into friction points to resolve the
 **Branch:** `squad/23-lit-vite-setup` (commit 2a493e7)
 
 **Impact:** Frontend infrastructure now ready for feature development. Client framework and tooling are stable and can accept HTTP requests to backend APIs. Mal can now proceed with any frontend-backend integration planning.
+
+### Issue #42 Research: Web Share Target API (2026-03-19)
+
+**Status:** ✅ Research complete — queuing for Marek decision
+
+**What is Web Share Target?**
+
+The Web Share Target API lets installed PWAs appear in the OS share picker (like a native app). When a user shares content from another app, SharedSpaces can register as a target. The browser sends a POST request to a `/share-target/` endpoint with the shared content (files, text, links).
+
+**Key Technical Facts:**
+- Requires app to be **installed** (PWA with manifest + service worker)
+- Browser support: ✅ Chrome 76+ (Android), Chrome 89+ (desktop), Edge 79+ | ❌ Safari, Firefox
+- Flow: OS share picker → `/share-target/` POST → service worker intercepts → forward to server or foreground
+- Shared data arrives as multipart form data; service worker must handle it
+- **Critical blocker:** Requires service worker (Phase 5 #28, not yet done)
+
+**Current SharedSpaces Status:**
+- ❌ No `manifest.json` in client
+- ❌ No PWA icons (192px, 512px PNG)
+- ❌ No service worker
+- ⚠️ HTTPS only in production (Phase 5 #29)
+- Technically feasible; fit naturally into Phase 5 offline + polish work
+
+**Architecture Decisions Needed:**
+
+1. **Authentication model:** Does shared content go to pre-existing space (user must be member) or new space?
+2. **Data flow:** Service worker forwards POST to backend, or parse in foreground?
+3. **File types:** Accept all (`*/*`) or restrict MIME types?
+4. **UX after share:** Auto-navigate to space, toast, or silent?
+5. **Mobile priority:** Android-first, or include iOS fallback strategies?
+6. **Phase timing:** Batch with Phase 5 (#28–#30), or prioritize separately?
+
+**Scope (MVP):**
+- Create manifest with `share_target` declaration
+- Add 192px + 512px app icons
+- Register service worker to intercept `/share-target/` POST
+- Forward shared content to backend (new endpoint TBD) or existing upload flow
+- Redirect user to space view
+
+**Open Questions for Marek:**
+All 6 architecture decisions listed above require user input before implementation. Full research documented in `.squad/decisions/inbox/mal-share-target-research.md` with options, pros/cons, and recommendations.
+
+**Next Steps:**
+1. Marek answers open questions
+2. Reassign to Kaylee (backend) + Wash (frontend) for parallel work
+3. Integrate with Phase 5 timeline or reprioritize
+4. Create backend endpoint for share intake (if needed)
+
+**Resources:**
+- Web Share Target spec: https://web.dev/web-share-target/
+- PWA install criteria: https://web.dev/install-criteria/
+- Shared service worker concern: Phase 5 #28 owns offline; Share Target adds fetch handler

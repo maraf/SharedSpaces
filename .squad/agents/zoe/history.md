@@ -85,6 +85,23 @@ Server structure now available to Zoe; test project can reference production ent
 - `GET /v1/spaces` is an admin-protected endpoint that returns all spaces as the shared `SpaceResponse` shape ordered by `CreatedAt` descending; integration tests should cover empty-state, auth failure, and newest-first listing.
 - Admin member-management coverage is strongest when tests create `SpaceMember` rows through the real invitation + token exchange flow (create space → create invitation → POST `/v1/spaces/{id}/tokens`) instead of seeding members directly, so member listing/revocation scenarios exercise the join pipeline end to end.
 - Admin invitation-management list responses are metadata-only (`InvitationListResponse` = `Id` + `SpaceId`) and must never expose hashed PINs; tests should deserialize the array shape and also inspect raw JSON to confirm no `pin` property leaks.
+- SignalR client tests must mock `HubConnectionBuilder` as a class constructor, not a function returning an object; vitest requires `class MockHubConnectionBuilder` with methods that delegate to shared mock builder to properly intercept `new HubConnectionBuilder()` calls.
+- SignalR client event handlers are registered in constructor (not start/stop), so events can theoretically fire after `stop()` if the connection receives messages; tests should verify handlers remain active after stop to document this behavior.
+- SignalR client `accessTokenFactory` is an async function (not a plain string), enabling dynamic token refresh; tests should verify the factory function is passed through to `withUrl` options and returns the expected JWT.
+- SignalR client stop() is defensive and checks `HubConnectionState` before calling `connection.stop()`, preventing errors on already-disconnected connections; tests should verify idempotent stop behavior and no-op on pre-disconnected state.
+- SignalR client state tracking uses a getter that maps `HubConnectionState` enum values to simplified `ConnectionState` union type ('connected' | 'disconnected' | 'reconnecting'); tests should verify state transitions via connection lifecycle callbacks (onreconnecting, onreconnected, onclose).
+
+## Team Updates (2026-03-19)
+
+**Wash + Zoe completed race condition fix (squad/26-signalr-client):** 
+- **Issue:** Uploader saw duplicate items due to SignalR `ItemAdded` events arriving before PUT responses
+- **Wash's fix:** Added `pendingItemIds: Set<string>` tracking in space-view.ts to block SignalR during upload window (commit 3502e56)
+- **Zoe's tests:** Wrote 7 integration + unit tests covering race condition, concurrent uploads, failed cleanup, cross-member events (commit be441b9)
+- **Verification:** Lint ✅, Build ✅, All 91 client tests pass ✅
+- **Decision recorded:** `.squad/decisions.md` — full implementation details, rationale, alternatives considered
+- **Related:** Orchestration logs at `.squad/orchestration-log/2026-03-19T20-30-wash.md` and `-zoe.md`
+
+This fix is a critical bug squash preventing data corruption for users. The `pendingItemIds` Set pattern is now established as the dedup strategy for async upload scenarios. Wash demonstrated hybrid integration + unit testing strategy to validate async race conditions reliably without flakiness.
 
 ## Team Updates (2026-03-17)
 
@@ -180,3 +197,68 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Test coverage expanded (67 total, 3 new GET /v1/spaces tests)
 
 **Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.
+
+## Team Updates (2026-03-18 Continued)
+
+**Zoe completed Issue #26 (SignalR Client Tests):** Wrote comprehensive test suite for Wash's SignalR client service:
+- Test file: `src/SharedSpaces.Client/src/lib/signalr-client.test.ts`
+- 23 tests covering connection lifecycle (8), event handling (4), error/edge cases (6), configuration (5)
+- Mock strategy: Class-based HubConnectionBuilder mock to properly intercept `new` operator
+- Verified accessTokenFactory async function pattern, state tracking, stop idempotence, reconnection flow
+- Key edge case documented: event handlers registered in constructor remain active after stop()
+- All 84 client tests passing (14 api-client + 13 space-api + 23 signalr-client + 17 token-storage + 17 invitation)
+- Branch: ready for commit alongside Wash's implementation
+
+## Team Updates (2026-03-18 Continued)
+
+**Zoe delivered space-view deduplication tests (2026-03-18T21:40Z):** Wrote comprehensive test suite for Wash's race condition fix:
+- Test file: `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+- 7 tests covering all dedup scenarios: existing dedup (item already in list), race condition (SignalR before API response), multiple file uploads with early SignalR events, failed upload cleanup, delete during pending upload, and cross-member events
+- **Key test strategy:** Mix of integration tests (full upload flow with delayed API responses) and unit tests (direct handleItemAdded invocation) for reliability
+- **Critical race condition test passing:** Verifies `pendingItemIds` blocks SignalR event when API response hasn't completed yet
+- Tests validate Wash's fix: `pendingItemIds.add()` before API call, `handleItemAdded` checks `pendingItemIds.has()`, cleanup in finally block
+- All 7 tests passing; dedup logic verified correct for both existing behavior and new race condition fix
+- Client test suite now: 91 passing tests (7 space-view + 84 existing)
+
+## Learnings
+
+<!-- Append new learnings below. Each entry is something lasting about the project. -->
+- Test project (`tests/SharedSpaces.Server.Tests/`) uses EF Core InMemory for isolated unit/integration tests; xUnit + Moq + FluentAssertions provide robust, readable test infrastructure.
+- Server domain entities (Space, SpaceInvitation, SpaceMember, SpaceItem) are GUID-based; all configured with fluent API in `Infrastructure/Persistence/Configurations/` for DRY entity mapping.
+- SQLite and EF Core migrations initialize automatically on startup via `DatabaseInitializationExtensions.InitializeDatabaseAsync()` in `Program.cs`; test database seeding can leverage the same DbContext configuration.
+- `tests/SharedSpaces.Server.Tests/TokenEndpointTests.cs` is the JWT join/auth integration suite; it uses `WebApplicationFactory<Program>` with EF Core InMemory and test config overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
+- Server startup now supports non-relational test hosts by falling back to `EnsureCreatedAsync()` when the configured `AppDbContext` provider is not relational, which keeps WebApplicationFactory-based integration tests bootable.
+- `src/SharedSpaces.Server/Program.cs` exposes a `public partial class Program` marker so external integration tests can boot the minimal API host without `InternalsVisibleTo` wiring.
+- `AddJwtAuthentication` resolves the JWT signing key during service registration, so WebApplicationFactory-based tests must provide `Jwt:SigningKey` through host configuration before the app finishes building.
+- TokenEndpointTests currently contains 13 passing integration tests covering PIN exchange, JWT issuance, invitation deletion, member creation, auth success/failure, revoked members, display-name validation, and no-expiration JWT behavior.
+- Successful token exchange tests should decode the JWT payload and assert the concrete `sub`, `display_name`, `server_url`, and `space_id` claim values, while also asserting the token has no `exp` claim.
+- TokenEndpointTests seeds invitation PINs with the production `InvitationPinHasher` via `InternalsVisibleTo`, keeping security-sensitive hashing logic single-sourced between app code and tests.
+- Item endpoint integration tests should seed `SpaceMember` rows directly and generate JWTs in-test with `sub`, `display_name`, `server_url`, and `space_id` claims so protected CRUD scenarios exercise the real auth pipeline without going through PIN exchange.
+- Item CRUD auth regression coverage should tolerate either 401 or 403 for `space_id` route mismatches, since the contract is rejection of cross-space access while the exact status may depend on whether auth or endpoint validation rejects first.
+- Quota enforcement tests are strongest when they use a tiny configured `Storage:MaxSpaceQuotaBytes` plus an existing file item, proving the server rejects uploads based on aggregate per-space usage rather than only single-file size.
+- SignalR hub integration tests use `Microsoft.AspNetCore.SignalR.Client` 10.0.0 with `WebApplicationFactory` test server wiring; hub connections pass JWT tokens via `AccessTokenProvider` in the `HubConnectionBuilder.WithUrl` options.
+- SignalR client event assertions should register handlers with `connection.On<TEvent>(eventName, handler)` before calling `StartAsync()`, and use `TaskCompletionSource<TEvent>` with `Task.WhenAny` timeout patterns to verify broadcasts arrive within expected time windows.
+- SpaceHub now auto-joins the route's space group during `OnConnectedAsync`, validating the route `spaceId` against the JWT `space_id` claim and closing the connection when they do not match.
+- SignalR event broadcast payloads include both `SpaceId` and `FileSize` fields in addition to item metadata (Id, ContentType, Content, SharedAt, MemberId, DisplayName); tests should verify full event structure matches the `ItemAddedEvent` and `ItemDeletedEvent` records in production code.
+- SignalR hub tests can safely run on the same `TestWebApplicationFactory` infrastructure as REST endpoint tests, using EF Core InMemory database and the same configuration overrides for `Admin:Secret`, `Jwt:SigningKey`, and `Server:Url`.
+- Test storage is now isolated at `./artifacts/storage-tests` per user directive (2026-03-17); ensure test hosts override `Storage:BasePath` to prevent cross-contamination with app storage at `./artifacts/storage`.
+- `SpaceHub` now auto-joins the route's space group during `OnConnectedAsync`; hub integration tests should connect to `/v1/spaces/{spaceId}/hub`, register handlers before `StartAsync()`, use `TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously)` + `TrySetResult`, and assert PUT/DELETE success before awaiting broadcast events.
+- Client-side tests use vitest 4.x with happy-dom environment for browser APIs simulation; tests are co-located with source files using `*.test.ts` naming convention in `src/SharedSpaces.Client/src/lib/`.
+- Client localStorage mocking requires explicit setup via `vitest.setup.ts` because happy-dom's default localStorage implementation lacks full API surface; custom mock provides `getItem`, `setItem`, `removeItem`, and `clear` methods.
+- Invitation parsing trims whitespace from each part BEFORE validation, so leading/trailing spaces in URL, space ID, or PIN parts are handled gracefully; tests may include whitespace-padded inputs for edge case coverage.
+- Token storage uses composite keys in format `serverUrl:spaceId` to support multi-server client scenarios; tests should verify token isolation across different server+space combinations.
+- API client tests mock global `fetch` with vitest's `vi.fn()` and should verify both success responses and typed error handling for HTTP status codes (400/401/404) plus network failures.
+- Client test scripts in package.json: `npm test` runs vitest once, `npm run test:watch` runs vitest in watch mode for TDD workflow.
+- Admin endpoint tests (`AdminEndpointTests.cs`) verify POST /v1/spaces and POST /v1/spaces/{spaceId}/invitations with comprehensive auth failure, validation edge cases, and happy path coverage; all admin endpoints use `AdminAuthenticationFilter` with X-Admin-Secret header validation.
+- Admin invitation generation creates 6-digit PINs, hashes them for storage, and returns both invitation string (server_url|space_id|pin format) and base64 PNG QR code; tests verify QR code PNG signature (0x89504E47) and PIN uniqueness across multiple invitations.
+- TestWebApplicationFactory requires `Microsoft.EntityFrameworkCore.Infrastructure` using statement to access `IDbContextOptionsConfiguration<>` for proper DbContext service removal during test setup.
+- `GET /v1/spaces` is an admin-protected endpoint that returns all spaces as the shared `SpaceResponse` shape ordered by `CreatedAt` descending; integration tests should cover empty-state, auth failure, and newest-first listing.
+- Admin member-management coverage is strongest when tests create `SpaceMember` rows through the real invitation + token exchange flow (create space → create invitation → POST `/v1/spaces/{id}/tokens`) instead of seeding members directly, so member listing/revocation scenarios exercise the join pipeline end to end.
+- Admin invitation-management list responses are metadata-only (`InvitationListResponse` = `Id` + `SpaceId`) and must never expose hashed PINs; tests should deserialize the array shape and also inspect raw JSON to confirm no `pin` property leaks.
+- SignalR client tests must mock `HubConnectionBuilder` as a class constructor, not a function returning an object; vitest requires `class MockHubConnectionBuilder` with methods that delegate to shared mock builder to properly intercept `new HubConnectionBuilder()` calls.
+- SignalR client event handlers are registered in constructor (not start/stop), so events can theoretically fire after `stop()` if the connection receives messages; tests should verify handlers remain active after stop to document this behavior.
+- SignalR client `accessTokenFactory` is an async function (not a plain string), enabling dynamic token refresh; tests should verify the factory function is passed through to `withUrl` options and returns the expected JWT.
+- SignalR client stop() is defensive and checks `HubConnectionState` before calling `connection.stop()`, preventing errors on already-disconnected connections; tests should verify idempotent stop behavior and no-op on pre-disconnected state.
+- SignalR client state tracking uses a getter that maps `HubConnectionState` enum values to simplified `ConnectionState` union type ('connected' | 'disconnected' | 'reconnecting'); tests should verify state transitions via connection lifecycle callbacks (onreconnecting, onreconnected, onclose).
+- Testing Lit component race conditions requires a hybrid strategy: use integration tests with controlled async timing for end-to-end flows, but prefer direct method invocation (unit-style) for logic verification to avoid test flakiness from unpredictable async component initialization timing.
+- Space-view deduplication tests verify two dedup mechanisms: `items.some()` check blocks items already in the list, and `pendingItemIds.has()` blocks SignalR events for items currently being uploaded (before API response completes); both mechanisms must pass for correct behavior.
