@@ -23,7 +23,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        var clientAppUrl = builder.Configuration["Server:DefaultClientAppUrl"] ?? "https://localhost:5173";
+        var clientAppUrl = builder.Configuration["Cors:AllowedOrigin"] ?? "https://localhost:5173";
         policy.WithOrigins(clientAppUrl)
             .AllowAnyHeader()
             .AllowAnyMethod()

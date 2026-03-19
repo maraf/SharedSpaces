@@ -78,8 +78,12 @@ public static class InvitationEndpoints
         var invitationString = $"{serverUrl}|{spaceId}|{pin}";
 
         string? qrCodeBase64 = null;
-        var clientAppUrl = request.ClientAppUrl 
-            ?? configuration["Server:DefaultClientAppUrl"];
+        var clientAppUrl = request.ClientAppUrl;
+
+        if (string.IsNullOrWhiteSpace(clientAppUrl))
+        {
+            clientAppUrl = httpRequest.Headers["Origin"].ToString();
+        }
 
         if (!string.IsNullOrWhiteSpace(clientAppUrl))
         {

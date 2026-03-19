@@ -202,7 +202,8 @@ public class AdminEndpointTests
             client,
             space.Id,
             clientAppUrl: null,
-            TestWebApplicationFactory.AdminSecret);
+            TestWebApplicationFactory.AdminSecret,
+            origin: "https://localhost:5173");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
@@ -244,7 +245,7 @@ public class AdminEndpointTests
     }
 
     [Fact]
-    public async Task CreateInvitation_WithoutClientAppUrl_UsesServerDefaultInQrCode()
+    public async Task CreateInvitation_WithoutClientAppUrl_UsesOriginHeaderForQrCode()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -254,7 +255,8 @@ public class AdminEndpointTests
             client,
             space.Id,
             clientAppUrl: null,
-            TestWebApplicationFactory.AdminSecret);
+            TestWebApplicationFactory.AdminSecret,
+            origin: "https://myapp.example.com");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
@@ -324,7 +326,8 @@ public class AdminEndpointTests
             client,
             space.Id,
             clientAppUrl: null,
-            TestWebApplicationFactory.AdminSecret);
+            TestWebApplicationFactory.AdminSecret,
+            origin: "https://localhost:5173");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
@@ -399,8 +402,8 @@ public class AdminEndpointTests
 
         var space = await factory.CreateSpaceAsync();
         
-        var response1 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret);
-        var response2 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret);
+        var response1 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret, origin: "https://localhost:5173");
+        var response2 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret, origin: "https://localhost:5173");
 
         response1.StatusCode.Should().Be(HttpStatusCode.OK);
         response2.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -715,12 +718,17 @@ public class AdminEndpointTests
         HttpClient client,
         Guid spaceId,
         string? clientAppUrl,
-        string? adminSecret)
+        string? adminSecret,
+        string? origin = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/invitations");
         if (!string.IsNullOrWhiteSpace(adminSecret))
         {
             request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+        if (!string.IsNullOrWhiteSpace(origin))
+        {
+            request.Headers.Add("Origin", origin);
         }
         request.Content = JsonContent.Create(new CreateInvitationRequest(clientAppUrl));
         return await client.SendAsync(request);
@@ -892,7 +900,7 @@ public class AdminEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Server:DefaultClientAppUrl"] = "https://localhost:5173",
+                    ["Cors:AllowedOrigin"] = "https://localhost:5173",
                     ["Storage:BasePath"] = "./artifacts/storage-tests"
                 });
             });
