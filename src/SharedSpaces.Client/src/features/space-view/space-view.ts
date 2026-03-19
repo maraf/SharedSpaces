@@ -125,9 +125,9 @@ export class SpaceView extends BaseElement {
       // Start SignalR connection after successful data load
       await this.startSignalR();
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or expired.';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       
@@ -252,9 +252,9 @@ export class SpaceView extends BaseElement {
       this.items = [item, ...this.items];
       this.textInput = '';
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or expired.';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       this.uploadError =
@@ -317,9 +317,9 @@ export class SpaceView extends BaseElement {
         this.items = [item, ...this.items];
       }
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or expired.';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       this.uploadError =
@@ -354,9 +354,9 @@ export class SpaceView extends BaseElement {
     try {
       await deleteItem(this.serverUrl, this.spaceId, item.id, this.token);
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or expired.';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       // Revert on failure
@@ -386,9 +386,9 @@ export class SpaceView extends BaseElement {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status === 401) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or expired.';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
       // Download failures are non-critical; could surface as a toast later.
