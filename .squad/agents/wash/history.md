@@ -195,3 +195,27 @@ Pattern established for light-DOM modals: `@state() private modalItem` with `fix
 **Coordinator fixed Tailwind dynamic class issue:** Your status badge used template literal interpolation (`` `bg-${colors[state]}` ``), which Tailwind v4 cannot purge. Refactored to conditional rendering with static class names (`'bg-emerald-400 text-emerald-900'` etc.). Builds now pass. Learning: Tailwind v4 requires statically analyzable class names.
 
 **Client test suite:** Now 84 total tests passing (token storage 17 + invitation parsing 17 + API client 14 + token validation 13 + SignalR 23).
+
+## Session 2026-03-19T20:26Z — Issue #48 Completion
+
+**Issue:** #48 — Remove Dead Spaces  
+**Branch:** squad/48-remove-dead-spaces  
+**Status:** ✅ COMPLETE (2 commits)
+
+Finalized dead space removal UI implementation:
+
+**Implementation details:**
+- **Space-view.ts** — Error state banner with Reconnect/Remove buttons, token cleanup on removal
+- **App-shell.ts** — Event listener for `reloadSpaces` flag, space list reload and view switching
+- **Navigation.ts** — State management for error conditions
+- **SignalR-client.ts** — Cleanup on space removal, proper disconnection
+
+**Validation:**
+- Lint: ✅ Pass
+- Build: ✅ Pass  
+- Server tests: 83 passing
+- Client tests: 84 passing (unchanged; no new client tests added)
+
+**Decision pattern:** "Dead Space Error Handling Pattern" merged to decisions.md. Establishes graceful degradation pattern for auth/network failures: track error type → provide recovery actions → let users clean up resources → coordinate with app-shell via event flags.
+
+**Next phase:** Ready for code review and merge to main.

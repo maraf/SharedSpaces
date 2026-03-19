@@ -1485,3 +1485,72 @@ ${state === 'disconnected' ? 'bg-red-400 text-red-900' : ''}
 - **Negative:** Slightly more verbose template code
 - **Learning:** Document Tailwind v4 static class requirement for future components
 
+
+---
+
+### Dead Space Error Handling Pattern
+
+**Decision Date:** 2026-03-19  
+**Decided By:** Wash (Frontend Dev)  
+**Issue:** #48  
+**Status:** Implemented
+
+#### Context
+
+When users select a space that's no longer accessible (server down, token revoked, network error), the client previously redirected them immediately to the join screen. This was frustrating because:
+
+1. Users lost context about which space failed
+2. No opportunity to retry a transient failure
+3. No way to clean up the dead space from their list
+
+#### Decision
+
+Implemented a graceful error state for connection failures in `space-view.ts`:
+
+**Error State Tracking**
+
+Added `connectionErrorType: 'none' | 'auth' | 'network'` to distinguish:
+- **auth**: HTTP 401 (token revoked or expired)
+- **network**: No status code (server unreachable)
+- **none**: No connection error (or non-connection error)
+
+**Error UI**
+
+When `connectionErrorType` is `'auth'` or `'network'`, show:
+- Error banner with context-specific title and message
+- **Reconnect** button to retry the connection
+- **Remove Space** button to delete the token and return to join screen
+
+**Token Removal Flow**
+
+`removeSpace()` method:
+1. Stop SignalR connection cleanly
+2. Call `removeToken(serverUrl, spaceId)` to delete from localStorage
+3. Emit `view-change` event with `reloadSpaces: true` flag
+4. App-shell reloads spaces and switches to join view
+
+**Consistent Error Handling**
+
+All API operations (loadData, shareText, shareFile, deleteItem, downloadFile) check for 401 and set `connectionErrorType` instead of calling `redirectToJoin()`.
+
+#### Consequences
+
+**Positive**
+- Users can retry transient failures without losing context
+- Users can clean up dead spaces from their list
+- Error messages explain what went wrong
+- Mobile-first responsive layout (vertical on 390×844, side-by-side on desktop)
+
+**Negative**
+- Slightly more complex error state tracking
+- Need to remember to set `connectionErrorType` in all error handlers
+
+#### Pattern for Future Work
+
+This establishes a pattern for graceful degradation:
+1. Track error type in state (not just boolean)
+2. Provide context-appropriate recovery actions
+3. Let users clean up failed resources
+4. Coordinate with app-shell via event flags
+
+Use this pattern for future connection/auth failures in other views (admin panel, etc.).
