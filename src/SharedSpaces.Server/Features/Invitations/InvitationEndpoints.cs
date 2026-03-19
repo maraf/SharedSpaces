@@ -52,7 +52,8 @@ public static class InvitationEndpoints
         Guid spaceId,
         CreateInvitationRequest request,
         AppDbContext db,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        HttpRequest httpRequest)
     {
         var space = await db.Spaces.FindAsync(spaceId);
         if (space == null)
@@ -73,7 +74,7 @@ public static class InvitationEndpoints
         db.SpaceInvitations.Add(invitation);
         await db.SaveChangesAsync();
 
-        var serverUrl = configuration["Server:Url"] ?? throw new InvalidOperationException("Server:Url not configured");
+        var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
         var invitationString = $"{serverUrl}|{spaceId}|{pin}";
 
         string? qrCodeBase64 = null;

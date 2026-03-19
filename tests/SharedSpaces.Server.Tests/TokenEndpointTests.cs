@@ -304,7 +304,7 @@ public class TokenEndpointTests
 
         payload.Should().ContainKey("server_url");
         payload["server_url"].ValueKind.Should().Be(JsonValueKind.String);
-        payload["server_url"].GetString().Should().Be(TestWebApplicationFactory.ServerUrl);
+        payload["server_url"].GetString().Should().Be("http://localhost");
 
         payload.Should().ContainKey("space_id");
         payload["space_id"].ValueKind.Should().Be(JsonValueKind.String);
@@ -353,7 +353,6 @@ public class TokenEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Server:Url"] = ServerUrl,
                     ["Storage:BasePath"] = "./artifacts/storage-tests"
                 });
             });

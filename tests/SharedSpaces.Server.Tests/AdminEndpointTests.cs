@@ -212,7 +212,7 @@ public class AdminEndpointTests
 
         var parts = invitation.InvitationString.Split('|');
         parts.Should().HaveCount(3);
-        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl);
+        parts[0].Should().Be("http://localhost");
         parts[1].Should().Be(space.Id.ToString());
         parts[2].Should().MatchRegex(@"^\d{6}$");
     }
@@ -238,7 +238,7 @@ public class AdminEndpointTests
 
         var parts = invitation.InvitationString.Split('|');
         parts.Should().HaveCount(3);
-        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl);
+        parts[0].Should().Be("http://localhost");
         parts[1].Should().Be(space.Id.ToString());
         parts[2].Should().MatchRegex(@"^\d{6}$");
     }
@@ -360,7 +360,7 @@ public class AdminEndpointTests
         var parts = invitation!.InvitationString.Split('|');
         parts.Should().HaveCount(3, "invitation string should have format: server_url|space_id|pin");
         
-        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl, "first part should be server URL");
+        parts[0].Should().Be("http://localhost", "first part should be server URL");
         Guid.TryParse(parts[1], out var spaceId).Should().BeTrue("second part should be valid GUID");
         spaceId.Should().Be(space.Id, "second part should be the space ID");
         parts[2].Should().MatchRegex(@"^\d{6}$", "third part should be 6-digit PIN");
@@ -892,7 +892,6 @@ public class AdminEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Server:Url"] = ServerUrl,
                     ["Server:DefaultClientAppUrl"] = "https://localhost:5173",
                     ["Storage:BasePath"] = "./artifacts/storage-tests"
                 });
