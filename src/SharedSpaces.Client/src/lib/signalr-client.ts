@@ -13,6 +13,7 @@ export interface SignalRClientConfig {
   onItemAdded?: (item: ItemAddedPayload) => void;
   onItemDeleted?: (item: ItemDeletedPayload) => void;
   onStateChange?: (state: ConnectionState) => void;
+  onReconnected?: () => void;
 }
 
 export interface ItemAddedPayload {
@@ -38,7 +39,9 @@ export class SignalRClient {
   constructor(config: SignalRClientConfig) {
     this.config = config;
 
-    const hubUrl = `${config.serverUrl}/v1/spaces/${config.spaceId}/hub`;
+    const normalizedServerUrl = config.serverUrl.replace(/\/+$/, '');
+    const encodedSpaceId = encodeURIComponent(config.spaceId);
+    const hubUrl = `${normalizedServerUrl}/v1/spaces/${encodedSpaceId}/hub`;
 
     this.connection = new HubConnectionBuilder()
       .withUrl(hubUrl, {
@@ -71,6 +74,9 @@ export class SignalRClient {
     this.connection.onreconnected(() => {
       if (this.config.onStateChange) {
         this.config.onStateChange('connected');
+      }
+      if (this.config.onReconnected) {
+        this.config.onReconnected();
       }
     });
 

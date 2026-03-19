@@ -62,7 +62,9 @@ export class SpaceView extends BaseElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.stopSignalR();
+    void this.stopSignalR().catch((error) => {
+      console.error('Failed to stop SignalR connection during disconnect', error);
+    });
   }
 
   private resolveToken(): string | undefined {
@@ -102,8 +104,10 @@ export class SpaceView extends BaseElement {
       this.spaceInfo = info;
       this.items = itemList;
       
-      // Start SignalR connection after successful data load
-      await this.startSignalR();
+      // Start SignalR connection after successful data load (non-blocking)
+      void this.startSignalR().catch((error) => {
+        console.error('Failed to start SignalR connection:', error);
+      });
     } catch (error) {
       if (error instanceof SpaceApiError && error.status === 401) {
         this.redirectToJoin();
@@ -138,11 +142,9 @@ export class SpaceView extends BaseElement {
       },
       onStateChange: (state: ConnectionState) => {
         this.connectionState = state;
-        
-        // On reconnect, refresh items to catch any missed events
-        if (state === 'connected') {
-          this.refreshItemsAfterReconnect();
-        }
+      },
+      onReconnected: () => {
+        this.refreshItemsAfterReconnect();
       },
     });
 
