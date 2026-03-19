@@ -162,6 +162,24 @@ export async function downloadFile(
   }
 }
 
+export async function deleteItem(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  token: string,
+): Promise<void> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}`,
+      { method: 'DELETE', headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
 export async function shareFile(
   serverUrl: string,
   spaceId: string,
