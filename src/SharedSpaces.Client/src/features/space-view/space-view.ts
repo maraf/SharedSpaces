@@ -39,15 +39,15 @@ export class SpaceView extends BaseElement {
   @state() private modalItem: SpaceItemResponse | null = null;
 
   private token?: string;
-
-  override connectedCallback() {
-    super.connectedCallback();
-    this.loadData();
-  }
+  private lastLoadedKey = '';
 
   override updated(changed: Map<string, unknown>) {
     if (changed.has('spaceId') || changed.has('serverUrl')) {
-      this.loadData();
+      const key = `${this.serverUrl ?? ''}|${this.spaceId ?? ''}`;
+      if (key !== this.lastLoadedKey) {
+        this.lastLoadedKey = key;
+        this.loadData();
+      }
     }
   }
 
@@ -125,6 +125,10 @@ export class SpaceView extends BaseElement {
       this.items = [item, ...this.items];
       this.textInput = '';
     } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
       this.uploadError =
         error instanceof SpaceApiError
           ? error.message
@@ -185,6 +189,10 @@ export class SpaceView extends BaseElement {
         this.items = [item, ...this.items];
       }
     } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
       this.uploadError =
         error instanceof SpaceApiError
           ? error.message
@@ -216,7 +224,11 @@ export class SpaceView extends BaseElement {
 
     try {
       await deleteItem(this.serverUrl, this.spaceId, item.id, this.token);
-    } catch {
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
       // Revert on failure
       this.items = [...this.items, item].sort(
         (a, b) =>
@@ -243,7 +255,11 @@ export class SpaceView extends BaseElement {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
       // Download failures are non-critical; could surface as a toast later.
     }
   };
@@ -370,7 +386,7 @@ export class SpaceView extends BaseElement {
             >
               ${this.isUploading ? 'Sending…' : 'Share Text'}
             </button>
-            <span class="text-xs text-slate-500">Ctrl+Enter to send</span>
+            <span class="text-xs text-slate-500">Ctrl/⌘+Enter to send</span>
           </div>
         </div>
 
