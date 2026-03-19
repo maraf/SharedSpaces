@@ -80,11 +80,6 @@ public static class InvitationEndpoints
         string? qrCodeBase64 = null;
         var clientAppUrl = request.ClientAppUrl;
 
-        if (string.IsNullOrWhiteSpace(clientAppUrl))
-        {
-            clientAppUrl = httpRequest.Headers["Origin"].ToString();
-        }
-
         if (!string.IsNullOrWhiteSpace(clientAppUrl))
         {
             var fullJoinUrl = $"{clientAppUrl}/?join={Uri.EscapeDataString(invitationString)}";

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
@@ -35,6 +36,10 @@ var app = builder.Build();
 
 await app.InitializeDatabaseAsync();
 
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 app.UseCors();
 app.UseAuthentication();
 app.UseSpaceMemberAuthorization();

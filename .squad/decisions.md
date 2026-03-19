@@ -765,7 +765,7 @@ Issue #24 required implementing the client-side join flow: parsing invitation li
 #### Form UX Pattern
 - **Two entry modes:** Toggle between "paste invitation string" and "manual entry"
 - **Auto-parsing:** Pasting an invitation string automatically extracts serverUrl, spaceId, and pin
-- **URL pre-fill:** If user arrives via QR scan (`?invitation=...`), form is pre-populated
+- **URL pre-fill:** If user arrives via QR scan (`?join=...`), form is pre-populated
 - **Display name persistence:** Pre-fill from localStorage, save on successful join
 - **Error states:** Show user-friendly messages for 400/401/404/network errors
 - **Loading states:** Disable inputs and show "Joining..." during API call

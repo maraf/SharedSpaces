@@ -48,8 +48,10 @@ export class JoinView extends BaseElement {
       this.pin = urlInvitation.pin;
       this.invitationString = `${urlInvitation.serverUrl}|${urlInvitation.spaceId}|${urlInvitation.pin}`;
 
-      // Strip join query parameter from URL
-      window.history.replaceState({}, '', window.location.pathname);
+      // Strip only the join query parameter from URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete('join');
+      window.history.replaceState({}, '', url.pathname + url.search);
     }
 
     // Pre-fill display name from localStorage

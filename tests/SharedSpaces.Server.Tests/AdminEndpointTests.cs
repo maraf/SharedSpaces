@@ -201,9 +201,8 @@ public class AdminEndpointTests
         var response = await CreateInvitationAsync(
             client,
             space.Id,
-            clientAppUrl: null,
-            TestWebApplicationFactory.AdminSecret,
-            origin: "https://localhost:5173");
+            clientAppUrl: "https://localhost:5173",
+            TestWebApplicationFactory.AdminSecret);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
@@ -245,7 +244,7 @@ public class AdminEndpointTests
     }
 
     [Fact]
-    public async Task CreateInvitation_WithoutClientAppUrl_UsesOriginHeaderForQrCode()
+    public async Task CreateInvitation_WithoutClientAppUrl_ReturnsNullQrCode()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -255,13 +254,13 @@ public class AdminEndpointTests
             client,
             space.Id,
             clientAppUrl: null,
-            TestWebApplicationFactory.AdminSecret,
-            origin: "https://myapp.example.com");
+            TestWebApplicationFactory.AdminSecret);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
         invitation.Should().NotBeNull();
-        invitation!.QrCodeBase64.Should().NotBeNullOrWhiteSpace();
+        invitation!.InvitationString.Should().NotBeNullOrWhiteSpace();
+        invitation.QrCodeBase64.Should().BeNull();
     }
 
     [Fact]
@@ -325,9 +324,8 @@ public class AdminEndpointTests
         var response = await CreateInvitationAsync(
             client,
             space.Id,
-            clientAppUrl: null,
-            TestWebApplicationFactory.AdminSecret,
-            origin: "https://localhost:5173");
+            clientAppUrl: "https://localhost:5173",
+            TestWebApplicationFactory.AdminSecret);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
@@ -402,8 +400,8 @@ public class AdminEndpointTests
 
         var space = await factory.CreateSpaceAsync();
         
-        var response1 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret, origin: "https://localhost:5173");
-        var response2 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret, origin: "https://localhost:5173");
+        var response1 = await CreateInvitationAsync(client, space.Id, "https://localhost:5173", TestWebApplicationFactory.AdminSecret);
+        var response2 = await CreateInvitationAsync(client, space.Id, "https://localhost:5173", TestWebApplicationFactory.AdminSecret);
 
         response1.StatusCode.Should().Be(HttpStatusCode.OK);
         response2.StatusCode.Should().Be(HttpStatusCode.OK);
