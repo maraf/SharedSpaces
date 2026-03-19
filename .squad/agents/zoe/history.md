@@ -196,3 +196,11 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Key edge case documented: event handlers registered in constructor remain active after stop()
 - All 84 client tests passing (14 api-client + 13 space-api + 23 signalr-client + 17 token-storage + 17 invitation)
 - Branch: ready for commit alongside Wash's implementation
+
+## Team Updates (2026-03-19)
+
+**Wash completed SignalR client integration (Issue #26):** Built ~100 LOC service wrapper with auto-reconnect, event callbacks (onItemAdded, onItemDeleted, onStateChange), and accessTokenFactory pattern for JWT auth. Integrated into space-view.ts with event deduplication and dynamic status badge. Full refresh on reconnect strategy ensures consistency. Initial build issue with Tailwind dynamic classes fixed by Coordinator (see Wash's history for details).
+
+**Client test suite:** Your 23 tests bring total to 84 passing (token storage 17 + invitation parsing 17 + API client 14 + token validation 13 + SignalR 23). Mocking pattern established for future SignalR work.
+
+**What you learned:** Mock HubConnectionBuilder must be class-based (not function) for `new` operator to work in vitest. Edge case: event handlers registered in constructor remain active after `stop()`, allowing post-stop event delivery (expected SignalR behavior, documented in tests).

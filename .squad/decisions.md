@@ -1350,3 +1350,138 @@ Text input hint uses `Ctrl/⌘+Enter` as static string rather than runtime platf
 - Simpler, more maintainable Lit component lifecycle
 
 ---
+
+---
+
+### SignalR Client Integration Pattern
+
+**Decision Date:** 2026-03-19  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented (Issue #26)
+
+#### Context
+
+The SharedSpaces client needed real-time item updates without polling. The server already broadcasts `ItemAdded` and `ItemDeleted` events via SignalR hub at `/v1/spaces/{spaceId}/hub` with `[Authorize]` protection.
+
+#### Decision
+
+Implement a SignalR service wrapper (`src/SharedSpaces.Client/src/lib/signalr-client.ts`) with the following architecture:
+
+**Service Design**
+
+1. **Configuration via accessTokenFactory pattern** — Use `accessTokenFactory: () => Promise<string>` instead of passing raw tokens, enabling future token refresh without rebuilding the connection
+2. **Callback-based event handling** — Accept optional `onItemAdded`, `onItemDeleted`, `onStateChange` callbacks in config rather than exposing the HubConnection directly
+3. **Automatic reconnection with refresh** — Enable `.withAutomaticReconnect()` and trigger full item refresh on reconnection to catch missed events
+4. **Non-blocking initialization** — SignalR connection failures are logged but don't prevent UI from working with REST-only updates
+
+**Component Integration (space-view.ts)**
+
+1. **Start timing** — Initiate SignalR connection after successful initial data load (not in constructor/connectedCallback) to ensure auth is ready
+2. **Cleanup on unmount** — Call `signalRClient.stop()` in `disconnectedCallback()` to prevent memory leaks
+3. **Event deduplication** — Check if item.id exists before adding (handles race between optimistic local add and SignalR broadcast)
+4. **Dynamic status indicator** — Map `HubConnectionState` to `'connected' | 'disconnected' | 'reconnecting'` and drive badge color/label with reactive property
+
+**Connection Status Badge**
+
+- **Connected**: Green dot + "Connected" (emerald-400 colors)
+- **Reconnecting**: Yellow dot + "Reconnecting..." (yellow-400 colors)
+- **Disconnected**: Red dot + "Disconnected" (red-400 colors)
+
+#### Rationale
+
+- **accessTokenFactory pattern** — Matches SignalR's recommended approach for JWT auth and enables future token rotation without connection rebuilds
+- **Callback-based API** — Keeps the SignalR implementation detail hidden from components; easier to mock in tests
+- **Reconnection refresh** — Simple strategy that guarantees consistency at the cost of one extra fetch; acceptable given typical disconnect durations
+- **Non-blocking** — SignalR is an enhancement, not a requirement; graceful degradation to REST-only is critical for unreliable networks
+- **Post-load start** — Avoids race conditions where SignalR connects before JWT is available
+
+#### Consequences
+
+- **Positive:** Clean separation between SignalR transport and UI concerns; easy to test; graceful degradation on connection failure
+- **Negative:** Full item refresh on reconnect causes brief flicker; could optimize with gap detection in future
+- **Future work:** Consider moving to incremental sync with sequence numbers if reconnect refreshes become expensive with large item lists
+
+---
+
+### SignalR Client Tests (Issue #26)
+
+**Decision Date:** 2026-03-19  
+**Decided By:** Zoe (Tester)  
+**Status:** Complete
+
+#### Context
+
+Wash implemented the SignalR client service (`signalr-client.ts`) for real-time event handling (ItemAdded, ItemDeleted). The client needed comprehensive test coverage for connection lifecycle, event handling, error cases, and configuration options.
+
+#### Decision
+
+Wrote 23 comprehensive tests for the SignalR client using vitest with mocked `@microsoft/signalr` library:
+
+**Test Structure**
+
+1. **Connection Lifecycle (8 tests):** Hub URL format, accessTokenFactory passing, automatic reconnect, start/stop methods, state transitions
+2. **Event Handling (4 tests):** ItemAdded/ItemDeleted callbacks, file payloads, no-callback safety
+3. **Error and Edge Cases (6 tests):** Start failures, idempotent stop, reconnection flow, connection close, post-stop event handling
+4. **Configuration (5 tests):** Various callback combinations, onStateChange callback
+
+**Mock Strategy**
+
+- Created mock HubConnection with controllable start/stop/on/state
+- Mock HubConnectionBuilder as a **class constructor** (not a function) to match `new HubConnectionBuilder()` usage
+- Shared mock builder instance with methods returning `this` for fluent API chaining
+
+#### Rationale
+
+**Why class constructor mock?** Vitest requires proper class mocking for `new` operator. Initial attempt with `vi.fn(() => mockBuilder)` failed with "not a constructor" errors. Solution: `class MockHubConnectionBuilder` with methods delegating to shared mock.
+
+**Why test post-stop event delivery?** Documents actual behavior: event handlers are registered in constructor and remain active after `stop()`, so events can technically fire if connection receives messages after stop. This is expected SignalR behavior.
+
+**Why test accessTokenFactory as async function?** Wash's implementation uses `accessTokenFactory: () => Promise<string>` instead of plain token string, enabling dynamic token refresh. Tests verify the factory is passed through and returns correct JWT.
+
+#### Impact
+
+- **23 passing tests** covering SignalR client service
+- Tests written against Wash's implementation (concurrent work)
+- Mock pattern established for future SignalR testing
+- Documented edge cases (stop idempotence, post-stop events, state transitions)
+- Client test suite now includes: token storage (17), invitation parsing (17), API client (14), SignalR client (23) = **71 total client tests**
+
+---
+
+### Tailwind Dynamic Class Interpolation Fix
+
+**Decision Date:** 2026-03-19  
+**Decided By:** Coordinator (Build Integration)  
+**Status:** Resolved
+
+#### Context
+
+Wash's connection status badge in space-view.ts used Tailwind class names interpolated via template literal: `` `bg-${colorMap[state]}` ``. Tailwind v4 cannot purge dynamically interpolated class names.
+
+#### Decision
+
+Refactor status badge to use conditional rendering with fixed, static Tailwind classes:
+
+```javascript
+// Before (purge fails):
+className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 bg-${colors[state]}`}
+
+// After (static classes):
+${state === 'connected' ? 'bg-emerald-400 text-emerald-900' : ''}
+${state === 'reconnecting' ? 'bg-yellow-400 text-yellow-900' : ''}
+${state === 'disconnected' ? 'bg-red-400 text-red-900' : ''}
+```
+
+#### Rationale
+
+- Tailwind's JIT compiler (v4) requires class names to be statically analyzable
+- Template literals with dynamic segments defeat the purge mechanism
+- Static classes in conditional branches are fully analyzable
+- No performance impact; CSS selector compiled the same way
+
+#### Consequences
+
+- **Positive:** Builds succeed, CSS correctly purged, no runtime overhead
+- **Negative:** Slightly more verbose template code
+- **Learning:** Document Tailwind v4 static class requirement for future components
+

@@ -176,3 +176,14 @@ Pattern established for light-DOM modals: `@state() private modalItem` with `fix
   - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
   - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
   - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
+
+## Team Updates (2026-03-19)
+
+**Zoe completed SignalR client tests (Issue #26):** 23 comprehensive tests written concurrently with your implementation. Test patterns established:
+- Class-based mock for `new HubConnectionBuilder()` (function mocks don't work with `new`)
+- All state transitions, event handling, errors covered
+- Mock pattern documented for future SignalR testing
+
+**Coordinator fixed Tailwind dynamic class issue:** Your status badge used template literal interpolation (`` `bg-${colors[state]}` ``), which Tailwind v4 cannot purge. Refactored to conditional rendering with static class names (`'bg-emerald-400 text-emerald-900'` etc.). Builds now pass. Learning: Tailwind v4 requires statically analyzable class names.
+
+**Client test suite:** Now 84 total tests passing (token storage 17 + invitation parsing 17 + API client 14 + token validation 13 + SignalR 23).
