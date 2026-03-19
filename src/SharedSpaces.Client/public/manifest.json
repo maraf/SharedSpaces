@@ -1,0 +1,47 @@
+{
+  "name": "SharedSpaces",
+  "short_name": "SharedSpaces",
+  "description": "Share text and files in real-time collaborative spaces",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "share_target": {
+    "action": "/_share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "file",
+          "accept": [
+            "image/*",
+            "video/*",
+            "audio/*",
+            "text/*",
+            "application/*",
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".zip",
+            ".tar",
+            ".gz"
+          ]
+        }
+      ]
+    }
+  }
+}

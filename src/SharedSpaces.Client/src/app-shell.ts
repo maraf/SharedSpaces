@@ -1,5 +1,5 @@
 import { provide } from '@lit/context';
-import { html } from 'lit';
+import { html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { jwtDecode } from 'jwt-decode';
 
@@ -16,6 +16,8 @@ import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
+import { registerServiceWorker } from './lib/sw-registration';
+import { getPendingShares } from './lib/idb-storage';
 
 interface SpaceEntry {
   serverUrl: string;
@@ -45,6 +47,11 @@ export class AppShell extends BaseElement {
   @state() private currentSpaceId?: string;
   @state() private currentServerUrl?: string;
   @state() private spaces: SpaceEntry[] = [];
+  @state() private isOnline = navigator.onLine;
+  @state() private pendingShareCount = 0;
+
+  private handleOnline = () => { this.isOnline = true; };
+  private handleOffline = () => { this.isOnline = false; };
 
   override connectedCallback() {
     super.connectedCallback();
@@ -53,6 +60,47 @@ export class AppShell extends BaseElement {
     const invitation = parseInvitationFromUrl();
     if (invitation) {
       this.view = 'join';
+    }
+
+    // Register service worker and listen for SW messages
+    registerServiceWorker();
+    navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
+
+    // Track online/offline state
+    globalThis.addEventListener('online', this.handleOnline);
+    globalThis.addEventListener('offline', this.handleOffline);
+
+    // Check pending shares from IndexedDB
+    this.refreshPendingShareCount();
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    globalThis.removeEventListener('online', this.handleOnline);
+    globalThis.removeEventListener('offline', this.handleOffline);
+    navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  private handleSwMessage = (event: MessageEvent) => {
+    if (event.data?.type === 'pending-share-added') {
+      this.refreshPendingShareCount();
+    }
+  };
+
+  private handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      this.refreshPendingShareCount();
+    }
+  };
+
+  private async refreshPendingShareCount() {
+    try {
+      const shares = await getPendingShares();
+      this.pendingShareCount = shares.length;
+    } catch {
+      // IndexedDB may not be available
     }
   }
 
@@ -120,6 +168,8 @@ export class AppShell extends BaseElement {
         <div
           class="mx-auto flex min-h-[calc(100svh-3rem)] w-full max-w-5xl flex-col gap-6"
         >
+          ${!this.isOnline ? this.renderOfflineBanner() : nothing}
+
           <header class="flex flex-col gap-4">
             <button
               type="button"
@@ -148,6 +198,24 @@ export class AppShell extends BaseElement {
                 +
               </button>
 
+              ${this.pendingShareCount > 0
+                ? html`
+                  <button
+                    @click=${() => {
+                      if (this.spaces.length > 0 && !this.currentSpaceId) {
+                        this.selectSpace(this.spaces[0]);
+                      } else if (this.currentSpaceId) {
+                        this.view = 'space';
+                      }
+                    }}
+                    class="${this.pillBase} border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60"
+                    title="Items shared from other apps"
+                  >
+                    📥 ${this.pendingShareCount}
+                  </button>
+                `
+                : nothing}
+
               <span class="flex-1"></span>
 
               <button
@@ -164,6 +232,17 @@ export class AppShell extends BaseElement {
             ${this.renderContent()}
           </main>
         </div>
+      </div>
+    `;
+  }
+
+  private renderOfflineBanner() {
+    return html`
+      <div
+        class="rounded-lg border border-amber-500/30 bg-amber-950/30 px-4 py-2 text-center text-sm text-amber-300"
+        role="alert"
+      >
+        📡 You're offline — uploads will be queued and sent when you reconnect
       </div>
     `;
   }
@@ -196,6 +275,12 @@ export class AppShell extends BaseElement {
     if (this.spaces.length === 0) {
       return html`
         <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
+          ${this.pendingShareCount > 0
+            ? html`<p class="text-amber-300">
+                📥 ${this.pendingShareCount} item${this.pendingShareCount !== 1 ? 's' : ''} shared from other apps.
+                Join a space to upload them.
+              </p>`
+            : nothing}
           <p class="text-slate-400">
             No spaces yet. Click <span class="font-semibold text-sky-300">+</span> to join one.
           </p>
@@ -204,6 +289,12 @@ export class AppShell extends BaseElement {
     }
     return html`
       <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
+        ${this.pendingShareCount > 0
+          ? html`<p class="text-amber-300">
+              📥 ${this.pendingShareCount} item${this.pendingShareCount !== 1 ? 's' : ''} shared from other apps.
+              Select a space to upload them.
+            </p>`
+          : nothing}
         <p class="text-slate-400">
           Select a space above to get started.
         </p>
