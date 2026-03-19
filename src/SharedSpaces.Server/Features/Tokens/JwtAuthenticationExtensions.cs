@@ -96,6 +96,7 @@ internal static class SpaceMemberClaimTypes
     public const string DisplayName = "display_name";
     public const string ServerUrl = "server_url";
     public const string SpaceId = "space_id";
+    public const string SpaceName = "space_name";
 }
 
 internal static class JwtTokenSigningKeyFactory

@@ -83,11 +83,11 @@ public static class TokenEndpoints
         }
 
         var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
-        var token = CreateToken(member, serverUrl, configuration);
+        var token = CreateToken(member, serverUrl, space.Name, configuration);
         return Results.Ok(new TokenResponse(token));
     }
 
-    private static string CreateToken(SpaceMember member, string serverUrl, IConfiguration configuration)
+    private static string CreateToken(SpaceMember member, string serverUrl, string spaceName, IConfiguration configuration)
     {
         var signingCredentials = new SigningCredentials(
             JwtTokenSigningKeyFactory.Create(configuration),
@@ -99,7 +99,8 @@ public static class TokenEndpoints
                 new Claim(JwtRegisteredClaimNames.Sub, member.Id.ToString()),
                 new Claim(SpaceMemberClaimTypes.DisplayName, member.DisplayName),
                 new Claim(SpaceMemberClaimTypes.ServerUrl, serverUrl),
-                new Claim(SpaceMemberClaimTypes.SpaceId, member.SpaceId.ToString())
+                new Claim(SpaceMemberClaimTypes.SpaceId, member.SpaceId.ToString()),
+                new Claim(SpaceMemberClaimTypes.SpaceName, spaceName)
             ],
             signingCredentials: signingCredentials);
 
