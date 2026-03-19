@@ -79,7 +79,7 @@ export class AppShell extends BaseElement {
   }
 
   private handleViewChange = (event: CustomEvent<AppViewChangeDetail>) => {
-    const { view, spaceId, serverUrl, token, displayName } = event.detail;
+    const { view, spaceId, serverUrl, token, displayName, reloadSpaces } = event.detail;
 
     this.view = view;
 
@@ -91,6 +91,9 @@ export class AppShell extends BaseElement {
         displayName: displayName ?? this.authState.displayName,
       };
       // Refresh space list after joining
+      this.loadSpacesFromStorage();
+    } else if (reloadSpaces) {
+      // Reload spaces when explicitly requested (e.g., after removing a space)
       this.loadSpacesFromStorage();
     }
   };

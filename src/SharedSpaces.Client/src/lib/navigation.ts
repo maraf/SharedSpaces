@@ -7,4 +7,5 @@ export interface AppViewChangeDetail {
   token?: string;
   displayName?: string;
   spaceName?: string;
+  reloadSpaces?: boolean;
 }
