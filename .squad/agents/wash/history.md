@@ -26,6 +26,18 @@
   - hooks/ — useSignalR, useOfflineQueue
   - main.tsx
 
+## Team Updates (2026-03-19)
+
+**Wash + Zoe completed race condition fix (squad/26-signalr-client):** 
+- **Issue:** Uploader saw duplicate items due to SignalR `ItemAdded` events arriving before PUT responses
+- **Wash's fix:** Added `pendingItemIds: Set<string>` tracking in space-view.ts to block SignalR during upload window (commit 3502e56)
+- **Zoe's tests:** Wrote 7 integration + unit tests covering race condition, concurrent uploads, failed cleanup, cross-member events (commit be441b9)
+- **Verification:** Lint ✅, Build ✅, All 91 client tests pass ✅
+- **Decision recorded:** `.squad/decisions.md` — full implementation details, rationale, alternatives considered
+- **Related:** Orchestration logs at `.squad/orchestration-log/2026-03-19T20-30-wash.md` and `-zoe.md`
+
+This fix is a critical bug squash preventing data corruption for users. The `pendingItemIds` Set pattern is now established as the dedup strategy for async upload scenarios.
+
 ## Team Updates (2026-03-16)
 
 **Mal completed issue decomposition:** 14 GitHub issues (#17–#30) created spanning 5 phases:
@@ -133,6 +145,8 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 - **Admin per-space state pattern (2026-03-18):** `src/SharedSpaces.Client/src/features/admin/admin-view.ts` should keep one in-memory state record per space card that combines invitation generation UI with fetched members, pending invitations, and destructive-action loading flags. Load those collections right after `GET /v1/spaces`, refetch pending invitations after generating a new invitation because `InvitationResponse` does not expose the list item ID, and treat any 401 from these follow-up admin calls as a full bounce back to the login form.
 - **Screenshot seed file uploads (2026-03-19):** The items PUT endpoint (`/v1/spaces/{spaceId}/items/{itemId}`) accepts `multipart/form-data` for both text and file items. For file items: fields `id` (UUID), `contentType` = `"file"`, and `file` (Blob with filename). The endpoint returns JSON (the item object), so the `apiCall` helper's `res.json()` works without modification. Node.js `Blob` and `FormData` are available natively in Playwright's Node.js runtime. See `src/SharedSpaces.Client/e2e/screenshots.spec.ts` `seedSpace()` for the pattern.
 - **Delete item pattern (2026-03-19):** `deleteItem()` in `space-api.ts` calls `DELETE /v1/spaces/{spaceId}/items/{itemId}` and returns void (204 No Content). `throwForFailed()` checks `response.ok` first and only reads the body on error, so no adjustment needed for void endpoints. In `space-view.ts`, delete uses optimistic removal (filter item from `this.items` immediately) with revert-on-failure (re-insert and re-sort by `sharedAt`). No SignalR `item-deleted` handler exists yet — local removal is the only mechanism. Delete button uses a trash SVG icon with `hover:text-red-400` to signal destructive action, placed between the copy/download button and the timestamp.
+- **Lit updated() dedup pattern (2026-03-19):** When using `updated(changed)` to trigger async work like data fetching, always track a `lastLoadedKey` to prevent redundant calls. Lit fires `updated()` on every render cycle where reactive properties changed, which can cause duplicate fetches if `connectedCallback()` also triggers loading. Canonical pattern: remove the `connectedCallback()` data call, rely solely on `updated()`, and compare a composite key (e.g., `${serverUrl}|${spaceId}`) against the last loaded key. Applied in `space-view.ts`.
+- **Consistent 401 → redirect pattern (2026-03-19):** All API-calling handlers in `space-view.ts` (`loadData`, `handleTextSubmit`, `uploadFiles`, `handleDelete`, `handleDownload`) now check for `SpaceApiError` with status 401 and call `redirectToJoin()`. Previously only `loadData` did this — other handlers showed error messages on 401, which left users stuck on a broken view. This mirrors the admin panel's 401 → login bounce pattern.
 
 ## Team Updates (2026-03-18)
 
@@ -219,3 +233,17 @@ Finalized dead space removal UI implementation:
 **Decision pattern:** "Dead Space Error Handling Pattern" merged to decisions.md. Establishes graceful degradation pattern for auth/network failures: track error type → provide recovery actions → let users clean up resources → coordinate with app-shell via event flags.
 
 **Next phase:** Ready for code review and merge to main.
+- **SignalR client integration (2026-03-19, Issue #26):** Implemented real-time item updates using `@microsoft/signalr` in `src/SharedSpaces.Client/src/lib/signalr-client.ts`. Key patterns:
+  - **HubConnectionBuilder with accessTokenFactory** — Pass JWT via function returning `Promise<string>`, not raw token, to support dynamic token refresh
+  - **Automatic reconnection** — Built-in `.withAutomaticReconnect()` handles connection drops with exponential backoff
+  - **Connection lifecycle in Lit components** — Start SignalR after initial data load (not in constructor/connectedCallback to avoid race with auth), stop in `disconnectedCallback()` for cleanup
+  - **Event deduplication** — Check if item.id already exists before adding (handles race between optimistic local add and SignalR broadcast)
+  - **Reconnection refresh** — On `onreconnected` callback, fetch full item list to catch missed events during disconnection
+  - **Dynamic connection status badge** — Map SignalR's `HubConnectionState` enum to UI-friendly `'connected' | 'disconnected' | 'reconnecting'` and drive badge color/label with reactive `@state()` property
+  - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
+  - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
+  - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
+
+## Learnings
+
+- **Item duplication race condition fix (2026-01):** Fixed race between HTTP PUT response and SignalR ItemAdded event in src/SharedSpaces.Client/src/features/space-view/space-view.ts. Pattern: track pending upload IDs in a private pendingItemIds = new Set<string>() field (not reactive—internal tracking only). In handleTextSubmit/uploadFiles, add generated UUID to set before API call, remove in finally block. In handleItemAdded, check both this.items.some(...) AND this.pendingItemIds.has(payload.id) before adding item. This prevents SignalR from adding items that are currently being uploaded by the same client. Simple O(1) Set lookups, no complex state machine needed. Cleanup in finally blocks ensures no leaked pending IDs even on error.
