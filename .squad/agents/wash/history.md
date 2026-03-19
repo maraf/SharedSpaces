@@ -166,3 +166,13 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 4. **Removed extra left padding** — Text content now flush with card edge (respects card `px-4` but no extra gap/indent)
 
 Pattern established for light-DOM modals: `@state() private modalItem` with `fixed inset-0 z-50 bg-black/80` overlay, `stopPropagation()` on inner card to prevent click-through, and simple close handler. File items keep 📄 icon + filename + size on first row, same action row below.
+- **SignalR client integration (2026-03-19, Issue #26):** Implemented real-time item updates using `@microsoft/signalr` in `src/SharedSpaces.Client/src/lib/signalr-client.ts`. Key patterns:
+  - **HubConnectionBuilder with accessTokenFactory** — Pass JWT via function returning `Promise<string>`, not raw token, to support dynamic token refresh
+  - **Automatic reconnection** — Built-in `.withAutomaticReconnect()` handles connection drops with exponential backoff
+  - **Connection lifecycle in Lit components** — Start SignalR after initial data load (not in constructor/connectedCallback to avoid race with auth), stop in `disconnectedCallback()` for cleanup
+  - **Event deduplication** — Check if item.id already exists before adding (handles race between optimistic local add and SignalR broadcast)
+  - **Reconnection refresh** — On `onreconnected` callback, fetch full item list to catch missed events during disconnection
+  - **Dynamic connection status badge** — Map SignalR's `HubConnectionState` enum to UI-friendly `'connected' | 'disconnected' | 'reconnecting'` and drive badge color/label with reactive `@state()` property
+  - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
+  - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
+  - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates

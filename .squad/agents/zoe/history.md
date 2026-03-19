@@ -85,6 +85,11 @@ Server structure now available to Zoe; test project can reference production ent
 - `GET /v1/spaces` is an admin-protected endpoint that returns all spaces as the shared `SpaceResponse` shape ordered by `CreatedAt` descending; integration tests should cover empty-state, auth failure, and newest-first listing.
 - Admin member-management coverage is strongest when tests create `SpaceMember` rows through the real invitation + token exchange flow (create space → create invitation → POST `/v1/spaces/{id}/tokens`) instead of seeding members directly, so member listing/revocation scenarios exercise the join pipeline end to end.
 - Admin invitation-management list responses are metadata-only (`InvitationListResponse` = `Id` + `SpaceId`) and must never expose hashed PINs; tests should deserialize the array shape and also inspect raw JSON to confirm no `pin` property leaks.
+- SignalR client tests must mock `HubConnectionBuilder` as a class constructor, not a function returning an object; vitest requires `class MockHubConnectionBuilder` with methods that delegate to shared mock builder to properly intercept `new HubConnectionBuilder()` calls.
+- SignalR client event handlers are registered in constructor (not start/stop), so events can theoretically fire after `stop()` if the connection receives messages; tests should verify handlers remain active after stop to document this behavior.
+- SignalR client `accessTokenFactory` is an async function (not a plain string), enabling dynamic token refresh; tests should verify the factory function is passed through to `withUrl` options and returns the expected JWT.
+- SignalR client stop() is defensive and checks `HubConnectionState` before calling `connection.stop()`, preventing errors on already-disconnected connections; tests should verify idempotent stop behavior and no-op on pre-disconnected state.
+- SignalR client state tracking uses a getter that maps `HubConnectionState` enum values to simplified `ConnectionState` union type ('connected' | 'disconnected' | 'reconnecting'); tests should verify state transitions via connection lifecycle callbacks (onreconnecting, onreconnected, onclose).
 
 ## Team Updates (2026-03-17)
 
@@ -180,3 +185,14 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Test coverage expanded (67 total, 3 new GET /v1/spaces tests)
 
 **Decisions.md updated:** Admin secret validation section corrected from outdated localStorage + test-space behavior to current GET /v1/spaces validation pattern.
+
+## Team Updates (2026-03-18 Continued)
+
+**Zoe completed Issue #26 (SignalR Client Tests):** Wrote comprehensive test suite for Wash's SignalR client service:
+- Test file: `src/SharedSpaces.Client/src/lib/signalr-client.test.ts`
+- 23 tests covering connection lifecycle (8), event handling (4), error/edge cases (6), configuration (5)
+- Mock strategy: Class-based HubConnectionBuilder mock to properly intercept `new` operator
+- Verified accessTokenFactory async function pattern, state tracking, stop idempotence, reconnection flow
+- Key edge case documented: event handlers registered in constructor remain active after stop()
+- All 84 client tests passing (14 api-client + 13 space-api + 23 signalr-client + 17 token-storage + 17 invitation)
+- Branch: ready for commit alongside Wash's implementation
