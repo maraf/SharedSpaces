@@ -1,4 +1,4 @@
-export type AppView = 'join' | 'space' | 'admin';
+export type AppView = 'home' | 'join' | 'space' | 'admin';
 
 export interface AppViewChangeDetail {
   view: AppView;
@@ -6,4 +6,5 @@ export interface AppViewChangeDetail {
   serverUrl?: string;
   token?: string;
   displayName?: string;
+  spaceName?: string;
 }

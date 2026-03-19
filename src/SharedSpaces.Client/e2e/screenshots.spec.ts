@@ -29,32 +29,28 @@ async function apiCall(url: string, options: RequestInit = {}) {
   return res.json();
 }
 
-async function seedSpace() {
-  // Create a space
+async function seedSpace(name: string) {
   const space = await apiCall(`${SERVER_URL}/v1/spaces`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
-    body: JSON.stringify({ name: 'Demo Space' }),
+    body: JSON.stringify({ name }),
   });
 
-  // Create invitation
   const invitation = await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/invitations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
     body: JSON.stringify({ clientAppUrl: CLIENT_URL }),
   });
 
-  // Parse PIN from invitationString (format: "serverUrl|spaceId|pin")
   const pin = invitation.invitationString.split('|')[2];
 
-  // Join as "Alice"
   const aliceToken = await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/tokens`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin, displayName: 'Alice' }),
   });
 
-  // Create a second invitation + member for richer screenshots
+  // Add a second member
   const invitation2 = await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/invitations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
@@ -67,11 +63,10 @@ async function seedSpace() {
     body: JSON.stringify({ pin: pin2, displayName: 'Bob' }),
   });
 
-  // Add sample items (endpoint expects multipart/form-data)
+  // Add sample items
   for (const content of [
     'Welcome to SharedSpaces! 🚀',
     'This is a shared note visible to all members.',
-    'Try adding your own items below.',
   ]) {
     const itemId = crypto.randomUUID();
     const form = new FormData();
@@ -88,72 +83,22 @@ async function seedSpace() {
   return { space, invitation, token: aliceToken.token };
 }
 
-async function navigateToSpaceView(
-  page: Page,
-  spaceId: string,
-  token: string,
-) {
-  await page.goto(CLIENT_URL);
-  await page.waitForSelector('app-shell');
-
-  // Inject token into localStorage
-  await page.evaluate(
-    ({ serverUrl, spaceId, token }) => {
-      const key = 'sharedspaces:tokens';
-      const tokens = JSON.parse(localStorage.getItem(key) || '{}');
-      tokens[`${serverUrl}:${spaceId}`] = token;
-      localStorage.setItem(key, JSON.stringify(tokens));
-    },
-    { serverUrl: SERVER_URL, spaceId, token },
-  );
-
-  // Dispatch view-change event to switch to space view
-  await page.evaluate(
-    ({ spaceId, serverUrl, token }) => {
-      document.querySelector('main')?.dispatchEvent(
-        new CustomEvent('view-change', {
-          bubbles: true,
-          composed: true,
-          detail: { view: 'space', spaceId, serverUrl, token, displayName: 'Alice' },
-        }),
-      );
-    },
-    { spaceId, serverUrl: SERVER_URL, token },
-  );
-
-  await page.waitForSelector('space-view');
-  // Wait for SignalR connection + data load
-  await page.waitForTimeout(1500);
-}
-
-async function navigateToAdminView(page: Page) {
-  await page.goto(CLIENT_URL);
-  await page.waitForSelector('app-shell');
-
-  // Switch to admin view via CustomEvent
-  await page.evaluate(() => {
-    document.querySelector('main')?.dispatchEvent(
-      new CustomEvent('view-change', {
-        bubbles: true,
-        composed: true,
-        detail: { view: 'admin' },
-      }),
-    );
-  });
-
-  await page.waitForSelector('admin-view');
-  await page.waitForTimeout(500);
+/** Inject tokens into localStorage so the pill bar shows joined spaces */
+async function injectTokens(page: Page, tokens: Record<string, string>) {
+  await page.evaluate((t) => {
+    localStorage.setItem('sharedspaces:tokens', JSON.stringify(t));
+  }, tokens);
 }
 
 async function navigateToAdminSignedIn(page: Page) {
-  await navigateToAdminView(page);
+  // Click the Admin pill in the nav bar
+  await page.click('button:has-text("Admin")');
+  await page.waitForSelector('admin-view');
 
-  // Fill in admin credentials and submit
   await page.fill('#admin-server-url', SERVER_URL);
   await page.fill('#admin-secret', ADMIN_SECRET);
   await page.locator('admin-view button[type="submit"]').click();
 
-  // Wait for spaces list to load (heading shows "Spaces (N)")
   await page.waitForFunction(
     () => document.body.textContent?.match(/Spaces\s*\(\d+\)/),
     { timeout: 10_000 },
@@ -170,21 +115,50 @@ async function capture(page: Page, name: string, vp: ViewportSpec) {
 }
 
 test.describe('Screenshot Capture', () => {
+  let tokenMap: Record<string, string>;
   let spaceId: string;
   let token: string;
   let invitationString: string;
 
   test.beforeAll(async () => {
-    const data = await seedSpace();
-    spaceId = data.space.id;
-    token = data.token;
-    invitationString = data.invitation.invitationString;
-    console.log(`Seeded space ${spaceId}`);
+    // Seed multiple spaces for a richer pill bar
+    const space1 = await seedSpace('Project Alpha');
+    const space2 = await seedSpace('Design Team');
+
+    spaceId = space1.space.id;
+    token = space1.token;
+    invitationString = space1.invitation.invitationString;
+
+    tokenMap = {
+      [`${SERVER_URL}:${space1.space.id}`]: space1.token,
+      [`${SERVER_URL}:${space2.space.id}`]: space2.token,
+    };
+    console.log(`Seeded spaces: ${space1.space.id}, ${space2.space.id}`);
   });
 
   for (const vp of Viewports) {
+    test(`home - empty - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await page.waitForSelector('app-shell');
+      await page.waitForTimeout(500);
+      await capture(page, 'home-empty', vp);
+    });
+
+    test(`home - with spaces - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.waitForTimeout(500);
+      await capture(page, 'home', vp);
+    });
+
     test(`join view - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('button:has-text("+")');
       await page.waitForSelector('join-view');
       await page.waitForTimeout(500);
       await capture(page, 'join', vp);
@@ -198,16 +172,22 @@ test.describe('Screenshot Capture', () => {
     });
 
     test(`space view - ${vp.name}`, async ({ page }) => {
-      await navigateToSpaceView(page, spaceId, token);
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Click the first space pill
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
       await capture(page, 'space', vp);
     });
 
-    test(`admin view - ${vp.name}`, async ({ page }) => {
-      await navigateToAdminView(page);
-      await capture(page, 'admin', vp);
-    });
-
     test(`admin view signed-in - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
       await capture(page, 'admin-spaces', vp);
     });

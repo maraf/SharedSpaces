@@ -3,7 +3,6 @@ import { customElement, property } from 'lit/decorators.js';
 
 import '../../components/view-card';
 import { BaseElement } from '../../lib/base-element';
-import type { AppViewChangeDetail } from '../../lib/navigation';
 
 @customElement('space-view')
 export class SpaceView extends BaseElement {
@@ -15,16 +14,6 @@ export class SpaceView extends BaseElement {
 
   @property({ type: String, attribute: 'server-url' })
   serverUrl?: string;
-
-  private handleBack = () => {
-    this.dispatchEvent(
-      new CustomEvent<AppViewChangeDetail>('view-change', {
-        bubbles: true,
-        composed: true,
-        detail: { view: 'join' },
-      }),
-    );
-  };
 
   override render() {
     const body = html`
@@ -64,12 +53,6 @@ export class SpaceView extends BaseElement {
             >
               Connection
             </p>
-            <p class="mt-2 text-sm text-slate-300">
-              Runtime API base URL:
-              <span class="break-all font-mono text-xs text-sky-300"
-                >${this.apiBaseUrl}</span
-              >
-            </p>
             ${this.spaceId
               ? html`<p class="mt-2 text-sm text-slate-300">
                   Space ID:
@@ -83,29 +66,7 @@ export class SpaceView extends BaseElement {
                 </p>`
               : ''}
           </div>
-          <div
-            class="rounded-2xl border border-dashed border-slate-700 p-4 text-sm text-slate-300"
-          >
-            SignalR client wrapper and auth state placeholders live under
-            <code class="rounded bg-slate-900 px-1.5 py-0.5 text-sky-300"
-              >src/lib</code
-            >.
-          </div>
         </aside>
-      </div>
-
-      <div
-        class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <button
-          class="inline-flex items-center justify-center rounded-full border border-slate-700 px-5 py-3 text-sm font-semibold text-white transition hover:border-slate-500 hover:bg-slate-800"
-          @click=${this.handleBack}
-        >
-          Back to join
-        </button>
-        <p class="text-sm text-slate-400">
-          Use this view switcher until real routing arrives.
-        </p>
       </div>
     `;
 

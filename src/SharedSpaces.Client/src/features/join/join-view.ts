@@ -21,6 +21,7 @@ interface JwtClaims {
   display_name: string;
   server_url: string;
   space_id: string;
+  space_name: string;
 }
 
 @customElement('join-view')
@@ -150,6 +151,7 @@ export class JoinView extends BaseElement {
             serverUrl: claims.server_url,
             token: response.token,
             displayName: claims.display_name,
+            spaceName: claims.space_name,
           },
         })
       );
