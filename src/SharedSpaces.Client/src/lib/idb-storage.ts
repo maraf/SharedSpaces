@@ -19,7 +19,6 @@ export interface OfflineQueueItem {
   itemId: string;
   spaceId: string;
   serverUrl: string;
-  token: string;
   type: 'text' | 'file';
   content?: string;
   fileName?: string;
@@ -28,8 +27,12 @@ export interface OfflineQueueItem {
   timestamp: number;
 }
 
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -41,8 +44,13 @@ function openDB(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
   });
+
+  return dbPromise;
 }
 
 function getAllFromStore<T>(storeName: string): Promise<T[]> {

@@ -17,7 +17,11 @@ import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
 import { registerServiceWorker } from './lib/sw-registration';
-import { getPendingShares } from './lib/idb-storage';
+import {
+  getPendingShares,
+  removePendingShare,
+  type PendingShareItem,
+} from './lib/idb-storage';
 
 interface SpaceEntry {
   serverUrl: string;
@@ -49,6 +53,7 @@ export class AppShell extends BaseElement {
   @state() private spaces: SpaceEntry[] = [];
   @state() private isOnline = navigator.onLine;
   @state() private pendingShareCount = 0;
+  @state() private pendingShares: PendingShareItem[] = [];
 
   private handleOnline = () => { this.isOnline = true; };
   private handleOffline = () => { this.isOnline = false; };
@@ -98,10 +103,17 @@ export class AppShell extends BaseElement {
   private async refreshPendingShareCount() {
     try {
       const shares = await getPendingShares();
+      this.pendingShares = shares;
       this.pendingShareCount = shares.length;
     } catch {
       // IndexedDB may not be available
     }
+  }
+
+  private async dismissPendingShare(share: PendingShareItem) {
+    await removePendingShare(share.id);
+    this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+    this.pendingShareCount = this.pendingShares.length;
   }
 
   private loadSpacesFromStorage() {
@@ -275,12 +287,7 @@ export class AppShell extends BaseElement {
     if (this.spaces.length === 0) {
       return html`
         <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
-          ${this.pendingShareCount > 0
-            ? html`<p class="text-amber-300">
-                📥 ${this.pendingShareCount} item${this.pendingShareCount !== 1 ? 's' : ''} shared from other apps.
-                Join a space to upload them.
-              </p>`
-            : nothing}
+          ${this.renderHomePendingShares('Join a space to upload them.')}
           <p class="text-slate-400">
             No spaces yet. Click <span class="font-semibold text-sky-300">+</span> to join one.
           </p>
@@ -289,15 +296,50 @@ export class AppShell extends BaseElement {
     }
     return html`
       <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
-        ${this.pendingShareCount > 0
-          ? html`<p class="text-amber-300">
-              📥 ${this.pendingShareCount} item${this.pendingShareCount !== 1 ? 's' : ''} shared from other apps.
-              Select a space to upload them.
-            </p>`
-          : nothing}
+        ${this.renderHomePendingShares('Select a space to upload them.')}
         <p class="text-slate-400">
           Select a space above to get started.
         </p>
+      </div>
+    `;
+  }
+
+  private renderHomePendingShares(instruction: string) {
+    if (this.pendingShares.length === 0) return nothing;
+
+    return html`
+      <div class="w-full max-w-md space-y-3 text-left">
+        <p class="text-center text-sm text-amber-300">
+          📥 ${this.pendingShares.length}
+          item${this.pendingShares.length !== 1 ? 's' : ''} shared from other
+          apps. ${instruction}
+        </p>
+        <ul class="space-y-1.5">
+          ${this.pendingShares.map(
+            (share) => html`
+              <li
+                class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
+              >
+                <span class="shrink-0 text-sm" aria-hidden="true">
+                  ${share.type === 'file' ? '📄' : '📝'}
+                </span>
+                <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
+                  ${share.type === 'file'
+                    ? share.fileName ?? 'File'
+                    : (share.content ?? '').substring(0, 100)}
+                </span>
+                <button
+                  @click=${() => this.dismissPendingShare(share)}
+                  class="shrink-0 rounded p-1 text-slate-500 hover:text-red-400"
+                  title="Dismiss"
+                  aria-label="Dismiss shared item"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </li>
+            `,
+          )}
+        </ul>
       </div>
     `;
   }

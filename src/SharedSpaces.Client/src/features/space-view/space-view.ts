@@ -63,14 +63,21 @@ export class SpaceView extends BaseElement {
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
 
-  private handleOnline = () => {
+  private handleOnline = async () => {
     this.isOnline = true;
-    this.processOfflineQueue();
+    // Prefer Background Sync (SW handles it); fall back to client-side processing
+    const synced = await requestBackgroundSync();
+    if (!synced) {
+      this.processOfflineQueue();
+    }
   };
   private handleOffline = () => { this.isOnline = false; };
   private handleSwMessage = (event: MessageEvent) => {
     if (event.data?.type === 'pending-share-added') {
       this.loadPendingShares();
+    }
+    if (event.data?.type === 'offline-queue-sync-requested') {
+      this.processOfflineQueue();
     }
     if (event.data?.type === 'offline-queue-synced') {
       const { synced, failed } = event.data;
@@ -291,6 +298,7 @@ export class SpaceView extends BaseElement {
 
     try {
       const itemId = crypto.randomUUID();
+      let uploaded = false;
 
       if (share.type === 'text' && share.content) {
         const item = await shareText(
@@ -301,6 +309,7 @@ export class SpaceView extends BaseElement {
           this.token,
         );
         this.items = [item, ...this.items];
+        uploaded = true;
       } else if (share.type === 'file' && share.fileData) {
         const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
         const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
@@ -312,10 +321,15 @@ export class SpaceView extends BaseElement {
           this.token,
         );
         this.items = [item, ...this.items];
+        uploaded = true;
       }
 
-      await removePendingShare(share.id);
-      this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+      if (uploaded) {
+        await removePendingShare(share.id);
+        this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+      } else {
+        this.uploadError = 'Shared item has no content to upload.';
+      }
     } catch (error) {
       this.uploadError =
         error instanceof SpaceApiError
@@ -353,14 +367,13 @@ export class SpaceView extends BaseElement {
     type: 'text' | 'file',
     options: { content?: string; fileName?: string; fileType?: string; fileData?: ArrayBuffer },
   ) {
-    if (!this.serverUrl || !this.spaceId || !this.token) return;
+    if (!this.serverUrl || !this.spaceId) return;
 
     const item = {
       id: crypto.randomUUID(),
       itemId: crypto.randomUUID(),
       spaceId: this.spaceId,
       serverUrl: this.serverUrl,
-      token: this.token,
       type,
       ...options,
       timestamp: Date.now(),
@@ -374,12 +387,13 @@ export class SpaceView extends BaseElement {
   }
 
   private async processOfflineQueue() {
-    if (!navigator.onLine) return;
+    if (!navigator.onLine || !this.token) return;
 
     try {
       const queue = await getOfflineQueue();
       if (queue.length === 0) return;
 
+      const currentToken = this.token;
       let synced = 0;
       for (const item of queue) {
         try {
@@ -398,7 +412,7 @@ export class SpaceView extends BaseElement {
             `${item.serverUrl.replace(/\/+$/, '')}/v1/spaces/${encodeURIComponent(item.spaceId)}/items/${encodeURIComponent(item.itemId)}`,
             {
               method: 'PUT',
-              headers: { Authorization: `Bearer ${item.token}` },
+              headers: { Authorization: `Bearer ${currentToken}` },
               body: form,
             },
           );

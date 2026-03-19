@@ -80,68 +80,6 @@ async function handleShareTarget(request) {
   return Response.redirect('/', 303);
 }
 
-async function processOfflineQueue() {
-  const db = await openDB();
-
-  const items = await new Promise((resolve, reject) => {
-    const tx = db.transaction(OFFLINE_QUEUE_STORE, 'readonly');
-    const request = tx.objectStore(OFFLINE_QUEUE_STORE).getAll();
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-
-  const results = { synced: 0, failed: 0 };
-
-  for (const item of items) {
-    try {
-      const form = new FormData();
-      form.append('id', item.itemId);
-      form.append('contentType', item.type);
-
-      if (item.type === 'text') {
-        form.append('content', item.content);
-      } else {
-        const blob = new Blob([item.fileData], { type: item.fileType });
-        form.append('file', blob, item.fileName);
-      }
-
-      const response = await fetch(
-        `${item.serverUrl}/v1/spaces/${item.spaceId}/items/${item.itemId}`,
-        {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${item.token}` },
-          body: form,
-        },
-      );
-
-      if (response.ok) {
-        const deleteTx = db.transaction(OFFLINE_QUEUE_STORE, 'readwrite');
-        deleteTx.objectStore(OFFLINE_QUEUE_STORE).delete(item.id);
-        await new Promise((resolve) => {
-          deleteTx.oncomplete = resolve;
-        });
-        results.synced++;
-      } else {
-        results.failed++;
-      }
-    } catch {
-      results.failed++;
-    }
-  }
-
-  // Notify clients about sync results
-  if (results.synced > 0) {
-    const allClients = await self.clients.matchAll();
-    for (const client of allClients) {
-      client.postMessage({
-        type: 'offline-queue-synced',
-        synced: results.synced,
-        failed: results.failed,
-      });
-    }
-  }
-}
-
 // --- Event Listeners ---
 
 self.addEventListener('fetch', (event) => {
@@ -157,7 +95,14 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('sync', (event) => {
   if (event.tag === 'offline-queue-sync') {
-    event.waitUntil(processOfflineQueue());
+    // Notify the client to process the queue (client has auth context)
+    event.waitUntil(
+      self.clients.matchAll().then((clients) => {
+        for (const client of clients) {
+          client.postMessage({ type: 'offline-queue-sync-requested' });
+        }
+      }),
+    );
   }
 });
 
