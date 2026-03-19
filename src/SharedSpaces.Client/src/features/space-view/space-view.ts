@@ -1,7 +1,18 @@
-import { html } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { html, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
+import type { AppViewChangeDetail } from '../../lib/navigation';
+import { getToken } from '../../lib/token-storage';
+import {
+  getSpaceInfo,
+  getItems,
+  shareText,
+  shareFile,
+  SpaceApiError,
+  type SpaceDetailsResponse,
+  type SpaceItemResponse,
+} from './space-api';
 
 @customElement('space-view')
 export class SpaceView extends BaseElement {
@@ -14,36 +25,378 @@ export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'server-url' })
   serverUrl?: string;
 
+  @state() private spaceInfo?: SpaceDetailsResponse;
+  @state() private items: SpaceItemResponse[] = [];
+  @state() private isLoading = true;
+  @state() private errorMessage = '';
+  @state() private textInput = '';
+  @state() private isUploading = false;
+  @state() private uploadError = '';
+  @state() private dragOver = false;
+
+  private token?: string;
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.loadData();
+  }
+
+  override updated(changed: Map<string, unknown>) {
+    if (changed.has('spaceId') || changed.has('serverUrl')) {
+      this.loadData();
+    }
+  }
+
+  private resolveToken(): string | undefined {
+    if (this.serverUrl && this.spaceId) {
+      return getToken(this.serverUrl, this.spaceId);
+    }
+    return undefined;
+  }
+
+  private redirectToJoin() {
+    this.dispatchEvent(
+      new CustomEvent<AppViewChangeDetail>('view-change', {
+        bubbles: true,
+        composed: true,
+        detail: { view: 'join' },
+      }),
+    );
+  }
+
+  private async loadData() {
+    if (!this.serverUrl || !this.spaceId) return;
+
+    this.token = this.resolveToken();
+    if (!this.token) {
+      this.redirectToJoin();
+      return;
+    }
+
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    try {
+      const [info, itemList] = await Promise.all([
+        getSpaceInfo(this.serverUrl, this.spaceId, this.token),
+        getItems(this.serverUrl, this.spaceId, this.token),
+      ]);
+      this.spaceInfo = info;
+      this.items = itemList;
+    } catch (error) {
+      if (error instanceof SpaceApiError && error.status === 401) {
+        this.redirectToJoin();
+        return;
+      }
+      this.errorMessage =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to load space data.';
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  private handleTextInput = (e: Event) => {
+    this.textInput = (e.target as HTMLTextAreaElement).value;
+    this.uploadError = '';
+  };
+
+  private handleTextSubmit = async () => {
+    if (!this.textInput.trim() || !this.serverUrl || !this.spaceId || !this.token)
+      return;
+
+    this.isUploading = true;
+    this.uploadError = '';
+
+    try {
+      const itemId = crypto.randomUUID();
+      const item = await shareText(
+        this.serverUrl,
+        this.spaceId,
+        itemId,
+        this.textInput.trim(),
+        this.token,
+      );
+      this.items = [item, ...this.items];
+      this.textInput = '';
+    } catch (error) {
+      this.uploadError =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to share text.';
+    } finally {
+      this.isUploading = false;
+    }
+  };
+
+  private handleTextKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      this.handleTextSubmit();
+    }
+  };
+
+  private handleFileSelect = async (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+    await this.uploadFiles(Array.from(files));
+    input.value = '';
+  };
+
+  private handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    this.dragOver = true;
+  };
+
+  private handleDragLeave = () => {
+    this.dragOver = false;
+  };
+
+  private handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    this.dragOver = false;
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    await this.uploadFiles(Array.from(files));
+  };
+
+  private async uploadFiles(files: File[]) {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    this.isUploading = true;
+    this.uploadError = '';
+
+    try {
+      for (const file of files) {
+        const itemId = crypto.randomUUID();
+        const item = await shareFile(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          file,
+          this.token,
+        );
+        this.items = [item, ...this.items];
+      }
+    } catch (error) {
+      this.uploadError =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to upload file.';
+    } finally {
+      this.isUploading = false;
+    }
+  }
+
+  private formatFileSize(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(
+      Math.floor(Math.log(bytes) / Math.log(1024)),
+      units.length - 1,
+    );
+    const size = bytes / Math.pow(1024, i);
+    return `${i === 0 ? size : size.toFixed(1)} ${units[i]}`;
+  }
+
+  private formatTime(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  }
+
+  // --- Rendering ---
+
   override render() {
+    if (this.isLoading) {
+      return html`
+        <div class="flex w-full items-center justify-center py-16">
+          <p class="text-sm text-slate-400">Loading space…</p>
+        </div>
+      `;
+    }
+
+    if (this.errorMessage) {
+      return html`
+        <div class="mx-auto max-w-lg space-y-4 py-8">
+          <p class="text-sm text-red-400">${this.errorMessage}</p>
+          <button
+            @click=${() => this.loadData()}
+            class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+          >
+            Retry
+          </button>
+        </div>
+      `;
+    }
+
     return html`
       <div class="space-y-8">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-              Item feed
-            </p>
-            <h2 class="mt-1 text-xl font-semibold text-white">No items yet</h2>
-          </div>
-          <span
-            class="mt-1 shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300"
+        ${this.renderHeader()}
+        ${this.renderUploadArea()}
+        ${this.renderItemsList()}
+      </div>
+    `;
+  }
+
+  private renderHeader() {
+    return html`
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
           >
-            Connected
-          </span>
+            Space
+          </p>
+          <h2 class="mt-1 text-xl font-semibold text-white">
+            ${this.spaceInfo?.name ?? this.spaceId}
+          </h2>
+        </div>
+        <span
+          class="mt-1 shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300"
+        >
+          Connected
+        </span>
+      </div>
+    `;
+  }
+
+  private renderUploadArea() {
+    return html`
+      <section class="space-y-4">
+        <!-- Text input -->
+        <div class="space-y-2">
+          <textarea
+            rows="3"
+            placeholder="Share some text…"
+            aria-label="Text to share"
+            .value=${this.textInput}
+            @input=${this.handleTextInput}
+            @keydown=${this.handleTextKeydown}
+            ?disabled=${this.isUploading}
+            class="w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20 disabled:opacity-50"
+          ></textarea>
+          <div class="flex items-center gap-3">
+            <button
+              @click=${this.handleTextSubmit}
+              ?disabled=${this.isUploading || !this.textInput.trim()}
+              class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              ${this.isUploading ? 'Sending…' : 'Share Text'}
+            </button>
+            <span class="text-xs text-slate-500">Ctrl+Enter to send</span>
+          </div>
         </div>
 
-        <p class="text-sm text-slate-400">
-          Uploaded files and shared text will appear here with real-time updates.
+        <!-- File upload / drag-and-drop -->
+        <div
+          @dragover=${this.handleDragOver}
+          @dragleave=${this.handleDragLeave}
+          @drop=${this.handleDrop}
+          class="relative rounded-lg border-2 border-dashed p-6 text-center transition ${this
+            .dragOver
+            ? 'border-sky-400 bg-sky-950/30'
+            : 'border-slate-700 hover:border-slate-600'}"
+        >
+          <input
+            type="file"
+            multiple
+            @change=${this.handleFileSelect}
+            ?disabled=${this.isUploading}
+            class="absolute inset-0 cursor-pointer opacity-0"
+            aria-label="Upload files"
+          />
+          <p class="text-sm text-slate-400">
+            ${this.dragOver
+              ? html`<span class="text-sky-300">Drop files here</span>`
+              : html`Drag & drop files here or
+                  <span class="font-medium text-sky-400">browse</span>`}
+          </p>
+        </div>
+
+        <!-- Upload error -->
+        ${this.uploadError
+          ? html`<p class="text-sm text-red-400">${this.uploadError}</p>`
+          : nothing}
+      </section>
+
+      <hr class="border-slate-800/60" />
+    `;
+  }
+
+  private renderItemsList() {
+    if (this.items.length === 0) {
+      return html`
+        <p class="py-4 text-center text-sm text-slate-500">
+          No items shared yet. Be the first!
+        </p>
+      `;
+    }
+
+    return html`
+      <section class="space-y-3">
+        <p
+          class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+        >
+          Shared items
+          <span class="ml-1 text-slate-600">(${this.items.length})</span>
         </p>
 
-        <hr class="border-slate-800/60" />
+        <ul class="space-y-2">
+          ${this.items.map((item) => this.renderItemCard(item))}
+        </ul>
+      </section>
+    `;
+  }
 
-        <div class="flex flex-wrap gap-x-8 gap-y-2 text-sm text-slate-500">
-          ${this.spaceId
-            ? html`<span>Space <span class="font-mono text-xs text-slate-400">${this.spaceId}</span></span>`
-            : ''}
-          ${this.serverUrl
-            ? html`<span>Server <span class="font-mono text-xs text-slate-400">${this.serverUrl}</span></span>`
-            : ''}
+  private renderItemCard(item: SpaceItemResponse) {
+    const isFile = item.contentType === 'file';
+
+    return html`
+      <li
+        class="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1 space-y-1">
+            ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
+          </div>
+          <time
+            class="shrink-0 text-xs text-slate-500"
+            datetime=${item.sharedAt}
+          >
+            ${this.formatTime(item.sharedAt)}
+          </time>
+        </div>
+      </li>
+    `;
+  }
+
+  private renderTextContent(item: SpaceItemResponse) {
+    return html`
+      <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
+        ${item.content}
+      </p>
+    `;
+  }
+
+  private renderFileContent(item: SpaceItemResponse) {
+    return html`
+      <div class="flex items-center gap-2">
+        <span class="text-base" aria-hidden="true">📄</span>
+        <div class="min-w-0">
+          <p
+            class="truncate text-sm font-medium text-slate-200"
+            title=${item.content}
+          >
+            ${item.content}
+          </p>
+          <p class="text-xs text-slate-500">
+            ${this.formatFileSize(item.fileSize)}
+          </p>
         </div>
       </div>
     `;
