@@ -10,6 +10,18 @@ var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOpt
 
 var server = builder.AddProject<Projects.SharedSpaces_Server>("server");
 
+var screenshotsDb = builder.Configuration["ConnectionStrings:DefaultConnection"];
+if (!string.IsNullOrEmpty(screenshotsDb))
+{
+    server.WithEnvironment("ConnectionStrings__DefaultConnection", screenshotsDb);
+}
+
+var storagePath = builder.Configuration["Storage:BasePath"];
+if (!string.IsNullOrEmpty(storagePath))
+{
+    server.WithEnvironment("Storage__BasePath", storagePath);
+}
+
 var client = builder.AddNpmApp("client", "./SharedSpaces.Client", "dev")
     .WithHttpEndpoint(port: 5173, env: "PORT")
     .WithEnvironment("BROWSER", "none")
