@@ -1052,3 +1052,78 @@ Keep return navigation in the shell chrome rather than burying it inside admin-v
 - This keeps admin and future non-join views from trapping the user in a dead-end flow.
 - It also gives us one consistent place to expose cross-view navigation as the SPA grows.
 
+# Item Card Mobile-First Redesign
+
+**Date:** 2026-03-19  
+**Agent:** Wash (Frontend Dev)  
+**Status:** Implemented
+
+## Decision
+
+Redesigned space-view item cards for mobile-first layout (390×844 viewport).
+
+## Changes
+
+### 1. Relative Time Formatting
+- **Before:** Full datetime string "3/19/2026, 6:21:23 PM" (takes excessive space on mobile)
+- **After:** Relative time with progressive detail:
+  - `< 1 min` → "just now"
+  - `< 1 hour` → "Xm ago"
+  - `< 24 hours` → "Xh ago"
+  - `< 7 days` → "Xd ago"
+  - `≥ 7 days` → Short date "Mar 19"
+
+### 2. Two-Row Layout
+- **Before:** Single row with content on left, actions + timestamp crammed on right
+- **After:** 
+  - Row 1: Content (text or file, single line)
+  - Row 2: Action icons + timestamp (`ml-auto`)
+
+Prevents horizontal cramming and makes tap targets more accessible on mobile.
+
+### 3. Text Truncation + Modal
+- **Before:** Multi-line text wraps fully, can dominate card space
+- **After:** 
+  - Single-line truncate with ellipsis (`truncate` Tailwind class)
+  - Cursor pointer + hover state signals clickability
+  - Click opens modal with full text content
+  - Modal: dark overlay (`bg-black/80`), centered card, click-outside-to-dismiss
+
+### 4. Removed Extra Left Padding
+- **Before:** Text nested in flex containers with gap spacing
+- **After:** Direct text within card's `px-4`, flush to edge
+
+## Implementation Pattern
+
+### Light DOM Modal
+```typescript
+@state() private modalItem: SpaceItemResponse | null = null;
+
+private handleTextClick = (item: SpaceItemResponse) => {
+  this.modalItem = item;
+};
+
+private renderModal() {
+  return html`
+    <div class="fixed inset-0 z-50 bg-black/80" @click=${this.closeModal}>
+      <div @click=${(e: Event) => e.stopPropagation()}>
+        <!-- Modal content -->
+      </div>
+    </div>
+  `;
+}
+```
+
+Key: `stopPropagation()` on inner card prevents click-through to overlay's close handler.
+
+## Files Modified
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts`
+
+## Rationale
+Mobile screens (390px width) cannot afford horizontal layout density. Vertical stacking, truncation, and progressive disclosure (modal) create better UX on small screens while maintaining desktop usability.
+
+## Future Work
+- Consider adding copy button to modal for convenience
+- Potential for relative time auto-refresh (update "2m ago" → "3m ago" every minute)
+- Screenshot tests should validate mobile layout and modal interaction
+
