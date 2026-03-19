@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HostFiltering;
 using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
@@ -9,6 +10,8 @@ using SharedSpaces.Server.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// AllowedHosts config key is used for CORS origin, not host filtering
+builder.Services.Configure<HostFilteringOptions>(options => options.AllowedHosts = ["*"]);
 builder.Services.AddPersistence(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<AdminAuthenticationFilter>();
@@ -23,7 +26,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        var clientAppUrl = builder.Configuration["Cors:AllowedOrigin"] ?? "https://localhost:5173";
+        var clientAppUrl = builder.Configuration["AllowedHosts"] ?? "https://localhost:5173";
         policy.WithOrigins(clientAppUrl)
             .AllowAnyHeader()
             .AllowAnyMethod()
