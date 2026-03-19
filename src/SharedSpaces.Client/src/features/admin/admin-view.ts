@@ -546,7 +546,7 @@ export class AdminView extends BaseElement {
         </div>
 
         <form @submit=${this.handleSecretSubmit} class="space-y-4">
-          <div class="grid gap-4 md:grid-cols-2">
+          <div class="grid gap-4">
             <div class="space-y-2">
               <label
                 for="admin-server-url"

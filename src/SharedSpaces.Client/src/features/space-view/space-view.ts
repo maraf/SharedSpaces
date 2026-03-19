@@ -18,7 +18,6 @@ import {
   downloadFile,
   deleteItem,
   SpaceApiError,
-  type SpaceDetailsResponse,
   type SpaceItemResponse,
 } from './space-api';
 
@@ -33,7 +32,6 @@ export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'server-url' })
   serverUrl?: string;
 
-  @state() private spaceInfo?: SpaceDetailsResponse;
   @state() private items: SpaceItemResponse[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
@@ -115,11 +113,10 @@ export class SpaceView extends BaseElement {
     this.connectionErrorType = 'none';
 
     try {
-      const [info, itemList] = await Promise.all([
+      const [, itemList] = await Promise.all([
         getSpaceInfo(this.serverUrl, this.spaceId, this.token),
         getItems(this.serverUrl, this.spaceId, this.token),
       ]);
-      this.spaceInfo = info;
       this.items = itemList;
       
       // Start SignalR connection after successful data load
@@ -520,19 +517,9 @@ export class SpaceView extends BaseElement {
     const status = statusConfig[this.connectionState];
 
     return html`
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
-          >
-            Space
-          </p>
-          <h2 class="mt-1 text-xl font-semibold text-white">
-            ${this.spaceInfo?.name ?? this.spaceId}
-          </h2>
-        </div>
+      <div class="flex items-center gap-2">
         <span
-          class="mt-1 shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
+          class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
         >
           ${status.label}
         </span>
@@ -661,7 +648,7 @@ export class SpaceView extends BaseElement {
     return html`
       <button
         @click=${() => this.handleCopy(item)}
-        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300"
         title=${copied ? 'Copied!' : 'Copy to clipboard'}
         aria-label=${copied ? 'Copied to clipboard' : 'Copy text to clipboard'}
       >
@@ -676,7 +663,7 @@ export class SpaceView extends BaseElement {
     return html`
       <button
         @click=${() => this.handleDelete(item)}
-        class="rounded p-2 text-slate-500 transition hover:text-red-400"
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-red-400"
         title="Delete item"
         aria-label="Delete item"
       >
@@ -689,7 +676,7 @@ export class SpaceView extends BaseElement {
     return html`
       <button
         @click=${() => this.handleDownload(item)}
-        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300"
         title="Download file"
         aria-label="Download file"
       >
@@ -751,7 +738,7 @@ export class SpaceView extends BaseElement {
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
-          <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
+          <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">
             ${this.modalItem.content}
           </p>
         </div>
