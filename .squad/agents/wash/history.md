@@ -26,6 +26,18 @@
   - hooks/ — useSignalR, useOfflineQueue
   - main.tsx
 
+## Team Updates (2026-03-19)
+
+**Wash + Zoe completed race condition fix (squad/26-signalr-client):** 
+- **Issue:** Uploader saw duplicate items due to SignalR `ItemAdded` events arriving before PUT responses
+- **Wash's fix:** Added `pendingItemIds: Set<string>` tracking in space-view.ts to block SignalR during upload window (commit 3502e56)
+- **Zoe's tests:** Wrote 7 integration + unit tests covering race condition, concurrent uploads, failed cleanup, cross-member events (commit be441b9)
+- **Verification:** Lint ✅, Build ✅, All 91 client tests pass ✅
+- **Decision recorded:** `.squad/decisions.md` — full implementation details, rationale, alternatives considered
+- **Related:** Orchestration logs at `.squad/orchestration-log/2026-03-19T20-30-wash.md` and `-zoe.md`
+
+This fix is a critical bug squash preventing data corruption for users. The `pendingItemIds` Set pattern is now established as the dedup strategy for async upload scenarios.
+
 ## Team Updates (2026-03-16)
 
 **Mal completed issue decomposition:** 14 GitHub issues (#17–#30) created spanning 5 phases:
@@ -176,3 +188,7 @@ Pattern established for light-DOM modals: `@state() private modalItem` with `fix
   - **Hub URL format** — `${serverUrl}/v1/spaces/${spaceId}/hub` matches server's `[Authorize]` hub at `/v1/spaces/{spaceId:guid}/hub`
   - **ItemAdded/ItemDeleted payloads** — Match server's broadcast shape: `ItemAdded` includes full item fields (id, spaceId, memberId, contentType, content, fileSize, sharedAt), `ItemDeleted` sends only id/spaceId
   - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
+
+## Learnings
+
+- **Item duplication race condition fix (2026-01):** Fixed race between HTTP PUT response and SignalR ItemAdded event in src/SharedSpaces.Client/src/features/space-view/space-view.ts. Pattern: track pending upload IDs in a private pendingItemIds = new Set<string>() field (not reactive—internal tracking only). In handleTextSubmit/uploadFiles, add generated UUID to set before API call, remove in finally block. In handleItemAdded, check both this.items.some(...) AND this.pendingItemIds.has(payload.id) before adding item. This prevents SignalR from adding items that are currently being uploaded by the same client. Simple O(1) Set lookups, no complex state machine needed. Cleanup in finally blocks ensures no leaked pending IDs even on error.

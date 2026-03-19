@@ -1350,3 +1350,68 @@ Text input hint uses `Ctrl/⌘+Enter` as static string rather than runtime platf
 - Simpler, more maintainable Lit component lifecycle
 
 ---
+### Fix Item Duplication Race Condition
+
+**Date:** 2026-03-19T20-30Z  
+**Decided by:** Wash (Frontend Dev), Zoe (Tester)  
+**Status:** Implemented  
+**Commits:** Wash 3502e56, Zoe be441b9
+
+## Context
+
+Users who upload files/text were seeing duplicate items in the space view. The issue was a race condition between the HTTP response and the SignalR `ItemAdded` event.
+
+## Problem
+
+1. Client generates UUID, sends PUT request
+2. Server saves to DB, broadcasts SignalR `ItemAdded` to ALL clients (including uploader), then returns HTTP response
+3. If SignalR event arrives before HTTP response:
+   - `handleItemAdded` doesn't find the item in `this.items` → adds it
+   - HTTP response arrives → upload handler also adds it → **DUPLICATE**
+
+## Decision
+
+Track pending upload IDs in a Set<string> to prevent SignalR from adding items that are currently being uploaded.
+
+### Implementation
+
+1. Added `private pendingItemIds = new Set<string>()` field to SpaceView
+2. In `handleTextSubmit`: add itemId to set before API call, remove in finally
+3. In `uploadFiles`: add each itemId before its API call, remove after item is added (or in finally if upload fails)
+4. In `handleItemAdded`: skip if item exists in `this.items` OR in `pendingItemIds`
+
+## Rationale
+
+- **Simple:** Uses a Set for O(1) lookups, no complex state machine
+- **Race-safe:** Blocks SignalR from adding items during the upload window
+- **Clean:** Cleanup in finally blocks ensures no leaked pending IDs (even on errors)
+- **Non-reactive:** `pendingItemIds` is internal tracking only, no @state decorator needed
+
+## Alternatives Considered
+
+- **Optimistic updates with rollback:** More complex, harder to reason about
+- **Timestamp-based deduplication:** Unreliable due to clock skew
+- **Server-side filtering:** Would require server to track which client sent the upload, breaks current architecture
+
+## Files Changed
+
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` (Wash)
+- `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts` — 7 new tests (Zoe)
+
+## Verification
+
+- ✅ Lint passed (eslint)
+- ✅ Build succeeded (vite build)
+- ✅ All 91 client tests pass (7 new integration/unit tests for race condition)
+- ✅ Logic verified: itemId tracked from generation to HTTP response completion, SignalR blocked during that window
+- ✅ Tests verify: existing dedup, race condition dedup, concurrent uploads, failed upload cleanup, cross-member events
+
+## Test Strategy
+
+Zoe used hybrid integration + unit testing:
+- **Integration tests** for complex async flows (race condition, multiple uploads, failed uploads) with controlled timing
+- **Unit tests** for simple logic (existing dedup, cross-member events) with no async dependencies
+- All scenarios passing with controlled Promise resolution to simulate race conditions
+
+---
+
