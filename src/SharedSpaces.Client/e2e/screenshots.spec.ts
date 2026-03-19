@@ -64,7 +64,7 @@ async function seedSpace(name: string) {
     body: JSON.stringify({ pin: pin2, displayName: 'Bob' }),
   });
 
-  // Add sample items
+  // Add sample text items
   for (const content of [
     'Welcome to SharedSpaces! 🚀',
     'This is a shared note visible to all members.',
@@ -80,6 +80,22 @@ async function seedSpace(name: string) {
       body: form,
     });
   }
+
+  // Add a sample file item
+  const fileItemId = crypto.randomUUID();
+  const fileForm = new FormData();
+  fileForm.append('id', fileItemId);
+  fileForm.append('contentType', 'file');
+  fileForm.append(
+    'file',
+    new Blob(['# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM'], { type: 'text/plain' }),
+    'meeting-notes.txt',
+  );
+  await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/items/${fileItemId}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${aliceToken.token}` },
+    body: fileForm,
+  });
 
   return { space, invitation, token: aliceToken.token };
 }
