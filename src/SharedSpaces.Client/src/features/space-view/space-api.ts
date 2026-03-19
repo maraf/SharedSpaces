@@ -143,6 +143,25 @@ export async function shareText(
   }
 }
 
+export async function downloadFile(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  token: string,
+): Promise<Blob> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}/download`,
+      { headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+    return await response.blob();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
 export async function shareFile(
   serverUrl: string,
   spaceId: string,

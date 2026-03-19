@@ -9,6 +9,7 @@ import {
   getItems,
   shareText,
   shareFile,
+  downloadFile,
   SpaceApiError,
   type SpaceDetailsResponse,
   type SpaceItemResponse,
@@ -33,6 +34,7 @@ export class SpaceView extends BaseElement {
   @state() private isUploading = false;
   @state() private uploadError = '';
   @state() private dragOver = false;
+  @state() private copiedItemIds = new Set<string>();
 
   private token?: string;
 
@@ -189,6 +191,43 @@ export class SpaceView extends BaseElement {
       this.isUploading = false;
     }
   }
+
+  private handleCopy = async (item: SpaceItemResponse) => {
+    try {
+      await navigator.clipboard.writeText(item.content);
+      this.copiedItemIds = new Set([...this.copiedItemIds, item.id]);
+      setTimeout(() => {
+        const next = new Set(this.copiedItemIds);
+        next.delete(item.id);
+        this.copiedItemIds = next;
+      }, 1500);
+    } catch {
+      // Clipboard API may fail in insecure contexts; silently ignore.
+    }
+  };
+
+  private handleDownload = async (item: SpaceItemResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    try {
+      const blob = await downloadFile(
+        this.serverUrl,
+        this.spaceId,
+        item.id,
+        this.token,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = item.content;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Download failures are non-critical; could surface as a toast later.
+    }
+  };
 
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 B';
@@ -364,14 +403,46 @@ export class SpaceView extends BaseElement {
           <div class="min-w-0 flex-1 space-y-1">
             ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
           </div>
-          <time
-            class="shrink-0 text-xs text-slate-500"
-            datetime=${item.sharedAt}
-          >
-            ${this.formatTime(item.sharedAt)}
-          </time>
+          <div class="flex shrink-0 items-center gap-1">
+            ${isFile ? this.renderDownloadButton(item) : this.renderCopyButton(item)}
+            <time
+              class="text-xs text-slate-500"
+              datetime=${item.sharedAt}
+            >
+              ${this.formatTime(item.sharedAt)}
+            </time>
+          </div>
         </div>
       </li>
+    `;
+  }
+
+  private renderCopyButton(item: SpaceItemResponse) {
+    const copied = this.copiedItemIds.has(item.id);
+    return html`
+      <button
+        @click=${() => this.handleCopy(item)}
+        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        title=${copied ? 'Copied!' : 'Copy to clipboard'}
+        aria-label=${copied ? 'Copied to clipboard' : 'Copy text to clipboard'}
+      >
+        ${copied
+          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+          : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+      </button>
+    `;
+  }
+
+  private renderDownloadButton(item: SpaceItemResponse) {
+    return html`
+      <button
+        @click=${() => this.handleDownload(item)}
+        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        title="Download file"
+        aria-label="Download file"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      </button>
     `;
   }
 
