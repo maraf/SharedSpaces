@@ -547,7 +547,6 @@ public class ItemEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Server:Url"] = ServerUrl,
                     ["Storage:BasePath"] = StorageBasePath,
                     ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString()
                 });

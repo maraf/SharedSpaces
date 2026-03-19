@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
@@ -23,7 +24,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        var clientAppUrl = builder.Configuration["Server:DefaultClientAppUrl"] ?? "https://localhost:5173";
+        var clientAppUrl = builder.Configuration["Cors:Origins"] ?? "https://localhost:5173";
         policy.WithOrigins(clientAppUrl)
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -35,6 +36,10 @@ var app = builder.Build();
 
 await app.InitializeDatabaseAsync();
 
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 app.UseCors();
 app.UseAuthentication();
 app.UseSpaceMemberAuthorization();

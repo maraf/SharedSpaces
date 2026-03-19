@@ -23,7 +23,8 @@ public static class TokenEndpoints
         Guid spaceId,
         CreateTokenRequest request,
         AppDbContext db,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        HttpRequest httpRequest)
     {
         if (string.IsNullOrWhiteSpace(request.Pin))
         {
@@ -81,13 +82,13 @@ public static class TokenEndpoints
             return Results.Unauthorized();
         }
 
-        var token = CreateToken(member, configuration);
+        var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
+        var token = CreateToken(member, serverUrl, configuration);
         return Results.Ok(new TokenResponse(token));
     }
 
-    private static string CreateToken(SpaceMember member, IConfiguration configuration)
+    private static string CreateToken(SpaceMember member, string serverUrl, IConfiguration configuration)
     {
-        var serverUrl = configuration["Server:Url"] ?? throw new InvalidOperationException("Server:Url not configured");
         var signingCredentials = new SigningCredentials(
             JwtTokenSigningKeyFactory.Create(configuration),
             SecurityAlgorithms.HmacSha256);

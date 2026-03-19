@@ -729,6 +729,184 @@ The file preserves the current orchestration behavior:
 
 ---
 
+## Join Flow: Invitation Format and JWT Storage Pattern
+
+**Decision Date:** 2026-03-18  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented (Issue #24, PR #40)
+
+### Context
+
+Issue #24 required implementing the client-side join flow: parsing invitation links/strings, exchanging PIN for JWT, and storing tokens for multi-server access. This involved several UX and architecture decisions about invitation format, storage strategy, and form interaction patterns.
+
+### Decision
+
+#### Invitation Format
+- **Server generates:** `serverUrl|spaceId|pin` (pipe-delimited, NOT colon-delimited)
+- **QR code URL:** `{clientAppUrl}/?join={url_encoded_invitation_string}`
+- **Example:** `https://client.example.com/?join=https%3A%2F%2Fserver.example.com%7C550e8400-e29b-41d4-a716-446655440000%7C123456`
+- After successful parse, the client strips the `join` query parameter via `history.replaceState`
+
+#### JWT Storage Strategy
+- **Multi-server support:** Client can connect to multiple servers simultaneously
+- **Storage key format:** `serverUrl:spaceId` (colon-separated composite key)
+- **LocalStorage structure:**
+  ```json
+  {
+    "sharedspaces:tokens": {
+      "https://server1.com:space-guid-1": "jwt1...",
+      "https://server2.com:space-guid-2": "jwt2..."
+    },
+    "sharedspaces:primaryDisplayName": "Alice"
+  }
+  ```
+- **Primary display name:** Separate from per-space identity. Used to pre-fill join forms, but doesn't override the immutable display name for a space once set.
+
+#### Form UX Pattern
+- **Two entry modes:** Toggle between "paste invitation string" and "manual entry"
+- **Auto-parsing:** Pasting an invitation string automatically extracts serverUrl, spaceId, and pin
+- **URL pre-fill:** If user arrives via QR scan (`?join=...`), form is pre-populated
+- **Display name persistence:** Pre-fill from localStorage, save on successful join
+- **Error states:** Show user-friendly messages for 400/401/404/network errors
+- **Loading states:** Disable inputs and show "Joining..." during API call
+
+#### JWT Claims (client-side)
+Client uses `jwt-decode` library (decode only, no verification) to extract:
+- `sub` — SpaceMember GUID
+- `display_name` — User's display name for this space
+- `server_url` — Server URL (used for routing subsequent API calls)
+- `space_id` — Space GUID
+
+### Rationale
+
+**Why pipe-delimited invitation format?**
+- Server was already generating this format (see `InvitationEndpoints.cs`)
+- Pipe (`|`) is safe in URLs when encoded, clear visual separator
+- Avoids ambiguity with colon (used in storage keys)
+
+**Why separate primary display name from per-space identity?**
+- User may join multiple spaces with different identities
+- Primary name is a convenience feature ("remember me for next time")
+- Per-space identity is immutable once joined (server-enforced)
+
+**Why `serverUrl:spaceId` as storage key?**
+- Composite key uniquely identifies a space across multiple servers
+- Colon separator is simple and doesn't conflict with URLs (which use `://`)
+- Enables O(1) token lookup for any server+space combination
+
+**Why toggle between paste/manual entry?**
+- QR scan use case: user pastes entire string, wants minimal friction
+- Manual entry use case: user types components separately (e.g., from email/text)
+- Toggle allows both without cluttering UI
+
+### Implementation Files
+- `src/SharedSpaces.Client/src/lib/token-storage.ts` — JWT storage utilities
+- `src/SharedSpaces.Client/src/lib/invitation.ts` — Invitation parsing
+- `src/SharedSpaces.Client/src/lib/api-client.ts` — Token exchange API
+- `src/SharedSpaces.Client/src/features/join/join-view.ts` — Join form component
+- `src/SharedSpaces.Client/src/app-shell.ts` — Auth context wiring
+
+### Consequences
+
+**Positive:**
+- Clear separation of concerns (storage, parsing, API, UI)
+- Multi-server support baked in from day one
+- Form UX accommodates both QR and manual entry flows
+- Testable utilities (48 passing tests)
+
+**Negative:**
+- Pipe-delimited format is unconventional (most systems use query params or JSON)
+- Client-side JWT decoding requires trusting the token (fine for local extraction, but server still validates)
+
+**Risks:**
+- If server changes invitation format, client parsing breaks (mitigated by validation)
+- LocalStorage is synchronous and can block UI (acceptable for small payloads like JWTs)
+
+### Alternatives Considered
+
+1. **JSON-encoded invitation string** — Rejected: harder to type manually, more verbose
+2. **Query param format (`?server=...&space=...&pin=...`)** — Rejected: server already uses pipe format, would require server change
+3. **Store all JWTs in single array** — Rejected: no efficient lookup by server+space
+4. **Use IndexedDB instead of localStorage** — Rejected: overkill for small key-value storage, adds async complexity
+
+### Related Decisions
+- See `.squad/decisions.md` for broader JWT auth architecture (issue #20)
+- Server-side invitation generation in `Features/Invitations/InvitationEndpoints.cs`
+
+### Open Questions
+- Should we add JWT expiration handling? (Current spec: JWT has no expiration)
+- Should we cache decoded claims to avoid repeated decoding? (Current: decode on every navigation)
+
+---
+
+## Client Test Infrastructure Setup
+
+**Date:** 2026-03-18  
+**Author:** Zoe (Tester)  
+**Issue:** #24 (Join flow client tests)
+
+### Decision
+
+Set up vitest for client-side testing with co-located test files alongside source code in `src/SharedSpaces.Client/src/lib/*.test.ts`.
+
+### Context
+
+- Client code (Lit components, utilities) needs unit tests for join flow utilities
+- No existing client test infrastructure in place
+- Need fast, modern test runner compatible with Vite build pipeline
+- Tests should validate business logic (token storage, invitation parsing, API client) without full DOM rendering
+
+### Solution
+
+1. **Test framework:** vitest 4.x (native Vite integration, fast, Jest-compatible API)
+2. **Environment:** happy-dom (lightweight browser API simulation, faster than jsdom)
+3. **Test location:** Co-located with source files (`*.test.ts` next to `*.ts` in `src/lib/`)
+4. **localStorage mock:** Custom implementation in `vitest.setup.ts` (happy-dom's default incomplete)
+5. **Test scripts:** `npm test` (CI), `npm run test:watch` (dev)
+
+### Configuration Files
+
+- `src/SharedSpaces.Client/vitest.config.ts` — Test environment and setup file registration
+- `src/SharedSpaces.Client/vitest.setup.ts` — Global mocks (localStorage)
+- `src/SharedSpaces.Client/package.json` — Test scripts and vitest dev dependency
+
+### Coverage
+
+First test suite covers join flow utilities:
+- **token-storage.test.ts** (17 tests) — Multi-server token management, corrupted data handling
+- **invitation.test.ts** (17 tests) — QR code parsing, validation edge cases
+- **api-client.test.ts** (14 tests) — Token exchange, HTTP error handling, network failures
+
+Total: 48 passing tests
+
+### Rationale
+
+**Why vitest over Jest?**
+- Native Vite integration (no transform config needed)
+- Faster startup and execution (reuses Vite transform cache)
+- Same API as Jest (easy migration if needed)
+
+**Why co-located tests?**
+- Easier to find tests for a module
+- Encourages writing tests alongside code
+- Matches modern frontend conventions (Next.js, Remix, etc.)
+
+**Why custom localStorage mock?**
+- happy-dom's localStorage lacks `.clear()` method (test isolation needs this)
+- Simpler than pulling in third-party mock libraries
+- Full control over mock behavior for edge case testing
+
+### Alternatives Considered
+
+1. **Jest + jsdom:** Rejected — slower, requires additional transform config
+2. **Separate `tests/` directory:** Rejected — harder to maintain, out of sync with modern practices
+3. **No mock (use happy-dom default):** Rejected — missing `.clear()` breaks test isolation
+
+### Future Considerations
+
+- Add coverage reporting when client code matures (vitest has built-in coverage via c8/istanbul)
+- Consider component testing with @testing-library/lit for UI components
+- May need MSW (Mock Service Worker) for more complex API scenarios
 ### Issue #27 Admin Panel Implementation Patterns
 
 **Decision Date:** 2026-03-18  

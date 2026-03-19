@@ -201,7 +201,7 @@ public class AdminEndpointTests
         var response = await CreateInvitationAsync(
             client,
             space.Id,
-            clientAppUrl: null,
+            clientAppUrl: "https://localhost:5173",
             TestWebApplicationFactory.AdminSecret);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -212,7 +212,7 @@ public class AdminEndpointTests
 
         var parts = invitation.InvitationString.Split('|');
         parts.Should().HaveCount(3);
-        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl);
+        parts[0].Should().Be("http://localhost");
         parts[1].Should().Be(space.Id.ToString());
         parts[2].Should().MatchRegex(@"^\d{6}$");
     }
@@ -238,13 +238,13 @@ public class AdminEndpointTests
 
         var parts = invitation.InvitationString.Split('|');
         parts.Should().HaveCount(3);
-        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl);
+        parts[0].Should().Be("http://localhost");
         parts[1].Should().Be(space.Id.ToString());
         parts[2].Should().MatchRegex(@"^\d{6}$");
     }
 
     [Fact]
-    public async Task CreateInvitation_WithoutClientAppUrl_UsesServerDefaultInQrCode()
+    public async Task CreateInvitation_WithoutClientAppUrl_ReturnsNullQrCode()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -259,7 +259,8 @@ public class AdminEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
         invitation.Should().NotBeNull();
-        invitation!.QrCodeBase64.Should().NotBeNullOrWhiteSpace();
+        invitation!.InvitationString.Should().NotBeNullOrWhiteSpace();
+        invitation.QrCodeBase64.Should().BeNull();
     }
 
     [Fact]
@@ -323,7 +324,7 @@ public class AdminEndpointTests
         var response = await CreateInvitationAsync(
             client,
             space.Id,
-            clientAppUrl: null,
+            clientAppUrl: "https://localhost:5173",
             TestWebApplicationFactory.AdminSecret);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -360,7 +361,7 @@ public class AdminEndpointTests
         var parts = invitation!.InvitationString.Split('|');
         parts.Should().HaveCount(3, "invitation string should have format: server_url|space_id|pin");
         
-        parts[0].Should().Be(TestWebApplicationFactory.ServerUrl, "first part should be server URL");
+        parts[0].Should().Be("http://localhost", "first part should be server URL");
         Guid.TryParse(parts[1], out var spaceId).Should().BeTrue("second part should be valid GUID");
         spaceId.Should().Be(space.Id, "second part should be the space ID");
         parts[2].Should().MatchRegex(@"^\d{6}$", "third part should be 6-digit PIN");
@@ -399,8 +400,8 @@ public class AdminEndpointTests
 
         var space = await factory.CreateSpaceAsync();
         
-        var response1 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret);
-        var response2 = await CreateInvitationAsync(client, space.Id, null, TestWebApplicationFactory.AdminSecret);
+        var response1 = await CreateInvitationAsync(client, space.Id, "https://localhost:5173", TestWebApplicationFactory.AdminSecret);
+        var response2 = await CreateInvitationAsync(client, space.Id, "https://localhost:5173", TestWebApplicationFactory.AdminSecret);
 
         response1.StatusCode.Should().Be(HttpStatusCode.OK);
         response2.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -715,12 +716,17 @@ public class AdminEndpointTests
         HttpClient client,
         Guid spaceId,
         string? clientAppUrl,
-        string? adminSecret)
+        string? adminSecret,
+        string? origin = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/invitations");
         if (!string.IsNullOrWhiteSpace(adminSecret))
         {
             request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+        if (!string.IsNullOrWhiteSpace(origin))
+        {
+            request.Headers.Add("Origin", origin);
         }
         request.Content = JsonContent.Create(new CreateInvitationRequest(clientAppUrl));
         return await client.SendAsync(request);
@@ -892,8 +898,7 @@ public class AdminEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Server:Url"] = ServerUrl,
-                    ["Server:DefaultClientAppUrl"] = "https://localhost:5173",
+                    ["Cors:Origins"] = "https://localhost:5173",
                     ["Storage:BasePath"] = "./artifacts/storage-tests"
                 });
             });

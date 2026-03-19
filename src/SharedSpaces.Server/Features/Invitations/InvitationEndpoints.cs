@@ -52,7 +52,8 @@ public static class InvitationEndpoints
         Guid spaceId,
         CreateInvitationRequest request,
         AppDbContext db,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        HttpRequest httpRequest)
     {
         var space = await db.Spaces.FindAsync(spaceId);
         if (space == null)
@@ -73,16 +74,15 @@ public static class InvitationEndpoints
         db.SpaceInvitations.Add(invitation);
         await db.SaveChangesAsync();
 
-        var serverUrl = configuration["Server:Url"] ?? throw new InvalidOperationException("Server:Url not configured");
+        var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
         var invitationString = $"{serverUrl}|{spaceId}|{pin}";
 
         string? qrCodeBase64 = null;
-        var clientAppUrl = request.ClientAppUrl 
-            ?? configuration["Server:DefaultClientAppUrl"];
+        var clientAppUrl = request.ClientAppUrl;
 
         if (!string.IsNullOrWhiteSpace(clientAppUrl))
         {
-            var fullJoinUrl = $"{clientAppUrl}/join?invitation={Uri.EscapeDataString(invitationString)}";
+            var fullJoinUrl = $"{clientAppUrl}/?join={Uri.EscapeDataString(invitationString)}";
             qrCodeBase64 = GenerateQrCode(fullJoinUrl);
         }
 
