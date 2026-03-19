@@ -32,6 +32,11 @@ type SpaceCardState = {
   pendingMemberRevocations: Record<string, boolean>;
 };
 
+type ModalState = {
+  type: 'members' | 'invitations' | 'invite';
+  spaceId: string;
+} | null;
+
 @customElement('admin-view')
 export class AdminView extends BaseElement {
   @property({ type: String, attribute: 'api-base-url' })
@@ -48,6 +53,7 @@ export class AdminView extends BaseElement {
   @state() private errorMessage = '';
 
   @state() private spaceCardState: Record<string, SpaceCardState> = {};
+  @state() private activeModal: ModalState = null;
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     if (
@@ -490,21 +496,32 @@ export class AdminView extends BaseElement {
     });
   };
 
+  private openModal(type: 'members' | 'invitations' | 'invite', spaceId: string) {
+    this.activeModal = { type, spaceId };
+  }
+
+  private closeModal = () => {
+    this.activeModal = null;
+  };
+
+  private handleModalBackdropClick = (e: Event) => {
+    if (e.target === e.currentTarget) {
+      this.closeModal();
+    }
+  };
+
   override render() {
     if (!this.adminSecret || !this.adminServerUrl) {
       return this.renderSecretPrompt();
     }
 
     return html`
-      <div class="space-y-8">
-        <div>
-          <h2 class="text-xl font-semibold text-white">Admin Panel</h2>
-          <p class="mt-1 text-sm text-slate-400">
-            Manage spaces, members, and pending invitations
-          </p>
-        </div>
-        ${this.renderAuthenticatedHeader()} ${this.renderSpacesSection()}
+      <div class="space-y-4">
+        ${this.renderConnectionCard()}
+        ${this.renderCreateSpaceForm()}
+        ${this.spaces.map((space) => this.renderSpaceCard(space))}
       </div>
+      ${this.activeModal ? this.renderModal() : null}
     `;
   }
 
@@ -579,298 +596,309 @@ export class AdminView extends BaseElement {
     `;
   }
 
-  private renderAuthenticatedHeader() {
+  private renderConnectionCard() {
     return html`
       <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+        class="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3"
       >
-        <p class="text-sm text-slate-400">
+        <p class="min-w-0 truncate text-sm text-slate-400">
           Connected to
           <span class="font-mono text-xs text-slate-300">${this.adminServerUrl}</span>
         </p>
         <button
           type="button"
           @click=${this.handleLogout}
-          class="rounded-full border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+          class="shrink-0 rounded-full border border-slate-700 px-4 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800"
         >
           Log out
         </button>
       </div>
-
-      <hr class="border-slate-800/60" />
     `;
   }
 
-  private renderSpacesSection() {
+  private renderCreateSpaceForm() {
     return html`
-      <section class="space-y-6">
-        <div class="flex items-baseline justify-between">
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
-          >
-            Spaces (${this.spaces.length})
-          </p>
-        </div>
+      <form
+        @submit=${this.handleCreateSpace}
+        class="flex gap-3 rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3"
+      >
+        <input
+          id="space-name"
+          type="text"
+          .value=${this.newSpaceName}
+          @input=${(e: InputEvent) =>
+            (this.newSpaceName = (e.target as HTMLInputElement).value)}
+          placeholder="New space name…"
+          class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+          ?disabled=${this.isCreatingSpace}
+        />
+        <button
+          type="submit"
+          ?disabled=${this.isCreatingSpace || !this.newSpaceName.trim()}
+          class="shrink-0 rounded-full bg-emerald-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ${this.isCreatingSpace ? 'Creating…' : 'Create'}
+        </button>
+      </form>
 
-        <form @submit=${this.handleCreateSpace}>
-          <div class="space-y-2">
-            <label
-              for="space-name"
-              class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+      ${this.errorMessage
+        ? html`
+            <div
+              class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
             >
-              Create New Space
-            </label>
-            <div class="flex gap-3">
-              <input
-                id="space-name"
-                type="text"
-                .value=${this.newSpaceName}
-                @input=${(e: InputEvent) =>
-                  (this.newSpaceName = (e.target as HTMLInputElement).value)}
-                placeholder="Space name"
-                class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-                ?disabled=${this.isCreatingSpace}
-              />
-              <button
-                type="submit"
-                ?disabled=${this.isCreatingSpace || !this.newSpaceName.trim()}
-                class="rounded-full bg-emerald-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                ${this.isCreatingSpace ? 'Creating...' : 'Create'}
-              </button>
+              ${this.errorMessage}
             </div>
-          </div>
-
-          ${this.errorMessage
-            ? html`
-                <div
-                  class="mt-4 rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-                >
-                  ${this.errorMessage}
-                </div>
-              `
-            : null}
-        </form>
-
-        ${this.spaces.length === 0
-          ? html`<p class="py-4 text-sm text-slate-500">
-              No spaces yet. Create one to get started.
-            </p>`
-          : html`
-              <div class="space-y-2">
-                ${this.spaces.map((space, index) =>
-                  this.renderSpaceCard(space, index < this.spaces.length - 1),
-                )}
-              </div>
-            `}
-      </section>
+          `
+        : null}
     `;
   }
 
-  private renderSpaceCard(space: SpaceResponse, showDivider: boolean) {
+  private renderSpaceCard(space: SpaceResponse) {
     const state = this.getSpaceCardState(space.id);
 
     return html`
-      <div class="space-y-5 pt-4">
-        <div>
-          <h3 class="text-lg font-semibold text-white">${space.name}</h3>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/50">
+        <div class="px-4 py-4">
+          <h3 class="text-base font-semibold text-white">${space.name}</h3>
           <p class="mt-0.5 font-mono text-xs text-slate-500">${space.id}</p>
           <p class="text-xs text-slate-500">
             Created ${this.formatDate(space.createdAt)}
           </p>
         </div>
 
-        <div class="space-y-3">
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+        <div class="divide-y divide-slate-800">
+          <button
+            type="button"
+            @click=${() => this.openModal('members', space.id)}
+            class="flex w-full items-center justify-between px-4 py-3 text-sm text-slate-300 transition hover:bg-slate-800/50"
           >
-            Generate Invitation
-          </p>
+            <span>Members (${state.members.length})</span>
+            <span class="text-slate-500">›</span>
+          </button>
 
+          <button
+            type="button"
+            @click=${() => this.openModal('invitations', space.id)}
+            class="flex w-full items-center justify-between px-4 py-3 text-sm text-slate-300 transition hover:bg-slate-800/50"
+          >
+            <span>Invitations (${state.invitations.length})</span>
+            <span class="text-slate-500">›</span>
+          </button>
+
+          <button
+            type="button"
+            @click=${() => this.openModal('invite', space.id)}
+            class="flex w-full items-center justify-between rounded-b-xl px-4 py-3 text-sm text-sky-300 transition hover:bg-slate-800/50"
+          >
+            <span>Invite</span>
+            <span class="text-slate-500">›</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderModal() {
+    if (!this.activeModal) return null;
+
+    const space = this.spaces.find((s) => s.id === this.activeModal!.spaceId);
+    if (!space) return null;
+
+    const state = this.getSpaceCardState(space.id);
+
+    let title = '';
+    let content = html``;
+
+    switch (this.activeModal.type) {
+      case 'members':
+        title = `Members — ${space.name}`;
+        content = this.renderMembersModalContent(space.id, state);
+        break;
+      case 'invitations':
+        title = `Invitations — ${space.name}`;
+        content = this.renderInvitationsModalContent(space.id, state);
+        break;
+      case 'invite':
+        title = `Invite — ${space.name}`;
+        content = this.renderInviteModalContent(space.id, state);
+        break;
+    }
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-[10vh]"
+        @click=${this.handleModalBackdropClick}
+      >
+        <div
+          class="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
+        >
+          <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+            <h3 class="text-sm font-semibold text-white">${title}</h3>
+            <button
+              type="button"
+              @click=${this.closeModal}
+              class="rounded-full p-1 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div class="max-h-[60vh] overflow-y-auto px-5 py-4">
+            ${content}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderMembersModalContent(spaceId: string, state: SpaceCardState) {
+    if (state.isLoadingMembers) {
+      return html`<p class="text-sm text-slate-500">Loading members…</p>`;
+    }
+
+    if (state.membersError) {
+      return html`
+        <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+          ${state.membersError}
+        </div>
+      `;
+    }
+
+    if (state.members.length === 0) {
+      return html`<p class="text-sm text-slate-500">No members yet.</p>`;
+    }
+
+    return html`
+      <div class="divide-y divide-slate-800">
+        ${state.members.map((member) => {
+          const isPending = !!state.pendingMemberRevocations[member.id];
+          return html`
+            <div class="flex items-center justify-between gap-3 py-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p
+                    class=${member.isRevoked
+                      ? 'text-sm font-medium text-slate-500 line-through'
+                      : 'text-sm font-medium text-slate-100'}
+                  >
+                    ${member.displayName}
+                  </p>
+                  ${member.isRevoked
+                    ? html`
+                        <span
+                          class="rounded-full border border-rose-800 bg-rose-950/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200"
+                        >
+                          Revoked
+                        </span>
+                      `
+                    : null}
+                </div>
+                <p class="text-xs text-slate-500">
+                  Joined ${this.formatDate(member.joinedAt)}
+                </p>
+              </div>
+
+              ${member.isRevoked
+                ? null
+                : html`
+                    <button
+                      type="button"
+                      @click=${() => this.handleRevokeMember(spaceId, member.id)}
+                      ?disabled=${isPending}
+                      class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      ${isPending ? 'Revoking…' : 'Revoke'}
+                    </button>
+                  `}
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  private renderInvitationsModalContent(spaceId: string, state: SpaceCardState) {
+    if (state.isLoadingInvitations) {
+      return html`<p class="text-sm text-slate-500">Loading invitations…</p>`;
+    }
+
+    if (state.invitationsError) {
+      return html`
+        <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+          ${state.invitationsError}
+        </div>
+      `;
+    }
+
+    if (state.invitations.length === 0) {
+      return html`<p class="text-sm text-slate-500">No pending invitations.</p>`;
+    }
+
+    return html`
+      <div class="divide-y divide-slate-800">
+        ${state.invitations.map((invitation) => {
+          const isPending = !!state.pendingInvitationDeletions[invitation.id];
+          return html`
+            <div class="flex items-center justify-between gap-3 py-3">
+              <p class="min-w-0 break-all font-mono text-xs text-slate-300">
+                ${invitation.id}
+              </p>
+              <button
+                type="button"
+                @click=${() => this.handleDeleteInvitation(spaceId, invitation.id)}
+                ?disabled=${isPending}
+                class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ${isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  private renderInviteModalContent(spaceId: string, state: SpaceCardState) {
+    return html`
+      <div class="space-y-4">
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+            Client App URL
+          </label>
           <div class="flex gap-3">
             <input
               type="url"
               .value=${state.clientAppUrl}
               @input=${(e: InputEvent) =>
-                this.updateSpaceCardState(space.id, {
+                this.updateSpaceCardState(spaceId, {
                   clientAppUrl: (e.target as HTMLInputElement).value,
                 })}
-              placeholder="Client app URL (optional)"
-              class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+              placeholder="https://app.example.com"
+              class="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
               ?disabled=${state.isGeneratingInvitation}
             />
             <button
               type="button"
-              @click=${() => this.handleGenerateInvitation(space.id)}
+              @click=${() => this.handleGenerateInvitation(spaceId)}
               ?disabled=${state.isGeneratingInvitation}
-              class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+              class="shrink-0 rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              ${state.isGeneratingInvitation ? 'Generating...' : 'Generate'}
+              ${state.isGeneratingInvitation ? 'Generating…' : 'Generate'}
             </button>
           </div>
-
-          ${state.invitationGenerationError
-            ? html`
-                <div
-                  class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-                >
-                  ${state.invitationGenerationError}
-                </div>
-              `
-            : null}
-          ${state.generatedInvitation
-            ? this.renderGeneratedInvitation(state.generatedInvitation)
-            : null}
         </div>
 
-        ${this.renderMembersSection(space.id, state)}
-        ${this.renderInvitationsSection(space.id, state)}
-
-        ${showDivider ? html`<hr class="border-slate-800/60" />` : null}
-      </div>
-    `;
-  }
-
-  private renderMembersSection(spaceId: string, state: SpaceCardState) {
-    return html`
-      <div class="space-y-3">
-        <div class="flex items-center justify-between gap-3">
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
-          >
-            Members (${state.members.length})
-          </p>
-          ${state.isLoadingMembers
-            ? html`<span class="text-xs text-slate-500">Loading...</span>`
-            : null}
-        </div>
-
-        ${state.membersError
+        ${state.invitationGenerationError
           ? html`
-              <div
-                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-              >
-                ${state.membersError}
+              <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+                ${state.invitationGenerationError}
               </div>
             `
           : null}
 
-        ${state.members.length === 0 && !state.isLoadingMembers && !state.membersError
-          ? html`<p class="text-sm text-slate-500">No members yet.</p>`
-          : html`
-              <div class="divide-y divide-slate-800/60">
-                ${state.members.map((member) => {
-                  const isPending = !!state.pendingMemberRevocations[member.id];
-                  return html`
-                    <div
-                      class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div class="space-y-0.5">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <p
-                            class=${member.isRevoked
-                              ? 'text-sm font-medium text-slate-500 line-through'
-                              : 'text-sm font-medium text-slate-100'}
-                          >
-                            ${member.displayName}
-                          </p>
-                          ${member.isRevoked
-                            ? html`
-                                <span
-                                  class="rounded-full border border-rose-800 bg-rose-950/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200"
-                                >
-                                  Revoked
-                                </span>
-                              `
-                            : null}
-                        </div>
-                        <p
-                          class=${member.isRevoked
-                            ? 'text-xs text-slate-600'
-                            : 'text-xs text-slate-500'}
-                        >
-                          Joined ${this.formatDate(member.joinedAt)}
-                        </p>
-                      </div>
-
-                      ${member.isRevoked
-                        ? null
-                        : html`
-                            <button
-                              type="button"
-                              @click=${() => this.handleRevokeMember(spaceId, member.id)}
-                              ?disabled=${isPending}
-                              class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-1.5 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              ${isPending ? 'Revoking...' : 'Revoke'}
-                            </button>
-                          `}
-                    </div>
-                  `;
-                })}
-              </div>
-            `}
-      </div>
-    `;
-  }
-
-  private renderInvitationsSection(spaceId: string, state: SpaceCardState) {
-    return html`
-      <div class="space-y-3">
-        <div class="flex items-center justify-between gap-3">
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
-          >
-            Pending Invitations (${state.invitations.length})
-          </p>
-          ${state.isLoadingInvitations
-            ? html`<span class="text-xs text-slate-500">Loading...</span>`
-            : null}
-        </div>
-
-        ${state.invitationsError
-          ? html`
-              <div
-                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-              >
-                ${state.invitationsError}
-              </div>
-            `
+        ${state.generatedInvitation
+          ? this.renderGeneratedInvitation(state.generatedInvitation)
           : null}
-
-        ${state.invitations.length === 0 &&
-        !state.isLoadingInvitations &&
-        !state.invitationsError
-          ? html`<p class="text-sm text-slate-500">No pending invitations</p>`
-          : html`
-              <div class="divide-y divide-slate-800/60">
-                ${state.invitations.map((invitation) => {
-                  const isPending =
-                    !!state.pendingInvitationDeletions[invitation.id];
-                  return html`
-                    <div
-                      class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div class="space-y-0.5">
-                        <p class="text-xs text-slate-500">Invitation ID</p>
-                        <p class="break-all font-mono text-sm text-slate-300">
-                          ${invitation.id}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        @click=${() =>
-                          this.handleDeleteInvitation(spaceId, invitation.id)}
-                        ?disabled=${isPending}
-                        class="rounded-full border border-rose-800 bg-rose-950/40 px-4 py-1.5 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        ${isPending ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  `;
-                })}
-              </div>
-            `}
       </div>
     `;
   }
@@ -887,7 +915,7 @@ export class AdminView extends BaseElement {
               type="text"
               readonly
               .value=${invitation.invitationString}
-              class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs text-emerald-300"
+              class="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-xs text-emerald-300"
             />
             <button
               type="button"
@@ -903,9 +931,7 @@ export class AdminView extends BaseElement {
         ${invitation.qrCodeBase64
           ? html`
               <div class="space-y-2">
-                <p
-                  class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400"
-                >
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
                   QR Code
                 </p>
                 <img

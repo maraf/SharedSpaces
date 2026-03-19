@@ -100,7 +100,7 @@ async function navigateToAdminSignedIn(page: Page) {
   await page.locator('admin-view button[type="submit"]').click();
 
   await page.waitForFunction(
-    () => document.body.textContent?.match(/Spaces\s*\(\d+\)/),
+    () => document.body.textContent?.match(/Members\s*\(\d+\)/),
     { timeout: 10_000 },
   );
   await page.waitForTimeout(500);
