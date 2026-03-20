@@ -16,7 +16,6 @@ import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
-import { registerServiceWorker } from './lib/sw-registration';
 import {
   getPendingShares,
   removePendingShare,
@@ -67,8 +66,7 @@ export class AppShell extends BaseElement {
       this.view = 'join';
     }
 
-    // Register service worker and listen for SW messages
-    registerServiceWorker();
+    // Listen for SW messages (registration handled by vite-plugin-pwa)
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
 
     // Track online/offline state
