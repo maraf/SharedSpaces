@@ -76,6 +76,7 @@ export class AppShell extends BaseElement {
     // Check pending shares from IndexedDB
     this.refreshPendingShareCount();
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    this.addEventListener('pending-shares-changed', this.handlePendingSharesChanged);
   }
 
   override disconnectedCallback() {
@@ -84,6 +85,7 @@ export class AppShell extends BaseElement {
     globalThis.removeEventListener('offline', this.handleOffline);
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
   }
 
   private handleSwMessage = (event: MessageEvent) => {
@@ -96,6 +98,10 @@ export class AppShell extends BaseElement {
     if (document.visibilityState === 'visible') {
       this.refreshPendingShareCount();
     }
+  };
+
+  private handlePendingSharesChanged = () => {
+    this.refreshPendingShareCount();
   };
 
   private async refreshPendingShareCount() {

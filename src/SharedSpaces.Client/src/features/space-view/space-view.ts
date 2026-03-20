@@ -332,6 +332,7 @@ export class SpaceView extends BaseElement {
       if (uploaded) {
         await removePendingShare(share.id);
         this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+        this.notifyPendingSharesChanged();
       } else {
         this.uploadError = 'Shared item has no content to upload.';
       }
@@ -355,6 +356,13 @@ export class SpaceView extends BaseElement {
   private async dismissPendingShare(share: PendingShareItem) {
     await removePendingShare(share.id);
     this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+    this.notifyPendingSharesChanged();
+  }
+
+  private notifyPendingSharesChanged() {
+    this.dispatchEvent(
+      new CustomEvent('pending-shares-changed', { bubbles: true, composed: true }),
+    );
   }
 
   // --- Offline Queue ---
