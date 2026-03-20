@@ -17,6 +17,7 @@ import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
 import {
+  clearPendingShares,
   getPendingShares,
   removePendingShare,
   type PendingShareItem,
@@ -119,6 +120,22 @@ export class AppShell extends BaseElement {
       await removePendingShare(share.id);
       this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
       this.pendingShareCount = this.pendingShares.length;
+      if (this.pendingShareCount === 0 && this.view === 'pending-shares') {
+        this.view = 'home';
+      }
+    } catch {
+      // IndexedDB may not be available
+    }
+  }
+
+  private async dismissAllPendingShares() {
+    try {
+      await clearPendingShares();
+      this.pendingShares = [];
+      this.pendingShareCount = 0;
+      if (this.view === 'pending-shares') {
+        this.view = 'home';
+      }
     } catch {
       // IndexedDB may not be available
     }
@@ -200,6 +217,19 @@ export class AppShell extends BaseElement {
             </button>
 
             <nav class="flex items-center gap-2 flex-wrap">
+              ${this.pendingShareCount > 0
+                ? html`
+                  <button
+                    @click=${() => { this.view = 'pending-shares'; }}
+                    class="${this.pillBase} ${this.view === 'pending-shares'
+                      ? 'border-amber-500 bg-amber-950/60 text-amber-300'
+                      : 'border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60'}"
+                    title="Items shared from other apps"
+                  >
+                    📥 ${this.pendingShareCount}
+                  </button>
+                `
+                : nothing}
               ${this.spaces.map(
                 (entry) => html`
                   <button
@@ -217,24 +247,6 @@ export class AppShell extends BaseElement {
               >
                 +
               </button>
-
-              ${this.pendingShareCount > 0
-                ? html`
-                  <button
-                    @click=${() => {
-                      if (this.spaces.length > 0 && !this.currentSpaceId) {
-                        this.selectSpace(this.spaces[0]);
-                      } else if (this.currentSpaceId) {
-                        this.view = 'space';
-                      }
-                    }}
-                    class="${this.pillBase} border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60"
-                    title="Items shared from other apps"
-                  >
-                    📥 ${this.pendingShareCount}
-                  </button>
-                `
-                : nothing}
 
               <span class="flex-1"></span>
 
@@ -281,6 +293,8 @@ export class AppShell extends BaseElement {
           .spaceId=${this.currentSpaceId}
           .serverUrl=${this.currentServerUrl}
         ></space-view>`;
+      case 'pending-shares':
+        return this.renderPendingSharesView();
       case 'admin':
         return html`<admin-view
           class="w-full"
@@ -295,7 +309,6 @@ export class AppShell extends BaseElement {
     if (this.spaces.length === 0) {
       return html`
         <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
-          ${this.renderHomePendingShares('Join a space to upload them.')}
           <p class="text-slate-400">
             No spaces yet. Click <span class="font-semibold text-sky-300">+</span> to join one.
           </p>
@@ -304,7 +317,6 @@ export class AppShell extends BaseElement {
     }
     return html`
       <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
-        ${this.renderHomePendingShares('Select a space to upload them.')}
         <p class="text-slate-400">
           Select a space above to get started.
         </p>
@@ -312,44 +324,220 @@ export class AppShell extends BaseElement {
     `;
   }
 
-  private renderHomePendingShares(instruction: string) {
-    if (this.pendingShares.length === 0) return nothing;
+  // --- Pending Shares View ---
+
+  private copiedShareIds = new Set<string>();
+
+  private renderPendingSharesView() {
+    if (this.pendingShares.length === 0) {
+      return html`
+        <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
+          <p class="text-slate-400">No pending shares.</p>
+        </div>
+      `;
+    }
 
     return html`
-      <div class="w-full max-w-md space-y-3 text-left">
-        <p class="text-center text-sm text-amber-300">
-          📥 ${this.pendingShares.length}
-          item${this.pendingShares.length !== 1 ? 's' : ''} shared from other
-          apps. ${instruction}
-        </p>
-        <ul class="space-y-1.5">
-          ${this.pendingShares.map(
-            (share) => html`
-              <li
-                class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
+      <div class="w-full space-y-4">
+        <section class="space-y-3">
+          <div class="flex items-center justify-between">
+            <p
+              class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+            >
+              Shared from other apps
+              <span class="ml-1 text-slate-600"
+                >(${this.pendingShares.length})</span
               >
-                <span class="shrink-0 text-sm" aria-hidden="true">
-                  ${share.type === 'file' ? '📄' : '📝'}
-                </span>
-                <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
-                  ${share.type === 'file'
-                    ? share.fileName ?? 'File'
-                    : (share.content ?? '').substring(0, 100)}
-                </span>
-                <button
-                  @click=${() => this.dismissPendingShare(share)}
-                  class="shrink-0 rounded p-1 text-slate-500 hover:text-red-400"
-                  title="Dismiss"
-                  aria-label="Dismiss shared item"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-              </li>
-            `,
-          )}
-        </ul>
+            </p>
+            ${this.pendingShares.length > 1
+              ? html`
+                  <button
+                    @click=${() => this.dismissAllPendingShares()}
+                    class="text-xs text-slate-500 transition hover:text-red-400"
+                  >
+                    Dismiss all
+                  </button>
+                `
+              : nothing}
+          </div>
+
+          <ul class="space-y-2">
+            ${this.pendingShares.map((share) =>
+              this.renderPendingShareCard(share),
+            )}
+          </ul>
+        </section>
       </div>
     `;
+  }
+
+  private renderPendingShareCard(share: PendingShareItem) {
+    const isFile = share.type === 'file';
+
+    return html`
+      <li
+        class="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+      >
+        <div class="space-y-1">
+          <div class="min-w-0">
+            ${isFile
+              ? this.renderPendingFileContent(share)
+              : this.renderPendingTextContent(share)}
+          </div>
+          <div class="flex items-center gap-1">
+            ${isFile
+              ? this.renderPendingDownloadButton(share)
+              : this.renderPendingCopyButton(share)}
+            ${this.renderPendingDismissButton(share)}
+            <time
+              class="ml-auto text-xs text-slate-500"
+              datetime=${new Date(share.timestamp).toISOString()}
+            >
+              ${this.formatTimestamp(share.timestamp)}
+            </time>
+          </div>
+        </div>
+      </li>
+    `;
+  }
+
+  private renderPendingTextContent(share: PendingShareItem) {
+    return html`
+      <p
+        class="truncate text-sm text-slate-200"
+        title=${share.content ?? ''}
+      >
+        ${share.content}
+      </p>
+    `;
+  }
+
+  private renderPendingFileContent(share: PendingShareItem) {
+    return html`
+      <div class="flex items-center gap-2">
+        <span class="text-base" aria-hidden="true">📄</span>
+        <div class="min-w-0">
+          <p
+            class="truncate text-sm font-medium text-slate-200"
+            title=${share.fileName ?? 'File'}
+          >
+            ${share.fileName ?? 'File'}
+          </p>
+          ${share.fileSize
+            ? html`<p class="text-xs text-slate-500">
+                ${this.formatFileSize(share.fileSize)}
+              </p>`
+            : nothing}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderPendingCopyButton(share: PendingShareItem) {
+    const copied = this.copiedShareIds.has(share.id);
+    return html`
+      <button
+        @click=${() => this.handleCopyShare(share)}
+        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        title=${copied ? 'Copied!' : 'Copy to clipboard'}
+        aria-label=${copied
+          ? 'Copied to clipboard'
+          : 'Copy text to clipboard'}
+      >
+        ${copied
+          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+          : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+      </button>
+    `;
+  }
+
+  private renderPendingDownloadButton(share: PendingShareItem) {
+    return html`
+      <button
+        @click=${() => this.handleDownloadShare(share)}
+        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        title="Download file"
+        aria-label="Download file"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      </button>
+    `;
+  }
+
+  private renderPendingDismissButton(share: PendingShareItem) {
+    return html`
+      <button
+        @click=${() => this.dismissPendingShare(share)}
+        class="rounded p-2 text-slate-500 transition hover:text-red-400"
+        title="Dismiss"
+        aria-label="Dismiss shared item"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+      </button>
+    `;
+  }
+
+  private async handleCopyShare(share: PendingShareItem) {
+    if (!share.content) return;
+    try {
+      await navigator.clipboard.writeText(share.content);
+      this.copiedShareIds.add(share.id);
+      this.requestUpdate();
+      setTimeout(() => {
+        this.copiedShareIds.delete(share.id);
+        this.requestUpdate();
+      }, 2000);
+    } catch {
+      // Clipboard may not be available
+    }
+  }
+
+  private handleDownloadShare(share: PendingShareItem) {
+    if (!share.fileData) return;
+    const blob = new Blob([share.fileData], {
+      type: share.fileType ?? 'application/octet-stream',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = share.fileName ?? 'file';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private formatFileSize(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(
+      Math.floor(Math.log(bytes) / Math.log(1024)),
+      units.length - 1,
+    );
+    const size = bytes / Math.pow(1024, i);
+    return `${i === 0 ? size : size.toFixed(1)} ${units[i]}`;
+  }
+
+  private formatTimestamp(ts: number): string {
+    try {
+      const diffMs = Date.now() - ts;
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+
+      if (diffSec < 60) return 'just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      if (diffHour < 24) return `${diffHour}h ago`;
+      if (diffDay < 7) return `${diffDay}d ago`;
+
+      const date = new Date(ts);
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      return `${months[date.getMonth()]} ${date.getDate()}`;
+    } catch {
+      return '';
+    }
   }
 }
 
