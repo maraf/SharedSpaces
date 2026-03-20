@@ -21,6 +21,18 @@ import {
   type SpaceDetailsResponse,
   type SpaceItemResponse,
 } from './space-api';
+import {
+  getPendingShares,
+  removePendingShare,
+  clearOfflineQueueForSpace,
+  type PendingShareItem,
+} from '../../lib/idb-storage';
+import { requestBackgroundSync } from '../../lib/sw-registration';
+import {
+  queueForOffline,
+  getOfflineQueueCount,
+  processOfflineQueue,
+} from '../../lib/offline-sync';
 
 @customElement('space-view')
 export class SpaceView extends BaseElement {
@@ -45,10 +57,32 @@ export class SpaceView extends BaseElement {
   @state() private copiedItemIds = new Set<string>();
   @state() private modalItem: SpaceItemResponse | null = null;
   @state() private connectionState: ConnectionState = 'disconnected';
+  @state() private isOnline = navigator.onLine;
+  @state() private pendingShares: PendingShareItem[] = [];
+  @state() private offlineQueueCount = 0;
+  @state() private syncMessage = '';
 
   private token?: string;
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
+  private pendingItemIds = new Set<string>();
+
+  private handleOnline = async () => {
+    this.isOnline = true;
+    const synced = await requestBackgroundSync();
+    if (!synced) {
+      this.syncOfflineQueue();
+    }
+  };
+  private handleOffline = () => { this.isOnline = false; };
+  private handleSwMessage = (event: MessageEvent) => {
+    if (event.data?.type === 'pending-share-added') {
+      this.loadPendingShares();
+    }
+    if (event.data?.type === 'offline-queue-sync-requested') {
+      this.syncOfflineQueue();
+    }
+  };
 
   override updated(changed: Map<string, unknown>) {
     if (changed.has('spaceId') || changed.has('serverUrl')) {
@@ -60,9 +94,21 @@ export class SpaceView extends BaseElement {
     }
   }
 
+  override connectedCallback() {
+    super.connectedCallback();
+    globalThis.addEventListener('online', this.handleOnline);
+    globalThis.addEventListener('offline', this.handleOffline);
+    navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
+    this.loadPendingShares();
+    this.refreshOfflineQueueCount();
+  }
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.stopSignalR();
+    globalThis.removeEventListener('online', this.handleOnline);
+    globalThis.removeEventListener('offline', this.handleOffline);
+    navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
   }
 
   private resolveToken(): string | undefined {
@@ -90,6 +136,9 @@ export class SpaceView extends BaseElement {
     
     // Remove token from storage
     removeToken(this.serverUrl, this.spaceId);
+
+    // Clear any queued offline items for this space
+    await clearOfflineQueueForSpace(this.serverUrl, this.spaceId).catch(() => {});
     
     // Redirect to join view and tell app-shell to reload spaces
     this.dispatchEvent(
@@ -193,9 +242,9 @@ export class SpaceView extends BaseElement {
   }
 
   private handleItemAdded(payload: ItemAddedPayload) {
-    // Check if item already exists (race with optimistic add)
-    const exists = this.items.some((item) => item.id === payload.id);
-    if (exists) return;
+    // Skip if item already exists or is being uploaded by us
+    if (this.items.some((item) => item.id === payload.id)) return;
+    if (this.pendingItemIds.has(payload.id)) return;
 
     // Prepend new item to the list
     const newItem: SpaceItemResponse = {
@@ -228,6 +277,136 @@ export class SpaceView extends BaseElement {
     }
   }
 
+  // --- Pending Shares (from Share Target) ---
+
+  private async loadPendingShares() {
+    try {
+      this.pendingShares = await getPendingShares();
+    } catch {
+      // IndexedDB may not be available
+    }
+  }
+
+  private async uploadPendingShare(share: PendingShareItem) {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    this.isUploading = true;
+    this.uploadError = '';
+
+    try {
+      const itemId = crypto.randomUUID();
+      let uploaded = false;
+
+      if (share.type === 'text' && share.content) {
+        const item = await shareText(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          share.content,
+          this.token,
+        );
+        this.items = [item, ...this.items];
+        uploaded = true;
+      } else if (share.type === 'file' && share.fileData) {
+        const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
+        const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
+        const item = await shareFile(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          file,
+          this.token,
+        );
+        this.items = [item, ...this.items];
+        uploaded = true;
+      }
+
+      if (uploaded) {
+        await removePendingShare(share.id);
+        this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+        this.notifyPendingSharesChanged();
+      } else {
+        this.uploadError = 'Shared item has no content to upload.';
+      }
+    } catch (error) {
+      this.uploadError =
+        error instanceof SpaceApiError
+          ? error.message
+          : 'Failed to upload shared item.';
+    } finally {
+      this.isUploading = false;
+    }
+  }
+
+  private async uploadAllPendingShares() {
+    for (const share of [...this.pendingShares]) {
+      await this.uploadPendingShare(share);
+      if (this.uploadError) break;
+    }
+  }
+
+  private async dismissPendingShare(share: PendingShareItem) {
+    try {
+      await removePendingShare(share.id);
+      this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+      this.notifyPendingSharesChanged();
+    } catch {
+      // IndexedDB may not be available
+    }
+  }
+
+  private notifyPendingSharesChanged() {
+    this.dispatchEvent(
+      new CustomEvent('pending-shares-changed', { bubbles: true, composed: true }),
+    );
+  }
+
+  // --- Offline Queue ---
+
+  private async refreshOfflineQueueCount() {
+    if (!this.serverUrl || !this.spaceId) return;
+    try {
+      this.offlineQueueCount = await getOfflineQueueCount(this.serverUrl, this.spaceId);
+    } catch {
+      // IndexedDB may not be available
+    }
+  }
+
+  private async enqueueForOffline(
+    type: 'text' | 'file',
+    options: { content?: string; fileName?: string; fileType?: string; fileData?: ArrayBuffer },
+  ) {
+    if (!this.serverUrl || !this.spaceId) return;
+    await queueForOffline(this.serverUrl, this.spaceId, type, options);
+    this.offlineQueueCount++;
+  }
+
+  private async syncOfflineQueue() {
+    if (!navigator.onLine || !this.token || !this.serverUrl || !this.spaceId) return;
+
+    try {
+      const result = await processOfflineQueue(this.serverUrl, this.spaceId, this.token);
+      await this.refreshOfflineQueueCount();
+
+      if (result.synced > 0 || result.failed > 0) {
+        if (result.synced > 0 && result.failed > 0) {
+          this.syncMessage = `Synced ${result.synced} item${result.synced !== 1 ? 's' : ''}, ${result.failed} failed`;
+        } else if (result.synced > 0) {
+          this.syncMessage = `${result.synced} queued item${result.synced !== 1 ? 's' : ''} uploaded`;
+        } else {
+          this.syncMessage = `${result.failed} queued item${result.failed !== 1 ? 's' : ''} failed to upload`;
+        }
+
+        if (result.synced > 0) {
+          this.refreshItemsAfterReconnect();
+        }
+        setTimeout(() => { this.syncMessage = ''; }, 5000);
+      }
+    } catch {
+      // Queue processing failed
+    }
+  }
+
   private handleTextInput = (e: Event) => {
     this.textInput = (e.target as HTMLTextAreaElement).value;
     this.uploadError = '';
@@ -241,17 +420,40 @@ export class SpaceView extends BaseElement {
     this.uploadError = '';
 
     try {
+      // If offline, queue for later
+      if (!navigator.onLine) {
+        await this.enqueueForOffline('text', { content: this.textInput.trim() });
+        this.textInput = '';
+        return;
+      }
+
       const itemId = crypto.randomUUID();
-      const item = await shareText(
-        this.serverUrl,
-        this.spaceId,
-        itemId,
-        this.textInput.trim(),
-        this.token,
-      );
-      this.items = [item, ...this.items];
-      this.textInput = '';
+      this.pendingItemIds.add(itemId);
+      try {
+        const item = await shareText(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          this.textInput.trim(),
+          this.token,
+        );
+        this.items = [item, ...this.items];
+        this.textInput = '';
+      } finally {
+        this.pendingItemIds.delete(itemId);
+      }
     } catch (error) {
+      // On network error, queue for offline
+      if (error instanceof SpaceApiError && !error.status) {
+        try {
+          await this.enqueueForOffline('text', { content: this.textInput.trim() });
+          this.textInput = '';
+          return;
+        } catch {
+          // Fall through to normal error handling
+        }
+      }
+
       if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
         this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
@@ -306,15 +508,45 @@ export class SpaceView extends BaseElement {
 
     try {
       for (const file of files) {
-        const itemId = crypto.randomUUID();
-        const item = await shareFile(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          file,
-          this.token,
-        );
-        this.items = [item, ...this.items];
+        // If offline, queue for later
+        if (!navigator.onLine) {
+          const arrayBuffer = await file.arrayBuffer();
+          await this.enqueueForOffline('file', {
+            fileName: file.name,
+            fileType: file.type,
+            fileData: arrayBuffer,
+          });
+          continue;
+        }
+
+        try {
+          const itemId = crypto.randomUUID();
+          this.pendingItemIds.add(itemId);
+          try {
+            const item = await shareFile(
+              this.serverUrl,
+              this.spaceId,
+              itemId,
+              file,
+              this.token,
+            );
+            this.items = [item, ...this.items];
+          } finally {
+            this.pendingItemIds.delete(itemId);
+          }
+        } catch (error) {
+          // On network error, queue remaining files for offline
+          if (error instanceof SpaceApiError && !error.status) {
+            const arrayBuffer = await file.arrayBuffer();
+            await this.enqueueForOffline('file', {
+              fileName: file.name,
+              fileType: file.type,
+              fileData: arrayBuffer,
+            });
+            continue;
+          }
+          throw error;
+        }
       }
     } catch (error) {
       if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
@@ -492,6 +724,8 @@ export class SpaceView extends BaseElement {
     return html`
       <div class="space-y-8">
         ${this.renderHeader()}
+        ${this.renderSyncStatus()}
+        ${this.renderPendingSharesSection()}
         ${this.renderUploadArea()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
@@ -512,7 +746,7 @@ export class SpaceView extends BaseElement {
           'border-yellow-400/30 bg-yellow-400/10 text-yellow-300',
       },
       disconnected: {
-        label: 'Disconnected',
+        label: this.isOnline ? 'Disconnected' : 'Offline',
         classes: 'border-red-400/30 bg-red-400/10 text-red-300',
       },
     };
@@ -531,12 +765,99 @@ export class SpaceView extends BaseElement {
             ${this.spaceInfo?.name ?? this.spaceId}
           </h2>
         </div>
-        <span
-          class="mt-1 shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
-        >
-          ${status.label}
-        </span>
+        <div class="flex items-center gap-2">
+          ${this.offlineQueueCount > 0
+            ? html`
+              <span
+                class="shrink-0 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-300"
+                title="${this.offlineQueueCount} item${this.offlineQueueCount !== 1 ? 's' : ''} queued for upload"
+              >
+                📤 ${this.offlineQueueCount}
+              </span>
+            `
+            : nothing}
+          <span
+            class="mt-1 shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
+          >
+            ${status.label}
+          </span>
+        </div>
       </div>
+    `;
+  }
+
+  private renderSyncStatus() {
+    if (!this.syncMessage) return nothing;
+
+    return html`
+      <div
+        class="rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-300"
+        role="status"
+      >
+        ✓ ${this.syncMessage}
+      </div>
+    `;
+  }
+
+  private renderPendingSharesSection() {
+    if (this.pendingShares.length === 0) return nothing;
+
+    return html`
+      <section
+        class="rounded-lg border border-amber-500/30 bg-amber-950/20 p-4 space-y-3"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-sm font-medium text-amber-300">
+            📥 ${this.pendingShares.length}
+            item${this.pendingShares.length !== 1 ? 's' : ''} shared from other
+            apps
+          </p>
+          <div class="flex gap-2">
+            <button
+              @click=${() => this.uploadAllPendingShares()}
+              ?disabled=${this.isUploading}
+              class="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
+            >
+              Upload All
+            </button>
+          </div>
+        </div>
+
+        <ul class="space-y-1.5">
+          ${this.pendingShares.map(
+            (share) => html`
+              <li
+                class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
+              >
+                <span class="shrink-0 text-sm" aria-hidden="true">
+                  ${share.type === 'file' ? '📄' : '📝'}
+                </span>
+                <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
+                  ${share.type === 'file'
+                    ? share.fileName ?? 'File'
+                    : (share.content ?? '').substring(0, 100)}
+                </span>
+                <button
+                  @click=${() => this.uploadPendingShare(share)}
+                  ?disabled=${this.isUploading}
+                  class="shrink-0 rounded px-2 py-1 text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
+                  title="Upload this item"
+                >
+                  Upload
+                </button>
+                <button
+                  @click=${() => this.dismissPendingShare(share)}
+                  class="shrink-0 rounded p-1 text-slate-500 hover:text-red-400"
+                  title="Dismiss"
+                  aria-label="Dismiss shared item"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </li>
+            `,
+          )}
+        </ul>
+      </section>
     `;
   }
 
@@ -596,6 +917,12 @@ export class SpaceView extends BaseElement {
         <!-- Upload error -->
         ${this.uploadError
           ? html`<p class="text-sm text-red-400">${this.uploadError}</p>`
+          : nothing}
+
+        ${this.offlineQueueCount > 0 && !this.isOnline
+          ? html`<p class="text-xs text-amber-400">
+              📤 ${this.offlineQueueCount} item${this.offlineQueueCount !== 1 ? 's' : ''} queued — will upload when back online
+            </p>`
           : nothing}
       </section>
 
