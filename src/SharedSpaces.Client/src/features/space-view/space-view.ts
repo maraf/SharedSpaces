@@ -18,8 +18,8 @@ import {
   downloadFile,
   deleteItem,
   SpaceApiError,
-  type SpaceDetailsResponse,
   type SpaceItemResponse,
+  type SpaceDetailsResponse,
 } from './space-api';
 import {
   getPendingShares,
@@ -45,7 +45,6 @@ export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'server-url' })
   serverUrl?: string;
 
-  @state() private spaceInfo?: SpaceDetailsResponse;
   @state() private items: SpaceItemResponse[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
@@ -57,6 +56,7 @@ export class SpaceView extends BaseElement {
   @state() private copiedItemIds = new Set<string>();
   @state() private modalItem: SpaceItemResponse | null = null;
   @state() private connectionState: ConnectionState = 'disconnected';
+  @state() private spaceInfo?: SpaceDetailsResponse;
   @state() private isOnline = navigator.onLine;
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private offlineQueueCount = 0;
@@ -91,6 +91,19 @@ export class SpaceView extends BaseElement {
         this.lastLoadedKey = key;
         this.loadData();
       }
+    }
+
+    if (changed.has('connectionState') && this.spaceId) {
+      this.dispatchEvent(
+        new CustomEvent('connection-state-change', {
+          bubbles: true,
+          composed: true,
+          detail: {
+            spaceId: this.spaceId,
+            state: this.connectionState,
+          },
+        }),
+      );
     }
   }
 
@@ -734,25 +747,6 @@ export class SpaceView extends BaseElement {
   }
 
   private renderHeader() {
-    const statusConfig = {
-      connected: {
-        label: 'Connected',
-        classes:
-          'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-      },
-      reconnecting: {
-        label: 'Reconnecting...',
-        classes:
-          'border-yellow-400/30 bg-yellow-400/10 text-yellow-300',
-      },
-      disconnected: {
-        label: this.isOnline ? 'Disconnected' : 'Offline',
-        classes: 'border-red-400/30 bg-red-400/10 text-red-300',
-      },
-    };
-
-    const status = statusConfig[this.connectionState];
-
     return html`
       <div class="flex items-start justify-between gap-4">
         <div>
@@ -776,11 +770,6 @@ export class SpaceView extends BaseElement {
               </span>
             `
             : nothing}
-          <span
-            class="mt-1 shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
-          >
-            ${status.label}
-          </span>
         </div>
       </div>
     `;
@@ -988,7 +977,7 @@ export class SpaceView extends BaseElement {
     return html`
       <button
         @click=${() => this.handleCopy(item)}
-        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300"
         title=${copied ? 'Copied!' : 'Copy to clipboard'}
         aria-label=${copied ? 'Copied to clipboard' : 'Copy text to clipboard'}
       >
@@ -1003,7 +992,7 @@ export class SpaceView extends BaseElement {
     return html`
       <button
         @click=${() => this.handleDelete(item)}
-        class="rounded p-2 text-slate-500 transition hover:text-red-400"
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-red-400"
         title="Delete item"
         aria-label="Delete item"
       >
@@ -1016,7 +1005,7 @@ export class SpaceView extends BaseElement {
     return html`
       <button
         @click=${() => this.handleDownload(item)}
-        class="rounded p-2 text-slate-500 transition hover:text-slate-300"
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300"
         title="Download file"
         aria-label="Download file"
       >
@@ -1078,7 +1067,7 @@ export class SpaceView extends BaseElement {
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
-          <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
+          <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">
             ${this.modalItem.content}
           </p>
         </div>

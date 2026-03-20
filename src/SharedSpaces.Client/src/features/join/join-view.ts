@@ -167,7 +167,7 @@ export class JoinView extends BaseElement {
 
   override render() {
     return html`
-      <div class="mx-auto max-w-lg space-y-8">
+      <div class="max-w-lg space-y-8">
         <div>
           <h2 class="text-2xl font-semibold tracking-tight text-white">
             Join a Space
