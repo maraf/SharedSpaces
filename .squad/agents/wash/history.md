@@ -256,3 +256,6 @@ Finalized dead space removal UI implementation:
   - Space view header: removed duplicate space name (already in pill bar), kept only the compact connection status badge
   - Cleaned up unused `spaceInfo` state and `SpaceDetailsResponse` import after header removal
   - Key files: `space-view.ts` (renderHeader, renderModal, action buttons), `join-view.ts` (outer container), `admin-view.ts` (login form grid)
+
+- **Connection status dot in nav pills:** Moved connection status from a separate pill in `space-view.ts renderHeader()` into a colored dot inside each space navigation pill in `app-shell.ts`. Pattern: `space-view` dispatches `connection-state-change` custom event (bubbles+composed) on `connectionState` reactive prop changes. `app-shell` listens on `<main>`, stores `Record<string, ConnectionState>` keyed by spaceId, and renders a 2×2 dot (`h-2 w-2 rounded-full`) before space name text. Colors: gray=no state, green=connected, orange=reconnecting, red=disconnected. State persists when switching spaces (no reset to gray). Stale entries for removed spaces are harmless since pills don't render.
+  - Key files: `app-shell.ts` (spaceConnectionStates, handleConnectionStateChange, dotColor, pill rendering), `space-view.ts` (updated lifecycle, removed renderHeader)

@@ -1143,3 +1143,40 @@ Removed the "Space" label and space name `<h2>` from `renderHeader()` in space-v
 - The pill bar in app-shell.ts is now the single source of truth for which space is active
 - Space view gains ~60px of vertical space on mobile
 - `getSpaceInfo()` still fires to validate membership; future features needing space metadata should re-add state if needed
+
+# Connection Status Moved to Nav Pill Dots
+
+**Decision Date:** 2026-03-20
+**Decided By:** Wash (Frontend Dev)
+**Status:** Active
+
+## Context
+
+The space-view header previously rendered a separate "Connected"/"Reconnecting"/"Disconnected" pill. This took up vertical space and was only visible when viewing a specific space.
+
+## Decision
+
+Replaced the separate status pill with a small colored **dot inside each space navigation pill** in `app-shell.ts`. Connection state is now visible at a glance for all spaces simultaneously.
+
+### Event Contract
+
+`space-view` dispatches `connection-state-change` custom event (bubbles, composed) with `{ spaceId: string, state: ConnectionState }` whenever its reactive `connectionState` property changes. `app-shell` listens on `<main>` and stores state in `Record<string, ConnectionState>`.
+
+### Dot Color Semantics
+
+| Color | Class | Meaning |
+|-------|-------|---------|
+| Gray | `bg-slate-500` | Space exists, no connection state yet |
+| Green | `bg-emerald-400` | SignalR connected |
+| Orange | `bg-amber-400` | Reconnecting |
+| Red | `bg-red-400` | Disconnected / error |
+
+### Key Files
+
+- `src/SharedSpaces.Client/src/app-shell.ts` — dot rendering, state tracking
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — event emission, renderHeader removed
+
+## Impact
+
+- **Zoe:** Tests referencing `renderHeader()` or the old status pill text ("Connected", "Disconnected") will need updating.
+- **All:** The `connection-state-change` event is now part of the space-view → app-shell contract.
