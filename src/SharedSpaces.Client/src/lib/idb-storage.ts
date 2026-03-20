@@ -1,5 +1,7 @@
-// IndexedDB schema — shared with public/sw.js (which has its own openDB for SW context).
+// IndexedDB schema — shared with src/sw.ts (which has its own openDB for SW context).
 // If you change DB_NAME, DB_VERSION, or store names, update both files.
+import { openDB, type IDBPDatabase } from 'idb';
+
 const DB_NAME = 'shared-spaces-db';
 const DB_VERSION = 1;
 const PENDING_SHARES_STORE = 'pending-shares';
@@ -29,108 +31,57 @@ export interface OfflineQueueItem {
   timestamp: number;
 }
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+let dbInstance: Promise<IDBPDatabase> | null = null;
 
-function openDB(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
+function getDB(): Promise<IDBPDatabase> {
+  if (dbInstance) return dbInstance;
 
-  dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
+  dbInstance = openDB(DB_NAME, DB_VERSION, {
+    upgrade(db) {
       if (!db.objectStoreNames.contains(PENDING_SHARES_STORE)) {
         db.createObjectStore(PENDING_SHARES_STORE, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         db.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: 'id' });
       }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => {
-      dbPromise = null;
-      reject(request.error);
-    };
+    },
+  }).catch((err) => {
+    dbInstance = null;
+    throw err;
   });
 
-  return dbPromise;
-}
-
-function getAllFromStore<T>(storeName: string): Promise<T[]> {
-  return openDB().then(
-    (db) =>
-      new Promise<T[]>((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readonly');
-        const request = tx.objectStore(storeName).getAll();
-        request.onsuccess = () => resolve(request.result as T[]);
-        request.onerror = () => reject(request.error);
-      }),
-  );
-}
-
-function putInStore<T extends { id: string }>(
-  storeName: string,
-  item: T,
-): Promise<void> {
-  return openDB().then(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).put(item);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      }),
-  );
-}
-
-function deleteFromStore(storeName: string, id: string): Promise<void> {
-  return openDB().then(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).delete(id);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      }),
-  );
-}
-
-function clearStore(storeName: string): Promise<void> {
-  return openDB().then(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).clear();
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      }),
-  );
+  return dbInstance;
 }
 
 // --- Pending Shares (from Web Share Target API) ---
 
-export function getPendingShares(): Promise<PendingShareItem[]> {
-  return getAllFromStore<PendingShareItem>(PENDING_SHARES_STORE);
+export async function getPendingShares(): Promise<PendingShareItem[]> {
+  const db = await getDB();
+  return db.getAll(PENDING_SHARES_STORE);
 }
 
-export function removePendingShare(id: string): Promise<void> {
-  return deleteFromStore(PENDING_SHARES_STORE, id);
+export async function removePendingShare(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(PENDING_SHARES_STORE, id);
 }
 
-export function clearPendingShares(): Promise<void> {
-  return clearStore(PENDING_SHARES_STORE);
+export async function clearPendingShares(): Promise<void> {
+  const db = await getDB();
+  await db.clear(PENDING_SHARES_STORE);
 }
 
 // --- Offline Queue ---
 
-export function getOfflineQueue(): Promise<OfflineQueueItem[]> {
-  return getAllFromStore<OfflineQueueItem>(OFFLINE_QUEUE_STORE);
+export async function getOfflineQueue(): Promise<OfflineQueueItem[]> {
+  const db = await getDB();
+  return db.getAll(OFFLINE_QUEUE_STORE);
 }
 
 export async function getOfflineQueueForSpace(
   serverUrl: string,
   spaceId: string,
 ): Promise<OfflineQueueItem[]> {
-  const all = await getAllFromStore<OfflineQueueItem>(OFFLINE_QUEUE_STORE);
+  const all = await getOfflineQueue();
   return all.filter(
     (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
   );
@@ -140,23 +91,28 @@ export async function clearOfflineQueueForSpace(
   serverUrl: string,
   spaceId: string,
 ): Promise<void> {
-  const all = await getAllFromStore<OfflineQueueItem>(OFFLINE_QUEUE_STORE);
-  const toRemove = all.filter(
-    (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
-  );
-  for (const item of toRemove) {
-    await deleteFromStore(OFFLINE_QUEUE_STORE, item.id);
+  const db = await getDB();
+  const all: OfflineQueueItem[] = await db.getAll(OFFLINE_QUEUE_STORE);
+  const tx = db.transaction(OFFLINE_QUEUE_STORE, 'readwrite');
+  for (const item of all) {
+    if (item.serverUrl === serverUrl && item.spaceId === spaceId) {
+      tx.store.delete(item.id);
+    }
   }
+  await tx.done;
 }
 
-export function addToOfflineQueue(item: OfflineQueueItem): Promise<void> {
-  return putInStore(OFFLINE_QUEUE_STORE, item);
+export async function addToOfflineQueue(item: OfflineQueueItem): Promise<void> {
+  const db = await getDB();
+  await db.put(OFFLINE_QUEUE_STORE, item);
 }
 
-export function removeFromOfflineQueue(id: string): Promise<void> {
-  return deleteFromStore(OFFLINE_QUEUE_STORE, id);
+export async function removeFromOfflineQueue(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(OFFLINE_QUEUE_STORE, id);
 }
 
-export function clearOfflineQueue(): Promise<void> {
-  return clearStore(OFFLINE_QUEUE_STORE);
+export async function clearOfflineQueue(): Promise<void> {
+  const db = await getDB();
+  await db.clear(OFFLINE_QUEUE_STORE);
 }

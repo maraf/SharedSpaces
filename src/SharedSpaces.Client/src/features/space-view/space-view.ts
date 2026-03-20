@@ -24,14 +24,15 @@ import {
 import {
   getPendingShares,
   removePendingShare,
-  addToOfflineQueue,
-  getOfflineQueue,
-  getOfflineQueueForSpace,
-  removeFromOfflineQueue,
   clearOfflineQueueForSpace,
   type PendingShareItem,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
+import {
+  queueForOffline,
+  getOfflineQueueCount,
+  processOfflineQueue,
+} from '../../lib/offline-sync';
 
 @customElement('space-view')
 export class SpaceView extends BaseElement {
@@ -67,10 +68,9 @@ export class SpaceView extends BaseElement {
 
   private handleOnline = async () => {
     this.isOnline = true;
-    // Prefer Background Sync (SW handles it); fall back to client-side processing
     const synced = await requestBackgroundSync();
     if (!synced) {
-      this.processOfflineQueue();
+      this.syncOfflineQueue();
     }
   };
   private handleOffline = () => { this.isOnline = false; };
@@ -79,7 +79,7 @@ export class SpaceView extends BaseElement {
       this.loadPendingShares();
     }
     if (event.data?.type === 'offline-queue-sync-requested') {
-      this.processOfflineQueue();
+      this.syncOfflineQueue();
     }
     if (event.data?.type === 'offline-queue-synced') {
       const { synced, failed } = event.data;
@@ -360,83 +360,34 @@ export class SpaceView extends BaseElement {
   // --- Offline Queue ---
 
   private async refreshOfflineQueueCount() {
+    if (!this.serverUrl || !this.spaceId) return;
     try {
-      const queue = await getOfflineQueue();
-      this.offlineQueueCount = queue.length;
+      this.offlineQueueCount = await getOfflineQueueCount(this.serverUrl, this.spaceId);
     } catch {
       // IndexedDB may not be available
     }
   }
 
-  private async queueForOffline(
+  private async enqueueForOffline(
     type: 'text' | 'file',
     options: { content?: string; fileName?: string; fileType?: string; fileData?: ArrayBuffer },
   ) {
     if (!this.serverUrl || !this.spaceId) return;
-
-    const item = {
-      id: crypto.randomUUID(),
-      itemId: crypto.randomUUID(),
-      spaceId: this.spaceId,
-      serverUrl: this.serverUrl,
-      type,
-      ...options,
-      timestamp: Date.now(),
-    };
-
-    await addToOfflineQueue(item);
+    await queueForOffline(this.serverUrl, this.spaceId, type, options);
     this.offlineQueueCount++;
-
-    // Try to register background sync so the SW can process when online
-    await requestBackgroundSync();
   }
 
-  private async processOfflineQueue() {
+  private async syncOfflineQueue() {
     if (!navigator.onLine || !this.token || !this.serverUrl || !this.spaceId) return;
 
     try {
-      const queue = await getOfflineQueueForSpace(this.serverUrl, this.spaceId);
-      if (queue.length === 0) return;
+      const result = await processOfflineQueue(this.serverUrl, this.spaceId, this.token);
+      await this.refreshOfflineQueueCount();
 
-      const currentToken = this.token;
-      let synced = 0;
-      for (const item of queue) {
-        try {
-          if (item.type === 'text' && item.content) {
-            await shareText(
-              item.serverUrl,
-              item.spaceId,
-              item.itemId,
-              item.content,
-              currentToken,
-            );
-          } else if (item.fileData) {
-            const blob = new Blob([item.fileData], { type: item.fileType ?? 'application/octet-stream' });
-            const file = new File([blob], item.fileName ?? 'file', { type: blob.type });
-            await shareFile(
-              item.serverUrl,
-              item.spaceId,
-              item.itemId,
-              file,
-              currentToken,
-            );
-          }
-
-          await removeFromOfflineQueue(item.id);
-          synced++;
-        } catch (error) {
-          if (error instanceof SpaceApiError && error.status) {
-            // Server rejected the item (401/403/413 etc.) — remove from queue
-            await removeFromOfflineQueue(item.id);
-          }
-          // Network errors leave the item in queue for next retry
-        }
-      }
-
-      this.refreshOfflineQueueCount();
-
-      if (synced > 0) {
-        this.syncMessage = `${synced} queued item${synced !== 1 ? 's' : ''} uploaded`;
+      if (result.synced > 0) {
+        this.syncMessage = result.failed > 0
+          ? `Synced ${result.synced} item${result.synced !== 1 ? 's' : ''}, ${result.failed} failed`
+          : `${result.synced} queued item${result.synced !== 1 ? 's' : ''} uploaded`;
         this.refreshItemsAfterReconnect();
         setTimeout(() => { this.syncMessage = ''; }, 5000);
       }
@@ -460,7 +411,7 @@ export class SpaceView extends BaseElement {
     try {
       // If offline, queue for later
       if (!navigator.onLine) {
-        await this.queueForOffline('text', { content: this.textInput.trim() });
+        await this.enqueueForOffline('text', { content: this.textInput.trim() });
         this.textInput = '';
         return;
       }
@@ -479,7 +430,7 @@ export class SpaceView extends BaseElement {
       // On network error, queue for offline
       if (error instanceof SpaceApiError && !error.status) {
         try {
-          await this.queueForOffline('text', { content: this.textInput.trim() });
+          await this.enqueueForOffline('text', { content: this.textInput.trim() });
           this.textInput = '';
           return;
         } catch {
@@ -544,7 +495,7 @@ export class SpaceView extends BaseElement {
         // If offline, queue for later
         if (!navigator.onLine) {
           const arrayBuffer = await file.arrayBuffer();
-          await this.queueForOffline('file', {
+          await this.enqueueForOffline('file', {
             fileName: file.name,
             fileType: file.type,
             fileData: arrayBuffer,
@@ -566,7 +517,7 @@ export class SpaceView extends BaseElement {
           // On network error, queue remaining files for offline
           if (error instanceof SpaceApiError && !error.status) {
             const arrayBuffer = await file.arrayBuffer();
-            await this.queueForOffline('file', {
+            await this.enqueueForOffline('file', {
               fileName: file.name,
               fileType: file.type,
               fileData: arrayBuffer,
