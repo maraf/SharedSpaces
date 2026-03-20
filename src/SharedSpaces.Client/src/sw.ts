@@ -99,15 +99,20 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 // --- Workbox Precaching ---
 // self.__WB_MANIFEST is replaced at build time by vite-plugin-pwa with the
 // list of all Vite build assets (HTML, JS, CSS, icons, etc.)
-precacheAndRoute(self.__WB_MANIFEST);
-cleanupOutdatedCaches();
+// In dev mode, the manifest is empty — precaching and SPA fallback are
+// production-only (the Vite dev server handles serving in development).
+const manifest = self.__WB_MANIFEST;
+if (manifest.length > 0) {
+  precacheAndRoute(manifest);
+  cleanupOutdatedCaches();
 
-// SPA fallback: serve precached index.html for all navigation requests
-registerRoute(
-  new NavigationRoute(createHandlerBoundToURL('index.html'), {
-    denylist: [/^\/v1\//, /^\/_share/],
-  }),
-);
+  // SPA fallback: serve precached index.html for all navigation requests
+  registerRoute(
+    new NavigationRoute(createHandlerBoundToURL('index.html'), {
+      denylist: [/^\/v1\//, /^\/_share/],
+    }),
+  );
+}
 
 // --- Background Sync ---
 // The 'sync' event is from the Background Sync API, not in standard TS lib types.
