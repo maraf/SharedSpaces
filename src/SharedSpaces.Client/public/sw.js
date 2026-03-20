@@ -1,10 +1,61 @@
 /// <reference lib="webworker" />
 // @ts-nocheck — plain JS service worker served from public/
 
+const CACHE_NAME = 'sharedspaces-v1';
 const DB_NAME = 'shared-spaces-db';
 const DB_VERSION = 1;
 const PENDING_SHARES_STORE = 'pending-shares';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
+
+// --- Asset Caching ---
+
+// Hashed assets (/assets/*) are immutable — cache-first, never revalidate.
+// Navigation and app shell — network-first with cache fallback.
+// API calls (/v1/*) and SignalR (/v1/*/hub) — never cache.
+
+function isApiRequest(url) {
+  return url.pathname.startsWith('/v1/');
+}
+
+function isHashedAsset(url) {
+  return url.pathname.startsWith('/assets/');
+}
+
+function isNavigationRequest(request) {
+  return request.mode === 'navigate';
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (response.ok) {
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(request, response.clone());
+  }
+  return response;
+}
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    // For navigation requests, try serving the cached root page (SPA fallback)
+    if (isNavigationRequest(request)) {
+      const fallback = await caches.match('/');
+      if (fallback) return fallback;
+    }
+    return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+  }
+}
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -85,12 +136,25 @@ async function handleShareTarget(request) {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
+  // Share target interception
   if (url.pathname === '/_share' && event.request.method === 'POST') {
     event.respondWith(handleShareTarget(event.request));
     return;
   }
 
-  // Pass through all other requests — no caching strategy
+  // Never cache API calls or non-GET requests
+  if (isApiRequest(url) || event.request.method !== 'GET') {
+    return;
+  }
+
+  // Hashed assets (JS/CSS bundles) — cache-first (immutable filenames)
+  if (isHashedAsset(url)) {
+    event.respondWith(cacheFirst(event.request));
+    return;
+  }
+
+  // Everything else (HTML, icons, manifest) — network-first
+  event.respondWith(networkFirst(event.request));
 });
 
 self.addEventListener('sync', (event) => {
@@ -107,5 +171,14 @@ self.addEventListener('sync', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  // Clean up old caches when the SW version changes
+  event.waitUntil(
+    caches.keys().then((names) =>
+      Promise.all(
+        names
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name)),
+      ),
+    ).then(() => self.clients.claim()),
+  );
 });
