@@ -2,6 +2,8 @@
 // @ts-nocheck — plain JS service worker served from public/
 
 const CACHE_NAME = 'sharedspaces-v1';
+// IndexedDB schema — shared with src/lib/idb-storage.ts (app-side typed wrapper).
+// If you change DB_NAME, DB_VERSION, or store names, update both files.
 const DB_NAME = 'shared-spaces-db';
 const DB_VERSION = 1;
 const PENDING_SHARES_STORE = 'pending-shares';

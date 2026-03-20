@@ -26,7 +26,9 @@ import {
   removePendingShare,
   addToOfflineQueue,
   getOfflineQueue,
+  getOfflineQueueForSpace,
   removeFromOfflineQueue,
+  clearOfflineQueueForSpace,
   type PendingShareItem,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
@@ -142,6 +144,9 @@ export class SpaceView extends BaseElement {
     
     // Remove token from storage
     removeToken(this.serverUrl, this.spaceId);
+
+    // Clear any queued offline items for this space
+    await clearOfflineQueueForSpace(this.serverUrl, this.spaceId).catch(() => {});
     
     // Redirect to join view and tell app-shell to reload spaces
     this.dispatchEvent(
@@ -387,42 +392,44 @@ export class SpaceView extends BaseElement {
   }
 
   private async processOfflineQueue() {
-    if (!navigator.onLine || !this.token) return;
+    if (!navigator.onLine || !this.token || !this.serverUrl || !this.spaceId) return;
 
     try {
-      const queue = await getOfflineQueue();
+      const queue = await getOfflineQueueForSpace(this.serverUrl, this.spaceId);
       if (queue.length === 0) return;
 
       const currentToken = this.token;
       let synced = 0;
       for (const item of queue) {
         try {
-          const form = new FormData();
-          form.append('id', item.itemId);
-          form.append('contentType', item.type);
-
           if (item.type === 'text' && item.content) {
-            form.append('content', item.content);
+            await shareText(
+              item.serverUrl,
+              item.spaceId,
+              item.itemId,
+              item.content,
+              currentToken,
+            );
           } else if (item.fileData) {
             const blob = new Blob([item.fileData], { type: item.fileType ?? 'application/octet-stream' });
-            form.append('file', blob, item.fileName ?? 'file');
+            const file = new File([blob], item.fileName ?? 'file', { type: blob.type });
+            await shareFile(
+              item.serverUrl,
+              item.spaceId,
+              item.itemId,
+              file,
+              currentToken,
+            );
           }
 
-          const response = await fetch(
-            `${item.serverUrl.replace(/\/+$/, '')}/v1/spaces/${encodeURIComponent(item.spaceId)}/items/${encodeURIComponent(item.itemId)}`,
-            {
-              method: 'PUT',
-              headers: { Authorization: `Bearer ${currentToken}` },
-              body: form,
-            },
-          );
-
-          if (response.ok) {
+          await removeFromOfflineQueue(item.id);
+          synced++;
+        } catch (error) {
+          if (error instanceof SpaceApiError && error.status) {
+            // Server rejected the item (401/403/413 etc.) — remove from queue
             await removeFromOfflineQueue(item.id);
-            synced++;
           }
-        } catch {
-          // Individual item failed — leave in queue
+          // Network errors leave the item in queue for next retry
         }
       }
 

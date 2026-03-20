@@ -1,3 +1,5 @@
+// IndexedDB schema — shared with public/sw.js (which has its own openDB for SW context).
+// If you change DB_NAME, DB_VERSION, or store names, update both files.
 const DB_NAME = 'shared-spaces-db';
 const DB_VERSION = 1;
 const PENDING_SHARES_STORE = 'pending-shares';
@@ -122,6 +124,29 @@ export function clearPendingShares(): Promise<void> {
 
 export function getOfflineQueue(): Promise<OfflineQueueItem[]> {
   return getAllFromStore<OfflineQueueItem>(OFFLINE_QUEUE_STORE);
+}
+
+export async function getOfflineQueueForSpace(
+  serverUrl: string,
+  spaceId: string,
+): Promise<OfflineQueueItem[]> {
+  const all = await getAllFromStore<OfflineQueueItem>(OFFLINE_QUEUE_STORE);
+  return all.filter(
+    (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
+  );
+}
+
+export async function clearOfflineQueueForSpace(
+  serverUrl: string,
+  spaceId: string,
+): Promise<void> {
+  const all = await getAllFromStore<OfflineQueueItem>(OFFLINE_QUEUE_STORE);
+  const toRemove = all.filter(
+    (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
+  );
+  for (const item of toRemove) {
+    await deleteFromStore(OFFLINE_QUEUE_STORE, item.id);
+  }
 }
 
 export function addToOfflineQueue(item: OfflineQueueItem): Promise<void> {
