@@ -65,6 +65,7 @@ export class SpaceView extends BaseElement {
   private token?: string;
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
+  private pendingItemIds = new Set<string>();
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -250,9 +251,9 @@ export class SpaceView extends BaseElement {
   }
 
   private handleItemAdded(payload: ItemAddedPayload) {
-    // Check if item already exists (race with optimistic add)
-    const exists = this.items.some((item) => item.id === payload.id);
-    if (exists) return;
+    // Skip if item already exists or is being uploaded by us
+    if (this.items.some((item) => item.id === payload.id)) return;
+    if (this.pendingItemIds.has(payload.id)) return;
 
     // Prepend new item to the list
     const newItem: SpaceItemResponse = {
@@ -425,15 +426,20 @@ export class SpaceView extends BaseElement {
       }
 
       const itemId = crypto.randomUUID();
-      const item = await shareText(
-        this.serverUrl,
-        this.spaceId,
-        itemId,
-        this.textInput.trim(),
-        this.token,
-      );
-      this.items = [item, ...this.items];
-      this.textInput = '';
+      this.pendingItemIds.add(itemId);
+      try {
+        const item = await shareText(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          this.textInput.trim(),
+          this.token,
+        );
+        this.items = [item, ...this.items];
+        this.textInput = '';
+      } finally {
+        this.pendingItemIds.delete(itemId);
+      }
     } catch (error) {
       // On network error, queue for offline
       if (error instanceof SpaceApiError && !error.status) {
@@ -513,14 +519,19 @@ export class SpaceView extends BaseElement {
 
         try {
           const itemId = crypto.randomUUID();
-          const item = await shareFile(
-            this.serverUrl,
-            this.spaceId,
-            itemId,
-            file,
-            this.token,
-          );
-          this.items = [item, ...this.items];
+          this.pendingItemIds.add(itemId);
+          try {
+            const item = await shareFile(
+              this.serverUrl,
+              this.spaceId,
+              itemId,
+              file,
+              this.token,
+            );
+            this.items = [item, ...this.items];
+          } finally {
+            this.pendingItemIds.delete(itemId);
+          }
         } catch (error) {
           // On network error, queue remaining files for offline
           if (error instanceof SpaceApiError && !error.status) {
