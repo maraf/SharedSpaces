@@ -56,6 +56,19 @@ export class SpaceView extends BaseElement {
         this.loadData();
       }
     }
+
+    if (changed.has('connectionState') && this.spaceId) {
+      this.dispatchEvent(
+        new CustomEvent('connection-state-change', {
+          bubbles: true,
+          composed: true,
+          detail: {
+            spaceId: this.spaceId,
+            state: this.connectionState,
+          },
+        }),
+      );
+    }
   }
 
   override disconnectedCallback() {
@@ -488,41 +501,9 @@ export class SpaceView extends BaseElement {
 
     return html`
       <div class="space-y-8">
-        ${this.renderHeader()}
         ${this.renderUploadArea()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
-      </div>
-    `;
-  }
-
-  private renderHeader() {
-    const statusConfig = {
-      connected: {
-        label: 'Connected',
-        classes:
-          'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-      },
-      reconnecting: {
-        label: 'Reconnecting...',
-        classes:
-          'border-yellow-400/30 bg-yellow-400/10 text-yellow-300',
-      },
-      disconnected: {
-        label: 'Disconnected',
-        classes: 'border-red-400/30 bg-red-400/10 text-red-300',
-      },
-    };
-
-    const status = statusConfig[this.connectionState];
-
-    return html`
-      <div class="flex items-center gap-2">
-        <span
-          class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${status.classes}"
-        >
-          ${status.label}
-        </span>
       </div>
     `;
   }

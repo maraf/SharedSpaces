@@ -16,6 +16,7 @@ import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
+import type { ConnectionState } from './lib/signalr-client';
 
 interface SpaceEntry {
   serverUrl: string;
@@ -45,6 +46,7 @@ export class AppShell extends BaseElement {
   @state() private currentSpaceId?: string;
   @state() private currentServerUrl?: string;
   @state() private spaces: SpaceEntry[] = [];
+  @state() private spaceConnectionStates: Record<string, ConnectionState> = {};
 
   override connectedCallback() {
     super.connectedCallback();
@@ -105,6 +107,28 @@ export class AppShell extends BaseElement {
     this.view = 'space';
   }
 
+  private handleConnectionStateChange = (event: Event) => {
+    const { spaceId, state } = (event as CustomEvent<{ spaceId: string; state: ConnectionState }>).detail;
+    this.spaceConnectionStates = {
+      ...this.spaceConnectionStates,
+      [spaceId]: state,
+    };
+  };
+
+  private dotColor(spaceId: string): string {
+    const state = this.spaceConnectionStates[spaceId];
+    switch (state) {
+      case 'connected':
+        return 'bg-emerald-400';
+      case 'reconnecting':
+        return 'bg-amber-400';
+      case 'disconnected':
+        return 'bg-red-400';
+      default:
+        return 'bg-slate-500';
+    }
+  }
+
   private readonly pillBase =
     'rounded-full border px-3 py-1.5 text-xs font-medium transition';
   private readonly pillDefault =
@@ -134,8 +158,9 @@ export class AppShell extends BaseElement {
                 (entry) => html`
                   <button
                     @click=${() => this.selectSpace(entry)}
-                    class="${this.pillBase} ${this.view === 'space' && this.currentSpaceId === entry.spaceId ? this.pillActive : this.pillDefault}"
+                    class="${this.pillBase} ${this.view === 'space' && this.currentSpaceId === entry.spaceId ? this.pillActive : this.pillDefault} inline-flex items-center gap-1.5"
                   >
+                    <span class="inline-block h-2 w-2 shrink-0 rounded-full ${this.dotColor(entry.spaceId)}"></span>
                     ${entry.spaceName}
                   </button>
                 `,
@@ -160,7 +185,7 @@ export class AppShell extends BaseElement {
             </nav>
           </header>
 
-          <main class="flex flex-1" @view-change=${this.handleViewChange}>
+          <main class="flex flex-1" @view-change=${this.handleViewChange} @connection-state-change=${this.handleConnectionStateChange}>
             ${this.renderContent()}
           </main>
         </div>
