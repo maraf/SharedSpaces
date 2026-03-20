@@ -82,15 +82,6 @@ export class SpaceView extends BaseElement {
     if (event.data?.type === 'offline-queue-sync-requested') {
       this.syncOfflineQueue();
     }
-    if (event.data?.type === 'offline-queue-synced') {
-      const { synced, failed } = event.data;
-      this.syncMessage = failed > 0
-        ? `Synced ${synced} item${synced !== 1 ? 's' : ''}, ${failed} failed`
-        : `${synced} queued item${synced !== 1 ? 's' : ''} uploaded`;
-      this.refreshOfflineQueueCount();
-      this.refreshItemsAfterReconnect();
-      setTimeout(() => { this.syncMessage = ''; }, 5000);
-    }
   };
 
   override updated(changed: Map<string, unknown>) {
@@ -355,9 +346,13 @@ export class SpaceView extends BaseElement {
   }
 
   private async dismissPendingShare(share: PendingShareItem) {
-    await removePendingShare(share.id);
-    this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
-    this.notifyPendingSharesChanged();
+    try {
+      await removePendingShare(share.id);
+      this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+      this.notifyPendingSharesChanged();
+    } catch {
+      // IndexedDB may not be available
+    }
   }
 
   private notifyPendingSharesChanged() {
@@ -393,11 +388,18 @@ export class SpaceView extends BaseElement {
       const result = await processOfflineQueue(this.serverUrl, this.spaceId, this.token);
       await this.refreshOfflineQueueCount();
 
-      if (result.synced > 0) {
-        this.syncMessage = result.failed > 0
-          ? `Synced ${result.synced} item${result.synced !== 1 ? 's' : ''}, ${result.failed} failed`
-          : `${result.synced} queued item${result.synced !== 1 ? 's' : ''} uploaded`;
-        this.refreshItemsAfterReconnect();
+      if (result.synced > 0 || result.failed > 0) {
+        if (result.synced > 0 && result.failed > 0) {
+          this.syncMessage = `Synced ${result.synced} item${result.synced !== 1 ? 's' : ''}, ${result.failed} failed`;
+        } else if (result.synced > 0) {
+          this.syncMessage = `${result.synced} queued item${result.synced !== 1 ? 's' : ''} uploaded`;
+        } else {
+          this.syncMessage = `${result.failed} queued item${result.failed !== 1 ? 's' : ''} failed to upload`;
+        }
+
+        if (result.synced > 0) {
+          this.refreshItemsAfterReconnect();
+        }
         setTimeout(() => { this.syncMessage = ''; }, 5000);
       }
     } catch {

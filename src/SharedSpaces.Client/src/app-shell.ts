@@ -115,9 +115,13 @@ export class AppShell extends BaseElement {
   }
 
   private async dismissPendingShare(share: PendingShareItem) {
-    await removePendingShare(share.id);
-    this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
-    this.pendingShareCount = this.pendingShares.length;
+    try {
+      await removePendingShare(share.id);
+      this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+      this.pendingShareCount = this.pendingShares.length;
+    } catch {
+      // IndexedDB may not be available
+    }
   }
 
   private loadSpacesFromStorage() {
