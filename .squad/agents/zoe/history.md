@@ -270,3 +270,25 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - SignalR client state tracking uses a getter that maps `HubConnectionState` enum values to simplified `ConnectionState` union type ('connected' | 'disconnected' | 'reconnecting'); tests should verify state transitions via connection lifecycle callbacks (onreconnecting, onreconnected, onclose).
 - Testing Lit component race conditions requires a hybrid strategy: use integration tests with controlled async timing for end-to-end flows, but prefer direct method invocation (unit-style) for logic verification to avoid test flakiness from unpredictable async component initialization timing.
 - Space-view deduplication tests verify two dedup mechanisms: `items.some()` check blocks items already in the list, and `pendingItemIds.has()` blocks SignalR events for items currently being uploaded (before API response completes); both mechanisms must pass for correct behavior.
+- Lit `updated()` does NOT fire on disconnected elements; when `space-view.disconnectedCallback()` sets `connectionState = 'disconnected'`, the `connection-state-change` event won't dispatch. App-shell's `willUpdate()` handles this by detecting view changes away from 'space' and directly updating `spaceConnectionStates`.
+- Testing Lit custom elements with private members requires `(element as any)` casts for internal state access; this pattern is established across all client test files and produces `no-explicit-any` lint warnings that are tolerated in tests.
+- App-shell test file (`src/SharedSpaces.Client/src/app-shell.test.ts`) must mock `@microsoft/signalr`, `jwt-decode`, and `./lib/idb-storage` because app-shell imports space-view (which imports signalr-client) and uses jwt-decode and idb-storage directly.
+- For Lit component `handleConnectionStateChange` testing, call the handler method directly rather than dispatching events, because the handler is bound to a child `<main>` element via Lit template — events dispatched on the host element don't reach child-bound listeners.
+
+## Team Update: Connection Dot Navigation Fix (2026-03-20)
+
+**Coordinated by:** Scribe  
+**Agents:** Wash (fix), Zoe (tests), Coordinator (lint)
+
+**Summary:** Fixed connection dot not updating when navigating away from space-view. App-shell now uses willUpdate() to proactively reset connection state when view changes from 'space' to other routes. Zoe added comprehensive 14-test suite validating three-layer connection cleanup lifecycle (SignalR client → space-view → app-shell). Coordinator fixed eslint config to permit ny in test files per pre-existing convention.
+
+**Key Pattern:** willUpdate() in parent components provides a proactive fallback for cleanup when child elements are removed from DOM, because Lit doesn't fire reactive updates on disconnected elements.
+
+**Test Coverage:** 138 passing tests (↑14 new). All linting passes. Three-layer coverage (unit-style direct method testing) avoids flakiness from async Lit lifecycle timing.
+
+**Files Modified:**
+- app-shell.ts (willUpdate)
+- space-view.test.ts (5 new tests)
+- signalr-client.test.ts (1 new test)
+- app-shell.test.ts (8 new tests, created)
+- eslint.config.js (allow any in tests)
