@@ -576,3 +576,49 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 
 **Status:** In Progress (spawned 2026-03-21T19:25:00Z)
 
+
+## Issue #93: Admin UI - Remove Member Button (2026-03-21)
+
+**Task:** Add "Remove" button for revoked members in admin UI to permanently delete members and their items
+
+**Objectives:**
+- Add `removeMember()` function to `admin-api.ts` following the pattern of `revokeMember()`
+- Add `pendingMemberRemovals` state tracking to `SpaceCardState`
+- Implement `handleRemoveMember()` with confirmation dialog and member filtering (not just flag update)
+- Update member rendering to show "Remove" button for revoked members
+- Button should be muted by default (slate tones), show red on hover to signal destructive action
+
+**Implementation:**
+- Added `removeMember()` to `admin-api.ts` calling `DELETE /v1/spaces/{spaceId}/members/{memberId}`
+- Added `pendingMemberRemovals: Record<string, boolean>` to `SpaceCardState` and initialized in `createSpaceCardState()`
+- Implemented `handleRemoveMember()` following exact pattern of `handleRevokeMember()`:
+  - Confirmation dialog warns: "Permanently remove this member and all their items? This cannot be undone."
+  - On success, **filters out** the member from state (not just updating a flag)
+  - Proper error handling with `AdminApiError` detection and session validation
+- Updated member rendering in `renderMembersModalContent()`:
+  - Revoked members now show "Remove" button (was showing `null` before)
+  - Button uses muted colors (slate-700/slate-800/slate-400) in default state
+  - Hover shows red tones (red-700/red-950/red-300) to signal destructive action
+  - Loading state shows "Removing…" with disabled state
+
+**Status:** Complete
+
+### Learnings
+
+#### Admin State Management Pattern
+- Use separate pending state records for different operations (`pendingMemberRevocations` vs `pendingMemberRemovals`)
+- When an operation should remove an item from the list, use `.filter()` (as in Remove)
+- When an operation should update an item in the list, use `.map()` (as in Revoke)
+- Always check `isCurrentSession()` before updating state to prevent race conditions when admin switches servers
+- Always handle unauthorized errors separately with `isUnauthorizedError()` check
+
+#### Destructive Action UI Pattern
+- Use muted colors by default for already-revoked items to de-emphasize their presence
+- Show destructive colors (red tones) only on hover to signal the irreversible nature
+- Confirmation dialogs should clearly state what will be deleted: "member AND their items"
+- Use "cannot be undone" language to ensure user understands permanence
+
+#### Inline Metadata Display Pattern
+- Append secondary stats (e.g., item count) to existing metadata lines using a middle dot separator (`·`)
+- Use singular/plural ternary for counts: `${n} ${n === 1 ? 'item' : 'items'}`
+- Keeps layout stable — no extra rows or elements needed for simple numeric annotations

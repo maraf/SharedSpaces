@@ -2170,3 +2170,279 @@ All scrollable containers automatically styled:
 - admin-view.ts (members/invitations modal: max-h-[60vh])
 - space-view.ts (textarea with conditional overflow)
 - Future scrollable areas
+
+---
+
+### DELETE Member Endpoint Implementation
+
+**Decision Date:** 2026-03-22  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active  
+**Issue:** #93
+
+#### Context
+
+Admins needed the ability to permanently remove a revoked member from a space, including all their shared items and associated file storage. The existing revoke endpoint only marked members as inactive but left their data intact.
+
+#### Decision
+
+Implemented `DELETE /v1/spaces/{spaceId:guid}/members/{memberId:guid}` endpoint with the following behavior:
+
+1. **Admin-only access** via `AdminAuthenticationFilter`
+2. **Validation sequence:**
+   - 404 if space doesn't exist
+   - 404 if member doesn't exist or doesn't belong to space
+   - **409 Conflict if member is not revoked** (prevents accidental deletion of active members)
+3. **Cleanup sequence (revised in PR #94):**
+   - Collect file item IDs that need cleanup (before DB delete removes them)
+   - Remove all SpaceItems from database + Remove SpaceMember record + Save changes
+   - Broadcast `ItemDeletedEvent` via SignalR for each deleted item (best-effort)
+   - Best-effort file storage cleanup **after** DB commit
+4. **Response:** 204 No Content on success
+
+#### Rationale
+
+- **Revocation check (409):** Prevents accidental deletion of active members — requires explicit two-step process (revoke, then delete)
+- **DB commit before file cleanup:** Ensures data consistency — if DB commit fails, files untouched; if file cleanup fails after commit, orphaned blobs are harmless (can be cleaned up later) rather than orphaned DB references (broken)
+- **SignalR after commit:** Notifies connected clients only after successful DB transaction
+- **Best-effort file cleanup:** File storage errors don't block member deletion (logged but not thrown)
+- **Pattern consistency:** Follows existing `DeleteItem` endpoint pattern from `ItemEndpoints.cs`
+
+#### Implementation Details
+
+**File:** `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`
+
+**Method signature:**
+```csharp
+private static async Task<IResult> DeleteMember(
+    Guid spaceId,
+    Guid memberId,
+    AppDbContext db,
+    IFileStorage fileStorage,
+    ISpaceHubNotifier hubNotifier,
+    CancellationToken cancellationToken)
+```
+
+#### Consequences
+
+**Positive:**
+- Admins can fully remove revoked members and reclaim storage
+- Two-step revoke-then-delete prevents accidental data loss
+- File storage cleanup prevents orphaned files
+- Real-time clients stay synchronized via SignalR
+
+**Negative:**
+- Member deletion is permanent and irreversible
+- Best-effort file cleanup may leave orphaned files on storage errors (rare)
+
+**Future considerations:**
+- Audit logging for member deletion (who deleted whom, when)
+- Bulk member deletion if needed
+- Option to archive instead of delete
+
+---
+
+### Admin UI: Remove Member Button Pattern
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented
+
+#### Context
+
+Issue #93 required adding a "Remove" button for revoked members in the admin UI. This allows admins to permanently delete members and their items after revocation. The backend endpoint was built in parallel with the following contract:
+
+```
+DELETE /v1/spaces/{spaceId}/members/{memberId}
+Headers: X-Admin-Secret: {secret}
+Response: 204 No Content
+Error: 409 Conflict if member is not revoked
+Error: 404 if member/space not found
+```
+
+#### Decision
+
+Implemented the Remove functionality following the established admin state management pattern:
+
+1. **API Function** — Added `removeMember()` to `admin-api.ts` following exact pattern of `revokeMember()`
+2. **Error Handling** — Added `includeConflictMessage` option to `throwForFailedResponse` to surface 409 errors from server response body (e.g., "Member must be revoked before deletion"). Also updated the 404 message from "Member not found" to "Space or member not found" since the endpoint can 404 for either a missing space or a missing member.
+3. **State Tracking** — Added `pendingMemberRemovals: Record<string, boolean>` to `SpaceCardState`
+4. **Handler Pattern** — Implemented `handleRemoveMember()` with:
+   - Confirmation dialog: "Permanently remove this member and all their items? This cannot be undone."
+   - On success: **filter out** the member from state (not just update a flag)
+   - Proper error handling with session validation and unauthorized checks
+5. **UI Pattern for Destructive Actions** — Revoked members now show "Remove" button with:
+   - Muted colors by default (slate-700/slate-800/slate-400) to de-emphasize
+   - Red tones on hover (red-700/red-950/red-300) to signal destructive action
+   - Loading state: "Removing…" with disabled state
+
+#### Rationale
+
+**Visual Design**
+- **Muted default state** — Revoked members are already disabled, so the action button should not draw attention until needed
+- **Red on hover only** — Destructive nature is signaled when user considers the action, not passively
+- **Contrast with Revoke button** — Revoke button is always red (it's the primary destructive action); Remove is muted because it's a cleanup action on already-revoked members
+
+**State Management**
+- **Separate pending trackers** — Each operation (`revokeMember`, `removeMember`, `deleteInvitation`) has its own `Record<string, boolean>` to avoid conflicts
+- **Filter vs Map** — Remove operation uses `.filter()` to remove the member from the list entirely, while Revoke uses `.map()` to update the `isRevoked` flag in-place
+- **Session validation** — Both operations check `isCurrentSession()` before updating state to prevent race conditions when admin switches between servers
+- **Error message surfaces 409 details** — When server returns Conflict status, the custom error message is read from the response body and shown to the admin
+
+#### Consequences
+
+- **Positive:** Clear visual hierarchy for destructive actions; muted Remove button doesn't distract from active member management
+- **Positive:** Confirmation dialog prevents accidental permanent deletion
+- **Positive:** Pattern is reusable for future admin operations (invitation deletion already follows similar pattern)
+- **Positive:** Server error messages (e.g., business rule violations) surface clearly to the admin
+- **Neutral:** Remove button only appears after member is revoked (two-step process)
+
+**Files Modified:**
+- `src/SharedSpaces.Client/src/features/admin/admin-api.ts` — Added `removeMember()` function, updated error handling to support `includeConflictMessage`
+- `src/SharedSpaces.Client/src/features/admin/admin-view.ts` — Added state, handler, and UI rendering
+
+---
+
+### Test Structure for DELETE Member Endpoint (Issue #93)
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Zoe (Tester)  
+**Status:** Implemented
+
+#### Context
+
+Issue #93 requires a new admin endpoint `DELETE /v1/spaces/{spaceId}/members/{memberId}` to permanently remove revoked members and their associated data (items, files). This endpoint has specific business logic requirements:
+- Member MUST already be revoked (IsRevoked == true)
+- Returns 409 Conflict if member is not revoked
+- Deletes all member's items (both text and file)
+- Deletes member's file storage
+- Broadcasts ItemDeleted events via SignalR
+- Returns 204 No Content on success
+
+#### Decision
+
+Added 6 comprehensive integration tests to the existing `AdminEndpointTests.cs` file, following established test patterns:
+
+1. **Test Location:** Added to existing member management section in `AdminEndpointTests.cs` rather than creating a new test file
+2. **Helper Methods:** Reused existing helpers (`CreateMemberViaTokenExchangeAsync`, `ListMembersAsync`) and added new ones for item operations
+3. **Test Coverage Strategy:**
+   - Happy path with items (text + file) — validates full cleanup
+   - Happy path without items — validates basic member removal
+   - Business rule enforcement — 409 for non-revoked members
+   - Error cases — 404 for missing space/member, 401 for missing auth
+4. **Verification Approach:**
+   - Assert HTTP status codes match API contract
+   - Verify member removed from GET /members list
+   - Verify member and items deleted from database using `WithDbContextAsync`
+   - Verify revoked member's JWT can no longer access items (401/403)
+
+#### Rationale
+
+- **Why extend AdminEndpointTests.cs instead of new file?** Member removal is a member management operation, logically grouped with existing RevokeMember, ListMembers tests. Keeps related admin operations together.
+- **Why full item creation in tests?** The endpoint's core responsibility is cleaning up member data. Tests must prove file items are properly removed from storage, not just database.
+- **Why verify both HTTP response and database state?** HTTP status proves the API contract; database assertions prove the business logic (cascading deletes, cleanup).
+- **Why test revoked member's JWT after deletion?** Validates that the member is truly removed, not just marked as deleted.
+
+#### Consequences
+
+**Positive:**
+- Clear test specification for Kaylee's endpoint implementation
+- All 6 tests pass with current implementation
+- Test suite now covers full member lifecycle: create → revoke → remove
+- Tests validate both success paths and error handling
+
+**Negative:**
+- AdminEndpointTests.cs is now ~1200 lines (manageable for now)
+- Item helper methods duplicated from ItemEndpointTests (could be extracted to shared test utilities in future)
+
+**Future Considerations:**
+- If admin endpoint tests grow beyond 1500 lines, consider splitting by feature area (spaces, invitations, members)
+- Consider extracting common test helpers (JWT generation, item creation) to a shared TestHelpers class
+
+---
+
+## PR #94: Remove Member — Implementation Refinements
+
+**Decision Date:** 2026-03-22  
+**Decided By:** Kaylee (Backend Dev), Wash (Frontend Dev)  
+**PR:** #94  
+**Status:** Complete  
+
+### Backend: Reorder DeleteMember file cleanup after DB commit
+
+**Triggered by:** PR #94 review feedback on data consistency
+
+#### Context
+
+The `DeleteMember` handler was deleting file blobs from storage *before* committing the DB transaction. If `SaveChangesAsync` failed after files were already deleted, DB records would reference storage that no longer exists — orphaned references with no recovery path.
+
+#### Decision
+
+Reorder `DeleteMember` to match the existing `DeleteItem` pattern:
+
+1. Collect file item IDs that need cleanup (before DB delete removes them)
+2. DB delete (`RemoveRange` + `Remove`) + `SaveChangesAsync`
+3. SignalR notifications
+4. Best-effort file storage cleanup **after** commit
+
+This way, if the DB commit fails, no files have been touched and the system remains consistent. If file cleanup fails after commit, we get orphaned blobs (harmless, can be cleaned up later) rather than orphaned DB references (broken, causes errors on access).
+
+### Frontend: Surface 409 Conflict errors from server response body
+
+**Triggered by:** PR #94 review feedback on error messaging
+
+#### Context
+
+`removeMember()` in the admin API only customized the 404 error message. When the server returned 409 (e.g., "Member must be revoked before deletion"), users saw a generic "Server error: Conflict" message — not helpful.
+
+#### Decision
+
+Added `includeConflictMessage` option to `throwForFailedResponse`, following the same pattern as the existing `includeBadRequestMessage` for 400 responses. When enabled, the 409 handler reads the JSON body and surfaces the server's `Error` or `message` field.
+
+Also updated the 404 message from "Member not found" to "Space or member not found" since the endpoint can 404 for either a missing space or a missing member.
+
+#### Rationale
+
+- **Follows established pattern** — `includeBadRequestMessage` already handles extracting 400 error details; extending to 409 keeps the approach consistent
+- **User-facing clarity** — Business rule violations (e.g., member must be revoked) are now visible to admins instead of generic error text
+- **Accurate error scoping** — 404 can mean space or member is missing; updated message reflects both possibilities
+
+#### Consequences
+
+- **Positive:** Admins see actionable error messages for 409 Conflict responses
+- **Positive:** File cleanup order ensures data integrity even on partial failures
+- **Positive:** Build passes, 106 backend tests pass, 312 frontend tests pass
+
+#### Files Modified
+
+**Backend:**
+- `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs` — Reordered cleanup sequence in `DeleteMember`
+
+**Frontend:**
+- `src/SharedSpaces.Client/src/features/admin/admin-api.ts` — Extended `throwForFailedResponse` with `includeConflictMessage` option, updated 404 message
+- `src/SharedSpaces.Client/src/features/admin/admin-view.ts` — Pass `includeConflictMessage: true` when calling `removeMember()`
+
+# Decision: Correlated Subquery for MemberResponse ItemCount
+
+**Author:** Kaylee (Backend Dev)
+**Date:** 2026-03-22
+
+## Context
+
+The admin panel needs to show how many items each member has created in a space. We needed to add `ItemCount` to `MemberResponse`.
+
+## Decision
+
+Used a correlated subquery (`db.SpaceItems.Count(item => item.MemberId == member.Id && item.SpaceId == spaceId)`) inside the LINQ `.Select()` projection rather than loading a navigation property or performing a separate query.
+
+## Rationale
+
+- EF Core translates this to a single SQL query with a scalar subquery — no N+1 problem.
+- No new navigation properties or entity changes needed.
+- Keeps the query self-contained in the endpoint without additional joins or groupings.
+- Consistent with the existing read-only `AsNoTracking()` pattern used in the GetMembers endpoint.
+
+## Impact
+
+- `MemberResponse` record gains an `int ItemCount` parameter (positional record — any code constructing this record must be updated).
+- All 108 existing tests pass without modification.

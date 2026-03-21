@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
+using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -23,6 +24,9 @@ public static class SpaceEndpoints
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
         group.MapPost("/{spaceId:guid}/members/{memberId:guid}/revoke", RevokeMember)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
+        group.MapDelete("/{spaceId:guid}/members/{memberId:guid}", DeleteMember)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
         return app;
@@ -104,7 +108,12 @@ public static class SpaceEndpoints
             .AsNoTracking()
             .Where(member => member.SpaceId == spaceId)
             .OrderByDescending(member => member.JoinedAt)
-            .Select(member => new MemberResponse(member.Id, member.DisplayName, member.JoinedAt, member.IsRevoked))
+            .Select(member => new MemberResponse(
+                member.Id,
+                member.DisplayName,
+                member.JoinedAt,
+                member.IsRevoked,
+                db.SpaceItems.Count(item => item.MemberId == member.Id && item.SpaceId == spaceId)))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(response);
@@ -137,6 +146,70 @@ public static class SpaceEndpoints
         {
             member.IsRevoked = true;
             await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> DeleteMember(
+        Guid spaceId,
+        Guid memberId,
+        AppDbContext db,
+        IFileStorage fileStorage,
+        ISpaceHubNotifier hubNotifier,
+        CancellationToken cancellationToken)
+    {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
+        var member = await db.SpaceMembers
+            .SingleOrDefaultAsync(existingMember => existingMember.SpaceId == spaceId && existingMember.Id == memberId, cancellationToken);
+
+        if (member is null)
+        {
+            return Results.NotFound(new { Error = "Member not found" });
+        }
+
+        if (!member.IsRevoked)
+        {
+            return Results.Conflict(new { Error = "Member must be revoked before deletion" });
+        }
+
+        var items = await db.SpaceItems
+            .Where(item => item.MemberId == memberId && item.SpaceId == spaceId)
+            .ToListAsync(cancellationToken);
+
+        var fileItemIds = items
+            .Where(item => string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Id)
+            .ToList();
+
+        db.SpaceItems.RemoveRange(items);
+        db.SpaceMembers.Remove(member);
+        await db.SaveChangesAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var itemDeletedEvent = new ItemDeletedEvent(item.Id, spaceId);
+            await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
+        }
+
+        foreach (var fileItemId in fileItemIds)
+        {
+            try
+            {
+                await fileStorage.DeleteAsync(spaceId, fileItemId, cancellationToken);
+            }
+            catch
+            {
+                // Best-effort file cleanup
+            }
         }
 
         return Results.NoContent();

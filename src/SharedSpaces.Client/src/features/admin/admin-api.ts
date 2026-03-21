@@ -16,6 +16,7 @@ export interface MemberResponse {
   displayName: string;
   joinedAt: string;
   isRevoked: boolean;
+  itemCount: number;
 }
 
 export interface InvitationListResponse {
@@ -41,6 +42,7 @@ type BadRequestResponse = {
 type RequestErrorOptions = {
   notFoundMessage?: string;
   includeBadRequestMessage?: boolean;
+  includeConflictMessage?: boolean;
 };
 
 function normalizeApiBaseUrl(apiBaseUrl: string) {
@@ -77,6 +79,11 @@ async function throwForFailedResponse(
 
   if (response.status === 404 && options.notFoundMessage) {
     throw new AdminApiError(options.notFoundMessage, 404);
+  }
+
+  if (response.status === 409 && options.includeConflictMessage) {
+    const error = (await response.json().catch(() => ({}))) as { Error?: string; message?: string };
+    throw new AdminApiError(error.Error || error.message || 'Conflict', 409);
   }
 
   throw new AdminApiError(`Server error: ${response.statusText}`, response.status);
@@ -219,6 +226,33 @@ export async function listInvitations(
 
     await throwForFailedResponse(response, { notFoundMessage: 'Space not found' });
     return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function removeMember(
+  apiBaseUrl: string,
+  adminSecret: string,
+  spaceId: string,
+  memberId: string,
+): Promise<void> {
+  try {
+    const base = normalizeApiBaseUrl(apiBaseUrl);
+    const encodedSpaceId = encodeURIComponent(spaceId);
+    const encodedMemberId = encodeURIComponent(memberId);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodedSpaceId}/members/${encodedMemberId}`,
+      {
+        method: 'DELETE',
+        headers: createAdminHeaders(adminSecret),
+      },
+    );
+
+    await throwForFailedResponse(response, {
+      notFoundMessage: 'Space or member not found',
+      includeConflictMessage: true,
+    });
   } catch (error) {
     wrapNetworkError(error);
   }

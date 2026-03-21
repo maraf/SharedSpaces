@@ -71,6 +71,20 @@ async function seedSpace(name: string) {
     body: JSON.stringify({ pin: pin2, displayName: 'Bob' }),
   });
 
+  // Revoke Bob so the members modal shows both active and revoked states
+  const members: { id: string; displayName: string }[] = await apiCall(
+    `${SERVER_URL}/v1/spaces/${space.id}/members`,
+    { headers: { 'X-Admin-Secret': ADMIN_SECRET } },
+  );
+  const bob = members.find((m) => m.displayName === 'Bob');
+  if (bob) {
+    const revokeRes = await fetch(`${SERVER_URL}/v1/spaces/${space.id}/members/${bob.id}/revoke`, {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': ADMIN_SECRET },
+    });
+    if (!revokeRes.ok) throw new Error(`Revoke failed: ${revokeRes.status}`);
+  }
+
   // Add sample text items — enough to overflow and show the scrollbar
   for (const content of [
     'Welcome to SharedSpaces! 🚀',
@@ -250,6 +264,21 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
       await capture(page, 'admin-spaces', vp);
+    });
+
+    test(`admin view members modal - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await navigateToAdminSignedIn(page);
+
+      // Click the "Members (N)" button on the first space card to open the modal
+      const membersButton = page.locator('button', { hasText: /Members\s*\(\d+\)/ }).first();
+      await membersButton.click();
+      await page.waitForSelector('[role="dialog"]');
+      await page.waitForTimeout(500);
+      await capture(page, 'admin-members', vp);
     });
 
     test(`space view - delete confirmation - ${vp.name}`, async ({ page }) => {

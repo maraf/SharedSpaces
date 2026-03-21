@@ -15,6 +15,7 @@ import {
   listInvitations,
   listMembers,
   listSpaces,
+  removeMember,
   revokeMember,
   type InvitationListResponse,
   type InvitationResponse,
@@ -35,6 +36,7 @@ type SpaceCardState = {
   membersError: string;
   pendingInvitationDeletions: Record<string, boolean>;
   pendingMemberRevocations: Record<string, boolean>;
+  pendingMemberRemovals: Record<string, boolean>;
 };
 
 type ModalState = {
@@ -115,6 +117,7 @@ export class AdminView extends BaseElement {
       membersError: '',
       pendingInvitationDeletions: {},
       pendingMemberRevocations: {},
+      pendingMemberRemovals: {},
     };
   }
 
@@ -481,6 +484,69 @@ export class AdminView extends BaseElement {
           error instanceof Error ? error.message : 'Failed to revoke member',
         pendingMemberRevocations: this.getPendingState(
           latestState.pendingMemberRevocations,
+          memberId,
+          false,
+        ),
+      });
+    }
+  };
+
+  private handleRemoveMember = async (spaceId: string, memberId: string) => {
+    if (!this.adminSecret || !this.adminServerUrl) return;
+
+    if (
+      !confirm(
+        'Permanently remove this member and all their items? This cannot be undone.',
+      )
+    ) {
+      return;
+    }
+
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const currentState = this.getSpaceCardState(spaceId);
+
+    this.updateSpaceCardState(spaceId, {
+      membersError: '',
+      pendingMemberRemovals: this.getPendingState(
+        currentState.pendingMemberRemovals,
+        memberId,
+        true,
+      ),
+    });
+
+    try {
+      await removeMember(serverUrl, adminSecret, spaceId, memberId);
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        members: latestState.members.filter((member) => member.id !== memberId),
+        pendingMemberRemovals: this.getPendingState(
+          latestState.pendingMemberRemovals,
+          memberId,
+          false,
+        ),
+      });
+    } catch (error) {
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
+        return;
+      }
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        membersError:
+          error instanceof Error ? error.message : 'Failed to remove member',
+        pendingMemberRemovals: this.getPendingState(
+          latestState.pendingMemberRemovals,
           memberId,
           false,
         ),
@@ -899,7 +965,8 @@ export class AdminView extends BaseElement {
     return html`
       <div class="divide-y divide-slate-800">
         ${state.members.map((member) => {
-          const isPending = !!state.pendingMemberRevocations[member.id];
+          const isRevokePending = !!state.pendingMemberRevocations[member.id];
+          const isRemovePending = !!state.pendingMemberRemovals[member.id];
           return html`
             <div class="flex items-center justify-between gap-3 py-3">
               <div class="min-w-0">
@@ -922,20 +989,29 @@ export class AdminView extends BaseElement {
                     : null}
                 </div>
                 <p class="text-xs text-slate-500">
-                  Joined ${this.formatDate(member.joinedAt)}
+                  Joined ${this.formatDate(member.joinedAt)} · ${member.itemCount} ${member.itemCount === 1 ? 'item' : 'items'}
                 </p>
               </div>
 
               ${member.isRevoked
-                ? null
+                ? html`
+                    <button
+                      type="button"
+                      @click=${() => this.handleRemoveMember(spaceId, member.id)}
+                      ?disabled=${isRemovePending}
+                      class="shrink-0 rounded-full border border-slate-700 bg-slate-800/40 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:border-red-700 hover:bg-red-950/40 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      ${isRemovePending ? 'Removing…' : 'Remove'}
+                    </button>
+                  `
                 : html`
                     <button
                       type="button"
                       @click=${() => this.handleRevokeMember(spaceId, member.id)}
-                      ?disabled=${isPending}
+                      ?disabled=${isRevokePending}
                       class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      ${isPending ? 'Revoking…' : 'Revoke'}
+                      ${isRevokePending ? 'Revoking…' : 'Revoke'}
                     </button>
                   `}
             </div>
