@@ -280,7 +280,7 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 **Coordinated by:** Scribe  
 **Agents:** Wash (fix), Zoe (tests), Coordinator (lint)
 
-**Summary:** Fixed connection dot not updating when navigating away from space-view. App-shell now uses willUpdate() to proactively reset connection state when view changes from 'space' to other routes. Zoe added comprehensive 14-test suite validating three-layer connection cleanup lifecycle (SignalR client → space-view → app-shell). Coordinator fixed eslint config to permit ny in test files per pre-existing convention.
+**Summary:** Fixed connection dot not updating when navigating away from space-view. App-shell now uses willUpdate() to proactively reset connection state when view changes from 'space' to other routes. Zoe added comprehensive 14-test suite validating three-layer connection cleanup lifecycle (SignalR client → space-view → app-shell). Coordinator fixed eslint config to permit any in test files per pre-existing convention.
 
 **Key Pattern:** willUpdate() in parent components provides a proactive fallback for cleanup when child elements are removed from DOM, because Lit doesn't fire reactive updates on disconnected elements.
 

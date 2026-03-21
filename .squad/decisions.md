@@ -1182,8 +1182,6 @@ Replaced the separate status pill with a small colored **dot inside each space n
 - **All:** The `connection-state-change` event is now part of the space-view → app-shell contract.
 
 
-# Connection Cleanup Test Strategy
-
 # Client Version Injection via Git Tag
 
 **Decision Date:** 2026-03-21
