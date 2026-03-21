@@ -80,7 +80,9 @@ export class SpaceView extends BaseElement {
   private handleOffline = () => { this.isOnline = false; };
   private handleVisibilityChange = () => {
     if (document.visibilityState === 'visible' && this.connectionState === 'disconnected') {
-      this.startSignalR();
+      this.startSignalR().catch((error) => {
+        console.error('Failed to start SignalR after visibility change', error);
+      });
     }
   };
   private handleSwMessage = (event: MessageEvent) => {
