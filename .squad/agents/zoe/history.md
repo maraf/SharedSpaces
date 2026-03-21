@@ -658,3 +658,33 @@ When implementing the auto-grow feature:
 - Tests cover: happy path, auth failures (invalid + missing secret), 404s (member + space not found), idempotent un-revoke of active member, JWT access restoration after un-revoke, member data preservation through revoke/un-revoke cycle
 - All 108 existing tests still pass; 8 new tests fail as expected (endpoint not yet implemented by Kaylee)
 - Helper method `UnrevokeMemberAsync` added alongside `RevokeMemberAsync` in test infrastructure section
+
+## Team Update (2026-03-21 — Issue #92 Un-revoke Member — Complete)
+
+**Status:** ✅ Done
+**Commit:** 8bc868d (Kaylee), 2d44723 (Wash), 8590338 (Zoe), adb78df (Coordinator)
+
+**Kaylee's Work:**
+- Implemented `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` endpoint
+- Mirrors revoke pattern: admin-only, idempotent (204 for already-active), no schema changes
+- JWT restoration: existing tokens become valid immediately via per-request IsRevoked check
+- All 116 tests pass
+
+**Wash's Work:**
+- Added `unrevokeMember()` API function to admin-api.ts
+- Added UI "Restore" button (emerald) for revoked members in admin-view.ts
+- Restore + Remove buttons appear side-by-side with mutual disabling during pending operations
+- Button label "Restore" chosen for clarity; emerald color signals constructive action
+
+**Zoe's Work:**
+- Wrote 8 integration tests for un-revoke endpoint covering: happy path, auth, 404s, idempotency, JWT restoration, data preservation
+- Tests expect: 204 NoContent on success and for already-active (idempotent), 401 for missing/invalid auth, 404 for missing space/member
+- All tests pass; no regressions
+
+**Coordinator Work:**
+- Fixed endpoint naming mismatch: `/reinstate` → `/unrevoke` to align server with client tests and UI
+
+**Cross-Team Learning:**
+- Endpoint contract for un-revoke mirrors revoke exactly (status codes, error responses, idempotency)
+- JWT restoration is automatic — no token refresh needed after un-revoke
+- UI pattern extends existing member action patterns (pending state, mutual button disabling, color coding)
