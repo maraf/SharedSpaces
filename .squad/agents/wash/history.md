@@ -622,3 +622,12 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - Append secondary stats (e.g., item count) to existing metadata lines using a middle dot separator (`·`)
 - Use singular/plural ternary for counts: `${n} ${n === 1 ? 'item' : 'items'}`
 - Keeps layout stable — no extra rows or elements needed for simple numeric annotations
+
+## Learnings — Issue #92 (Un-revoke Member)
+
+- **Un-revoke API pattern**: Mirrors revoke exactly — `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` with `X-Admin-Secret` header. The endpoint convention is `/{action}` suffix on the member resource.
+- **Pending state pattern**: Each member action gets its own `pendingMember{Action}` record in `SpaceCardState`. The `getPendingState()` helper adds/removes keys from a `Record<string, boolean>` immutably.
+- **Revoked member UI**: When `isRevoked` is true, the member row shows strikethrough name + "Revoked" badge + action buttons. Now shows both "Restore" (emerald) and "Remove" (slate/red) side by side.
+- **Button mutual disabling**: When one action is pending on a revoked member, both Restore and Remove buttons are disabled to prevent conflicting operations.
+- **Key files**: `admin-api.ts` (API functions), `admin-view.ts` (1160+ line Lit component with modal-based member management).
+- **Pre-existing test errors**: `space-view.test.ts` has ~25 pre-existing TS errors unrelated to admin code — don't let those block you.

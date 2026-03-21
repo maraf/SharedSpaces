@@ -649,3 +649,12 @@ When implementing the auto-grow feature:
 - To verify computed item counts, create items via `UpsertTextItemAsync`/`UpsertFileItemAsync` with a member JWT, then call `ListMembersAsync` and assert `ItemCount` matches the number of items created.
 - Existing member tests (ListMembers, RevokeMember) that create members without items should assert `ItemCount == 0` to confirm the default/empty case.
 - DeleteMember tests already verify the member is absent from the list post-removal, which implicitly covers the item count disappearing — no separate ItemCount assertion needed there.
+
+## Team Updates (2026-03-20 — Issue #92)
+
+**Zoe wrote 8 integration tests for un-revoke member endpoint (tests-first):**
+- Endpoint pattern: `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` (mirrors revoke)
+- Admin-protected via X-Admin-Secret header
+- Tests cover: happy path, auth failures (invalid + missing secret), 404s (member + space not found), idempotent un-revoke of active member, JWT access restoration after un-revoke, member data preservation through revoke/un-revoke cycle
+- All 108 existing tests still pass; 8 new tests fail as expected (endpoint not yet implemented by Kaylee)
+- Helper method `UnrevokeMemberAsync` added alongside `RevokeMemberAsync` in test infrastructure section

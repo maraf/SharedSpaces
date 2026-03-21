@@ -26,7 +26,7 @@ public static class SpaceEndpoints
         group.MapPost("/{spaceId:guid}/members/{memberId:guid}/revoke", RevokeMember)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
-        group.MapPost("/{spaceId:guid}/members/{memberId:guid}/reinstate", ReinstateMember)
+        group.MapPost("/{spaceId:guid}/members/{memberId:guid}/unrevoke", ReinstateMember)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
         group.MapDelete("/{spaceId:guid}/members/{memberId:guid}", DeleteMember)

@@ -247,3 +247,13 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - **Learnings:** DELETE operations require revocation check (409 if not revoked), file cleanup before DB removal, SignalR notification after DB commit
 - **File:** `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs` (added imports for IFileStorage and ISpaceHubNotifier)
 - **Build:** Verified with `dotnet build --no-restore` — successful compilation
+
+### Issue #92: Un-revoke (Reinstate) Space Member
+- **Endpoint:** `POST /v1/spaces/{spaceId:guid}/members/{memberId:guid}/reinstate`
+- **Admin-only:** Uses `AdminAuthenticationFilter`, matching the revoke endpoint
+- **Behavior:** Sets `IsRevoked = false` on the member; idempotent (no-op if already active)
+- **Validation:** Returns 404 if space or member not found; returns 204 No Content on success
+- **Pattern:** Exact mirror of `RevokeMember` handler — same space-exists check, member lookup, conditional save
+- **No schema changes needed:** `SpaceMember.IsRevoked` is a simple boolean toggle
+- **File:** `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`
+- **Tests:** All 108 existing tests pass after change
