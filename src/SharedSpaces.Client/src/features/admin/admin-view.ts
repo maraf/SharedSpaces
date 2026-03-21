@@ -3,6 +3,11 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
 import {
+  addAdminServerUrl,
+  getAdminServerUrls,
+  removeAdminServerUrl,
+} from '../../lib/admin-url-storage';
+import {
   AdminApiError,
   createInvitation,
   createSpace,
@@ -44,7 +49,7 @@ export class AdminView extends BaseElement {
 
   @state() private adminSecret: string | null = null;
   @state() private adminServerUrl: string | null = null;
-  @state() private serverUrlInput = '/';
+  @state() private serverUrlInput = 'https://';
   @state() private secretInput = '';
   @state() private spaces: SpaceResponse[] = [];
   @state() private newSpaceName = '';
@@ -53,6 +58,9 @@ export class AdminView extends BaseElement {
   @state() private isConnecting = false;
   @state() private errorMessage = '';
 
+  @state() private savedServerUrls: string[] = [];
+  @state() private showUrlDropdown = false;
+
   @state() private spaceCardState: Record<string, SpaceCardState> = {};
   @state() private activeModal: ModalState = null;
 
@@ -60,21 +68,26 @@ export class AdminView extends BaseElement {
     if (
       changedProperties.has('apiBaseUrl') &&
       !this.adminServerUrl &&
-      (this.serverUrlInput === '/' || !this.serverUrlInput.trim())
+      (this.serverUrlInput === 'https://' || !this.serverUrlInput.trim())
     ) {
       this.serverUrlInput = this.getDefaultServerUrl();
     }
   }
 
+  override connectedCallback() {
+    super.connectedCallback();
+    this.savedServerUrls = getAdminServerUrls();
+  }
+
   private normalizeServerUrl(serverUrl: string) {
     const trimmed = serverUrl.trim();
-    if (!trimmed) return '';
+    if (!trimmed) return 'https://';
     if (trimmed === '/') return '/';
     return trimmed.replace(/\/+$/, '');
   }
 
   private getDefaultServerUrl() {
-    return this.normalizeServerUrl(this.apiBaseUrl) || '/';
+    return this.normalizeServerUrl(this.apiBaseUrl) || 'https://';
   }
 
   private formatDate(value: string) {
@@ -268,6 +281,9 @@ export class AdminView extends BaseElement {
       this.serverUrlInput = serverUrl;
       this.setSpaces(spaces);
       this.errorMessage = '';
+      // Save successful URL to history
+      addAdminServerUrl(serverUrl);
+      this.savedServerUrls = getAdminServerUrls();
       void this.loadSpaceCollectionsForAll(spaces, serverUrl, secret);
     } catch (error) {
       this.adminSecret = null;
@@ -293,6 +309,30 @@ export class AdminView extends BaseElement {
     this.newSpaceQuotaMb = '';
     this.spaceCardState = {};
     this.errorMessage = '';
+  };
+
+  private handleUrlSelect = (url: string) => {
+    this.serverUrlInput = url;
+    this.showUrlDropdown = false;
+  };
+
+  private handleUrlRemove = (e: Event, url: string) => {
+    e.stopPropagation();
+    removeAdminServerUrl(url);
+    this.savedServerUrls = getAdminServerUrls();
+  };
+
+  private handleUrlInputFocus = () => {
+    if (this.savedServerUrls.length > 0) {
+      this.showUrlDropdown = true;
+    }
+  };
+
+  private handleUrlInputBlur = () => {
+    // Small delay to allow click events on dropdown items to register
+    setTimeout(() => {
+      this.showUrlDropdown = false;
+    }, 200);
   };
 
   private handleCreateSpace = async (e: Event) => {
@@ -571,15 +611,50 @@ export class AdminView extends BaseElement {
               >
                 Server URL
               </label>
-              <input
-                id="admin-server-url"
-                type="text"
-                .value=${this.serverUrlInput}
-                @input=${(e: InputEvent) =>
-                  (this.serverUrlInput = (e.target as HTMLInputElement).value)}
-                placeholder="https://api.example.com"
-                class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              />
+              <div class="relative">
+                <input
+                  id="admin-server-url"
+                  type="text"
+                  .value=${this.serverUrlInput}
+                  @input=${(e: InputEvent) =>
+                    (this.serverUrlInput = (e.target as HTMLInputElement).value)}
+                  @focus=${this.handleUrlInputFocus}
+                  @blur=${this.handleUrlInputBlur}
+                  placeholder="https://api.example.com"
+                  class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+                />
+                ${this.showUrlDropdown && this.savedServerUrls.length > 0
+                  ? html`
+                      <div
+                        class="absolute z-10 mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 shadow-lg"
+                      >
+                        ${this.savedServerUrls.map(
+                          (url) => html`
+                            <div
+                              class="flex items-center justify-between border-b border-slate-700 last:border-b-0"
+                            >
+                              <button
+                                type="button"
+                                @click=${() => this.handleUrlSelect(url)}
+                                class="flex-1 px-4 py-3 text-left text-sm text-slate-50 hover:bg-slate-700/50"
+                              >
+                                ${url}
+                              </button>
+                              <button
+                                type="button"
+                                @click=${(e: Event) => this.handleUrlRemove(e, url)}
+                                class="px-3 py-3 text-slate-400 hover:text-red-400"
+                                title="Remove from history"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          `,
+                        )}
+                      </div>
+                    `
+                  : null}
+              </div>
             </div>
 
             <div class="space-y-2">
