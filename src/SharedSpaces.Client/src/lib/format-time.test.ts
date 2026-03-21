@@ -147,18 +147,23 @@ describe('formatRelativeTime', () => {
     it('handles future dates (clock skew)', () => {
       mockNow('2024-03-19T14:30:00');
       const date = new Date('2024-03-20T14:30:00');
-      // Future date should show as negative days, format depends on implementation
-      // Based on the logic, -1 day would be < 7, so it would return "-1d ago"
+      // Small future offsets (e.g., from clock skew) should not show as negative "ago"
+      // Clamp to "Today" instead of rendering "-1d ago"
       const result = formatRelativeTime(date);
-      expect(result).toBe('-1d ago');
+      expect(result).toBe('Today');
     });
 
     it('handles dates far in the future', () => {
       mockNow('2024-03-19T14:30:00');
       const date = new Date('2024-03-30T14:30:00');
-      // -11 days is < 7 (negative), so it returns "-11d ago"
+      // Dates sufficiently far in the future should use the short date format
       const result = formatRelativeTime(date);
-      expect(result).toBe('-11d ago');
+      expect(result).toBe('Mar 30');
+    });
+
+    it('returns empty string for invalid dates', () => {
+      const date = new Date('invalid');
+      expect(formatRelativeTime(date)).toBe('');
     });
 
     it('handles same exact moment (0ms difference)', () => {

@@ -277,6 +277,20 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 
 ## Team Update: Connection Dot Navigation Fix (2026-03-20)
 
+## Team Update: Per-Space Upload Quota (2026-03-21, Issue #72)
+
+**Kaylee + Wash + Zoe completed per-space upload quota feature:**
+
+- **Kaylee (Backend):** Implemented `Space.MaxUploadSize` property (nullable long), EF migration, quota validation in create endpoint (rejects ≤ 0 or > 100MB), and enforcement in upload endpoint (resolves `maxUploadSize ?? serverDefault`). API contract: `CreateSpaceRequest.MaxUploadSize`, `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`. Commit: 78909a3.
+
+- **Wash (Frontend):** Updated `admin-api.ts` types to match backend contract. Added quota input field (MB-based, `Math.round(parseFloat(mb) * 1024 * 1024)` conversion) to create form with two-row layout for mobile responsiveness. Space list displays effective quota with "(default)" label when `maxUploadSize` is null. Commit: 326c4b9.
+
+- **Zoe (Tester):** Wrote 9 integration tests — 6 admin endpoint tests (quota validation, rejection, display) and 3 upload enforcement tests (per-space limit, fallback to server default). Updated test DTOs. All 100 tests passing. Commit: d5e1d0c.
+
+**Key Design Decision:** Nullable column distinguishes "not set" from "explicitly set to default". Server default (100MB) acts as ceiling — prevents quotas exceeding storage capacity. Resolved in two places: API response (display) and upload validation (enforcement).
+
+**Status:** ✅ Feature complete and tested. Recorded in `.squad/decisions.md`.
+
 **Coordinated by:** Scribe  
 **Agents:** Wash (fix), Zoe (tests), Coordinator (lint)
 
@@ -322,6 +336,21 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Both InvitationEndpoints.CreateInvitation and TokenEndpoints.ExchangePinForToken build serverUrl from httpRequest.Scheme and httpRequest.Host; forwarded header tests must send X-Forwarded-Proto and X-Forwarded-Host via HttpRequestMessage.Headers.Add() since HttpClient extension methods don't support custom headers.
 - ForwardedHeadersTests.cs covers 8 integration tests for issue #69: 4 for invitation URL generation and 4 for token server_url JWT claim, each testing X-Forwarded-Proto alone, X-Forwarded-Host alone, both together, and no-forwarded-headers default.
 - Current ForwardedHeadersOptions in Program.cs only enables XForwardedFor | XForwardedProto; XForwardedHost support requires adding ForwardedHeaders.XForwardedHost to the flags — tests for X-Forwarded-Host will fail until that's done.
+
+## Team Updates (Issue #72)
+
+**Zoe completed per-space upload quota tests:** Wrote 9 integration tests covering the full quota feature:
+- **AdminEndpointTests.cs (6 tests):** Space creation with explicit quota (201 + fields), without quota (defaults), exceeds server limit (400), zero (400), negative (400), list spaces includes quota fields
+- **ItemEndpointTests.cs (3 tests):** Upload within per-space quota (201), upload exceeding per-space quota (413), upload without per-space quota falls back to server default (413)
+- Updated test DTOs: `CreateSpaceRequest` and `SpaceResponse` now include `MaxUploadSize`/`EffectiveMaxUploadSize` fields; `CreateSpaceAsync` helper accepts optional `maxUploadSize`
+- Updated `TestWebApplicationFactory.CreateSpaceAsync` in ItemEndpointTests to accept optional `maxUploadSize` parameter for space seeding
+- All 100 tests passing (91 existing + 9 new). Branch: `squad/72-per-space-upload-quota`, commit: d5e1d0c
+
+## Learnings
+
+- Per-space quota tests need two distinct patterns: (1) AdminEndpointTests use default server quota (100MB) and test via HTTP API creation, (2) ItemEndpointTests seed spaces with `MaxUploadSize` directly via factory helper and use default or custom `maxSpaceQuotaBytes` constructor param to control server default.
+- `SpaceResponse` now includes `MaxUploadSize` (nullable) and `EffectiveMaxUploadSize` (always populated); effective = space-specific ?? server default. Both fields returned from POST /v1/spaces and GET /v1/spaces.
+- Upload quota enforcement uses `space.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes` — per-space quota takes priority when set, otherwise falls back to server-wide `Storage:MaxSpaceQuotaBytes` config (default 104,857,600 = 100MB).
 
 ## Learnings (Issue #74 - Relative Time Formatting Tests)
 
@@ -374,6 +403,10 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - New describe block `'visibility change reconnect'` inserted before final closing brace
 - All 43 tests pass (including 7 new visibility tests)
 - Commit message includes issue reference and Co-authored-by trailer
+**File location and test execution:**
+- Client lib tests live co-located: `src/SharedSpaces.Client/src/lib/format-time.test.ts` next to `format-time.ts`
+- Run single test file: `cd src/SharedSpaces.Client && npx vitest run src/lib/format-time.test.ts`
+- Vitest configured in package.json: `"test": "vitest run"`, `"test:watch": "vitest"`
 
 ## Learnings (2026-03-21)
 

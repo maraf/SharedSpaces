@@ -287,6 +287,20 @@ Finalized dead space removal UI implementation:
 
 - **CI/CD workflows for client (2026-03-21):** Created `client-publish.yml` and `client-deploy.yml` workflows. Updated `vite.config.ts` to prefer `process.env.VITE_APP_VERSION` over `pkg.version` for version injection — package.json stays at `0.0.0`. Publish workflow: triggers on `client-*` tags, builds with `--base ./` (relative paths) and VITE_APP_VERSION from tag, zips dist/, uploads to GH Release (creates release if it doesn't exist, uploads to existing release otherwise). Deploy workflow: manual `workflow_dispatch` with `tag` input, downloads prebuilt zip from GH Release, asserts exactly one zip, unzips, and deploys via `actions/upload-pages-artifact` + `actions/deploy-pages`. No Node.js, no npm, no CNAME detection at deploy time. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`, `src/SharedSpaces.Client/vite.config.ts`.
 
+## Team Update: Per-Space Upload Quota (2026-03-21, Issue #72)
+
+**Kaylee + Wash + Zoe completed per-space upload quota feature:**
+
+- **Kaylee (Backend):** Implemented `Space.MaxUploadSize` property (nullable long), EF migration, quota validation in create endpoint (rejects ≤ 0 or > 100MB), and enforcement in upload endpoint (resolves `maxUploadSize ?? serverDefault`). API contract: `CreateSpaceRequest.MaxUploadSize`, `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`. Commit: 78909a3.
+
+- **Wash (Frontend):** Updated `admin-api.ts` types to match backend contract. Added quota input field (MB-based, `Math.round(parseFloat(mb) * 1024 * 1024)` conversion) to create form with two-row layout for mobile responsiveness. Space list displays effective quota with "(default)" label when `maxUploadSize` is null. Commit: 326c4b9.
+
+- **Zoe (Tester):** Wrote 9 integration tests — 6 admin endpoint tests (quota validation, rejection, display) and 3 upload enforcement tests (per-space limit, fallback to server default). Updated test DTOs. All 100 tests passing. Commit: d5e1d0c.
+
+**Key Design Decision:** Nullable column distinguishes "not set" from "explicitly set to default". Server default (100MB) acts as ceiling — prevents quotas exceeding storage capacity. Resolved in two places: API response (display) and upload validation (enforcement).
+
+**Status:** ✅ Feature complete and tested. Recorded in `.squad/decisions.md`.
+
 - **Build-once-deploy-anywhere refactor (2025-07-17, PR #61):** Reworked `client-publish.yml` and `client-deploy.yml` to follow "build once, deploy anywhere." Publish now builds with `--base ./` (relative asset paths), zips, and uploads to GH Release. Deploy downloads the prebuilt zip via `gh release download` instead of rebuilding from source — no Node.js, no npm, no CNAME detection. Relative base paths (`./`) work at any deployment path (custom domain root or `/repo-name/` subpath), eliminating the CNAME-sniffing logic entirely. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`. Decision doc: `.squad/decisions/inbox/wash-deploy-prebuilt.md`.
 
 - **Connection dot color behavior refinement:** Improved dot color transitions to avoid the jarring gray→red→green flash when selecting a space, and the misleading red dot on non-selected spaces. Three coordinated changes:
@@ -361,6 +375,20 @@ Applied review feedback from Copilot reviewer and Marek:
 
 - **Vite `?raw` imports for SVG icons:** Use `import svg from 'package/icon.svg?raw'` to get raw SVG strings at build time. Pair with `unsafeHTML` from Lit to render them. Requires `declare module '*.svg?raw'` in `vite-env.d.ts` for TypeScript. String-replace width/height attributes before rendering to control sizing. This is the preferred pattern over inline SVG paths when icons come from an npm package.
 - **`unsafeHTML` safety model:** Only safe for trusted build-time content (npm packages). Never use for user-supplied strings. This is a Lit directive, not a security bypass — it just opts out of Lit's template escaping.
+- **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
+
+### Issue #72: Per-space upload quota UI (2026-03-21)
+
+**Task:** Add upload quota input to admin create-space form; show effective quota in space list.
+
+**Changes:**
+- `admin-api.ts` — Added `maxUploadSize: number | null` and `effectiveMaxUploadSize: number` to `SpaceResponse`. Added optional `maxUploadSize` param to `createSpace()`.
+- `admin-view.ts` — Added `newSpaceQuotaMb` state for MB input. Create form now has a second row with quota input (`w-40`, `type="number"`) and "Default: 100 MB" hint. Space cards show effective quota with "(default)" suffix when no custom value set.
+
+**Patterns:**
+- MB-to-bytes conversion: `Math.round(parseFloat(mb) * 1024 * 1024)` on submit. Input uses `type="number"` with `step="any"` for decimal MB values.
+- The form layout changed from single-row `flex` to `space-y-3` with two rows to accommodate the quota field without overflowing on mobile.
+- `formatBytesAsMb()` helper added for consistent byte→MB display across the view.
 - **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
 
 - **Day-based time labels (Issue #74, 2026-03-20):** Refactored duplicate relative time formatting logic from `space-view.ts` and `app-shell.ts` into a shared utility `src/SharedSpaces.Client/src/lib/format-time.ts`. New format uses calendar day comparison (not 24-hour diff) for better UX:
