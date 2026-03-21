@@ -870,7 +870,7 @@ export class SpaceView extends BaseElement {
 
   private renderUploadArea() {
     return html`
-      <section class="space-y-4">
+      <section class="space-y-3">
         <!-- Compact compose box -->
         <div
           @drop=${this.handleDrop}
@@ -965,8 +965,6 @@ export class SpaceView extends BaseElement {
             </p>`
           : nothing}
       </section>
-
-      <hr class="border-slate-800/60" />
     `;
   }
 
