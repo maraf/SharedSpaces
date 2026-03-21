@@ -161,6 +161,11 @@ describe('formatRelativeTime', () => {
       expect(result).toBe('Mar 30');
     });
 
+    it('returns empty string for invalid dates', () => {
+      const date = new Date('invalid');
+      expect(formatRelativeTime(date)).toBe('');
+    });
+
     it('handles same exact moment (0ms difference)', () => {
       mockNow('2024-03-19T14:30:00.000');
       const date = new Date('2024-03-19T14:30:00.000');
