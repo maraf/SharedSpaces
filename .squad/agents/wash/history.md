@@ -316,3 +316,19 @@ Redesigned item cards to improve visual hierarchy and usability:
 - `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — Redesigned card layout
 
 **Design Impact:** Cards now provide visual file type recognition at a glance, improving scan-ability in mobile context. Icons use semantic colors that map to common file type conventions (blue = docs, green = spreadsheets, red = PDFs, etc.).
+
+### PR #64 Review Feedback (2026-03-20)
+
+Applied review feedback from Copilot reviewer and Marek:
+
+1. **bootstrap-icons `?raw` imports:** Replaced inline SVG paths in `file-icons.ts` with Vite `?raw` imports from the `bootstrap-icons` npm package. Each SVG is imported at build time and rendered using `unsafeHTML` from `lit/directives/unsafe-html.js` with width/height string replacement. Safe because the source is a trusted npm package, not user input.
+2. **Semantic `<time>` elements:** Restored `<time datetime=${item.sharedAt}>` wrappers around formatted timestamps in both `renderTextContent` and `renderFileContent`.
+3. **`aria-hidden="true"`:** Added to decorative icon wrappers in `renderTextContent`, `renderFileContent`, and pending shares list.
+4. **Code/HTML icon dedup:** Both code files and HTML/CSS categories now share the same `fileEarmarkCodeSvg` import — natural deduplication via the import.
+5. **TypeScript `?raw` module declaration:** Added `declare module '*.svg?raw'` to `vite-env.d.ts`.
+
+## Learnings
+
+- **Vite `?raw` imports for SVG icons:** Use `import svg from 'package/icon.svg?raw'` to get raw SVG strings at build time. Pair with `unsafeHTML` from Lit to render them. Requires `declare module '*.svg?raw'` in `vite-env.d.ts` for TypeScript. String-replace width/height attributes before rendering to control sizing. This is the preferred pattern over inline SVG paths when icons come from an npm package.
+- **`unsafeHTML` safety model:** Only safe for trusted build-time content (npm packages). Never use for user-supplied strings. This is a Lit directive, not a security bypass — it just opts out of Lit's template escaping.
+- **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
