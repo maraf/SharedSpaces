@@ -46,12 +46,14 @@ public static class SpaceEndpoints
         AppDbContext db,
         IOptions<StorageOptions> storageOptions)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
+        var trimmedName = request.Name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(trimmedName))
         {
             return Results.BadRequest(new { Error = "Name is required" });
         }
 
-        if (request.Name.Length > 200)
+        if (trimmedName.Length > 200)
         {
             return Results.BadRequest(new { Error = "Name must not exceed 200 characters" });
         }
@@ -73,7 +75,7 @@ public static class SpaceEndpoints
 
         var space = new Space
         {
-            Name = request.Name.Trim(),
+            Name = trimmedName,
             MaxUploadSize = request.MaxUploadSize
         };
 
