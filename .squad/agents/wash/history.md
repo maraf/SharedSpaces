@@ -661,3 +661,9 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - Endpoint contract for un-revoke mirrors revoke exactly (status codes, error responses, idempotency)
 - JWT restoration is automatic — no token refresh needed after un-revoke
 - UI pattern extends existing member action patterns (pending state, mutual button disabling, color coding)
+
+## Learnings — Mobile Members Modal Layout Fix
+
+- **Mobile stacking pattern for member rows**: The admin members modal uses `flex-col sm:flex-row` on the outer row div to stack member info above action buttons on mobile (<640px) and display them side-by-side on desktop. Buttons use `self-end sm:self-auto` to right-align on mobile while keeping natural flex alignment on desktop.
+- **Tailwind `sm:` breakpoint (640px)** is the right threshold for this modal — at 390px mobile viewport, the modal content area is ~340px, far below `sm:`, so stacking always kicks in. Desktop modals are well above 640px, so horizontal layout is preserved.
+- **Both member types handled**: Active members (single Revoke button) and revoked members (Restore + Remove button group) both use `self-end` for mobile right-alignment.

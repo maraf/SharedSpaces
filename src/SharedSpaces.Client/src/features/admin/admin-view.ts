@@ -1029,7 +1029,7 @@ export class AdminView extends BaseElement {
           const isUnrevokePending = !!state.pendingMemberUnrevocations[member.id];
           const isRemovePending = !!state.pendingMemberRemovals[member.id];
           return html`
-            <div class="flex items-center justify-between gap-3 py-3">
+            <div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <p
@@ -1056,7 +1056,7 @@ export class AdminView extends BaseElement {
 
               ${member.isRevoked
                 ? html`
-                    <div class="flex shrink-0 gap-2">
+                    <div class="flex shrink-0 gap-2 self-end sm:self-auto">
                       <button
                         type="button"
                         @click=${() => this.handleUnrevokeMember(spaceId, member.id)}
@@ -1080,7 +1080,7 @@ export class AdminView extends BaseElement {
                       type="button"
                       @click=${() => this.handleRevokeMember(spaceId, member.id)}
                       ?disabled=${isRevokePending}
-                      class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                      class="shrink-0 self-end rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
                     >
                       ${isRevokePending ? 'Revoking…' : 'Revoke'}
                     </button>
