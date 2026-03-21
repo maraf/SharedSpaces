@@ -323,6 +323,30 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - ForwardedHeadersTests.cs covers 8 integration tests for issue #69: 4 for invitation URL generation and 4 for token server_url JWT claim, each testing X-Forwarded-Proto alone, X-Forwarded-Host alone, both together, and no-forwarded-headers default.
 - Current ForwardedHeadersOptions in Program.cs only enables XForwardedFor | XForwardedProto; XForwardedHost support requires adding ForwardedHeaders.XForwardedHost to the flags — tests for X-Forwarded-Host will fail until that's done.
 
+## Learnings (Issue #74 - Relative Time Formatting Tests)
+
+**Time-dependent test patterns for client utilities:**
+- Use Vitest's `vi.useFakeTimers()` and `vi.setSystemTime()` to mock the current time, enabling deterministic testing of relative time functions that depend on `new Date()`
+- Always pair fake timers with cleanup: `vi.useRealTimers()` in `afterEach()` to prevent test pollution
+- Helper pattern: `mockNow(dateStr: string)` wrapper reduces boilerplate and ensures consistent fake timer setup across tests
+
+**Calendar day boundary testing (the critical tests):**
+- Time utilities with "Today/Yesterday" logic must test calendar day boundaries, not 24-hour periods — 11:59 PM → 12:01 AM transition is distinct from same-day time differences
+- Edge case: 23 hours 59 minutes on same calendar day = "Today"; 1 hour across midnight = "Yesterday"
+- DST, leap years, month/year boundaries all require explicit test coverage as calendar math can hide bugs in edge cases
+
+**Relative time function test suite structure (28 tests for formatRelativeTime):**
+1. **Today** block (5 tests): current moment, 1 min ago, 6 hours ago, midnight, 11:59 PM same-day
+2. **Yesterday** block (5 tests): previous calendar day, midnight boundary crossing, any time on previous day
+3. **X days ago** block (4 tests): 2d, 3d, 6d boundary cases
+4. **Short date format** (7+ days, 4 tests): 7 days, 30 days, 365 days, all 12 month abbreviations
+5. **Edge cases** (7 tests): future dates (clock skew), same exact moment (0ms), month/year/leap year boundaries, DST
+6. **Calendar day precision** (3 tests): explicit tests showing calendar math vs. 24-hour elapsed time
+
+**File location and test execution:**
+- Client lib tests live co-located: `src/SharedSpaces.Client/src/lib/format-time.test.ts` next to `format-time.ts`
+- Run single test file: `cd src/SharedSpaces.Client && npx vitest run src/lib/format-time.test.ts`
+- Vitest configured in package.json: `"test": "vitest run"`, `"test:watch": "vitest"`
 
 ## Learnings (2026-03-21)
 
