@@ -288,11 +288,11 @@ describe('getFileTypeIcon', () => {
 });
 
 describe('getTextItemIcon', () => {
-  it('returns sky-400 color for text item icon', () => {
+  it('returns slate-400 color for text item icon', () => {
     const result = getTextItemIcon();
     expect(result.svg).toBeTruthy();
     expect(typeof result.svg).toBe('object');
-    expect(result.colorClass).toBe('text-sky-400');
+    expect(result.colorClass).toBe('text-slate-400');
   });
 
   it('colorClass is a valid Tailwind text color class', () => {

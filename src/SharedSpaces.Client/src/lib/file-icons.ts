@@ -13,7 +13,7 @@ import fileEarmarkZipSvg from 'bootstrap-icons/icons/file-earmark-zip.svg?raw';
 import fileEarmarkCodeSvg from 'bootstrap-icons/icons/file-earmark-code.svg?raw';
 import fileEarmarkTextSvg from 'bootstrap-icons/icons/file-earmark-text.svg?raw';
 import fileEarmarkSvg from 'bootstrap-icons/icons/file-earmark.svg?raw';
-import chatSvg from 'bootstrap-icons/icons/chat.svg?raw';
+import blockquoteLeftSvg from 'bootstrap-icons/icons/blockquote-left.svg?raw';
 
 export interface FileIcon {
   svg: TemplateResult;
@@ -130,7 +130,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
  */
 export function getTextItemIcon(size: number = 24): FileIcon {
   return {
-    svg: renderIcon(chatSvg, size),
-    colorClass: 'text-sky-400',
+    svg: renderIcon(blockquoteLeftSvg, size),
+    colorClass: 'text-slate-400',
   };
 }
