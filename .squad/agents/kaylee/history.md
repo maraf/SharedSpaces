@@ -58,6 +58,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 - A baseline GitHub Actions CI workflow should validate `SharedSpaces.sln` on `ubuntu-latest` with .NET 9 using `dotnet restore`, `dotnet build --no-restore`, and `dotnet test --no-build` for PRs/pushes to `main`.
+- Per-space quota overrides use a nullable `long? MaxUploadSize` on the Space entity; null means "use server default from `StorageOptions.MaxSpaceQuotaBytes`". The effective quota is resolved as `space.MaxUploadSize ?? serverDefault` at both API response time and upload enforcement.
+- When generating EF Core migrations, always build first (don't use `--no-build`) to ensure the model snapshot picks up property changes.
 - The backend scaffold lives in `SharedSpaces.sln` with the API project at `src/SharedSpaces.Server/SharedSpaces.Server.csproj`, keeping server work isolated under `src/SharedSpaces.Server/`.
 - EF Core persistence is organized under `src/SharedSpaces.Server/Infrastructure/Persistence/`, with entity configurations in `Configurations/` and generated migrations in `Migrations/`.
 - SQLite stays configured through `ConnectionStrings:DefaultConnection` in `src/SharedSpaces.Server/appsettings.json`, but runtime and design-time both normalize the file path through `SqliteConnectionStringResolver` so `dotnet run` and `dotnet ef` target the same database location.
@@ -206,3 +208,27 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Workflow extracts version via parameter expansion and publishes to `ghcr.io/maraf/sharedspaces-server` with tag format `{version}-linux-x64`
 - PR #59 opened; architecture documented in `.squad/decisions.md`
 - Decision: SDK container support (declarative, no Dockerfile), tag-driven CI (explicit versioning), single RID now, extensible matrix for future multi-arch
+
+## Team Updates (2026-03-21 Continued)
+
+**Kaylee completed Issue #72 (Per-Space Upload Quota):**
+- Added nullable `MaxUploadSize` property to `Space` entity for optional per-space quota override
+- Updated `CreateSpaceRequest` to accept optional `MaxUploadSize`, validated against server default (`StorageOptions.MaxSpaceQuotaBytes`)
+- `SpaceResponse` now includes both `MaxUploadSize` (nullable, space-specific) and `EffectiveMaxUploadSize` (resolved value)
+- Upload enforcement in `ItemEndpoints.UpsertItem()` reads `space.MaxUploadSize ?? serverDefault` instead of always using global config
+- EF Core migration `AddSpaceMaxUploadSize` adds nullable INTEGER column to Spaces table
+- Branch: `squad/72-per-space-upload-quota`, commit: 78909a3
+
+## Team Update: Per-Space Upload Quota Feature Complete (2026-03-21, Issue #72)
+
+**Kaylee + Wash + Zoe completed per-space upload quota feature:**
+
+- **Kaylee (Backend):** Implemented `Space.MaxUploadSize` property (nullable long), EF migration, quota validation in create endpoint (rejects ≤ 0 or > 100MB), and enforcement in upload endpoint (resolves `maxUploadSize ?? serverDefault`). API contract: `CreateSpaceRequest.MaxUploadSize`, `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`. Commit: 78909a3.
+
+- **Wash (Frontend):** Updated `admin-api.ts` types to match backend contract. Added quota input field (MB-based, `Math.round(parseFloat(mb) * 1024 * 1024)` conversion) to create form with two-row layout for mobile responsiveness. Space list displays effective quota with "(default)" label when `maxUploadSize` is null. Commit: 326c4b9.
+
+- **Zoe (Tester):** Wrote 9 integration tests — 6 admin endpoint tests (quota validation, rejection, display) and 3 upload enforcement tests (per-space limit, fallback to server default). Updated test DTOs. All 100 tests passing. Commit: d5e1d0c.
+
+**Key Design Decision:** Nullable column distinguishes "not set" from "explicitly set to default". Server default (100MB) acts as ceiling — prevents quotas exceeding storage capacity. Resolved in two places: API response (display) and upload validation (enforcement).
+
+**Status:** ✅ Feature complete and tested. Recorded in `.squad/decisions.md`.
