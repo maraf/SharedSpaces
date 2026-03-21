@@ -22,12 +22,13 @@ permissions:
 
 jobs:
   heartbeat:
-    # Skip when the base "squad" label is added — squad-triage.yml handles that.
-    # This prevents Ralph from racing the triage workflow and double-assigning.
+    # Only run on labeled events for squad:{member} labels (assignment changes).
+    # Skip ALL other labels (squad, type:*, go:*, priority:*, etc.) to prevent
+    # racing squad-triage.yml which handles the initial "squad" label routing.
     if: >-
       github.event_name != 'issues'
       || github.event.action != 'labeled'
-      || github.event.label.name != 'squad'
+      || startsWith(github.event.label.name, 'squad:')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
