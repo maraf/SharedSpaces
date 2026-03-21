@@ -320,38 +320,43 @@ export class SpaceView extends BaseElement {
 
     try {
       const itemId = crypto.randomUUID();
+      this.pendingItemIds.add(itemId);
       let uploaded = false;
 
-      if (share.type === 'text' && share.content) {
-        const item = await shareText(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          share.content,
-          this.token,
-        );
-        this.items = [item, ...this.items];
-        uploaded = true;
-      } else if (share.type === 'file' && share.fileData) {
-        const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
-        const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
-        const item = await shareFile(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          file,
-          this.token,
-        );
-        this.items = [item, ...this.items];
-        uploaded = true;
-      }
+      try {
+        if (share.type === 'text' && share.content) {
+          const item = await shareText(
+            this.serverUrl,
+            this.spaceId,
+            itemId,
+            share.content,
+            this.token,
+          );
+          this.items = [item, ...this.items];
+          uploaded = true;
+        } else if (share.type === 'file' && share.fileData) {
+          const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
+          const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
+          const item = await shareFile(
+            this.serverUrl,
+            this.spaceId,
+            itemId,
+            file,
+            this.token,
+          );
+          this.items = [item, ...this.items];
+          uploaded = true;
+        }
 
-      if (uploaded) {
-        await removePendingShare(share.id);
-        this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
-        this.notifyPendingSharesChanged();
-      } else {
-        this.uploadError = 'Shared item has no content to upload.';
+        if (uploaded) {
+          await removePendingShare(share.id);
+          this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+          this.notifyPendingSharesChanged();
+        } else {
+          this.uploadError = 'Shared item has no content to upload.';
+        }
+      } finally {
+        this.pendingItemIds.delete(itemId);
       }
     } catch (error) {
       this.uploadError =
