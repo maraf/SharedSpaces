@@ -21,5 +21,8 @@ public class SpaceConfiguration : IEntityTypeConfiguration<Space>
 
         builder.Property(space => space.CreatedAt)
             .IsRequired();
+
+        builder.Property(space => space.MaxUploadSize)
+            .IsRequired(false);
     }
 }

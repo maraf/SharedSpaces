@@ -1422,6 +1422,70 @@ Deep architecture details are no longer in the README but can be extracted from 
 
 ---
 
+## Per-Space Upload Quota (#72)
+
+**Date:** 2026-03-21  
+**Status:** ✅ Completed  
+**Deciders:** Kaylee (Backend), Wash (Frontend), Zoe (Tester)  
+
+### Context
+
+SharedSpaces needs per-space upload quotas to allow admins to enforce different storage limits across spaces within a single deployment. This supports multi-tenant use cases where different teams or projects have different storage budgets.
+
+### Decision
+
+Implement per-space quota as a nullable `long? MaxUploadSize` on the Space entity:
+- When null: server-wide default applies (100MB)
+- When set: cannot exceed server-wide default (validated at creation)
+- Resolved in two places: API response (`EffectiveMaxUploadSize`) and upload enforcement
+
+### Rationale
+
+- **Nullable over default-value:** Distinguishes "not set" from "explicitly set to default", allowing safe server-default changes later
+- **Server default as ceiling:** Prevents misconfiguration and storage overrun
+- **Dual resolution:** API truthfulness + consistent upload enforcement
+- **Mobile-first form:** Two-row layout accommodates quota input without overflow
+
+### Implementation
+
+**Backend (Kaylee):**
+- Domain: `Space.MaxUploadSize` property
+- Migration: Nullable INTEGER column
+- Validation: Create endpoint rejects quota ≤ 0 or > 100MB
+- Enforcement: Upload reads `space.MaxUploadSize ?? serverDefault`
+
+**Frontend (Wash):**
+- API types: `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`
+- Form: MB-based input (`Math.round(parseFloat(mb) * 1024 * 1024)` conversion)
+- Display: Space list shows effective quota with "(default)" label
+
+**Tests (Zoe):**
+- 6 admin endpoint tests: validation, rejection, display
+- 3 upload enforcement tests: per-space limit, server-default fallback
+- 100/100 tests passing
+
+### Files Affected
+
+**Backend:**
+- `Domain/Space.cs` — Property added
+- `Configurations/SpaceConfiguration.cs` — Nullable column config
+- `Features/Spaces/Models.cs` — Request/Response DTOs
+- `Features/Spaces/SpaceEndpoints.cs` — Create/list validation
+- `Features/Items/ItemEndpoints.cs` — Upload enforcement
+- Migration — `AddSpaceMaxUploadSize`
+
+**Frontend:**
+- `src/SharedSpaces.Client/src/features/admin/admin-api.ts` — SpaceResponse + createSpace signature
+- `src/SharedSpaces.Client/src/features/admin/admin-view.ts` — Form UI, conversion, display
+
+**Tests:**
+- `AdminEndpointTests` — 6 new tests
+- `ItemEndpointTests` — 3 new tests
+- Test DTOs updated with quota fields
+
+### Outcome
+
+Feature complete and tested. Admins can now set custom quotas per space; null quotas fall back to server default.
 # Decision: Share Target Deduplication Fix
 
 **Date:** 2026-03-19  

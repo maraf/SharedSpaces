@@ -48,6 +48,7 @@ export class AdminView extends BaseElement {
   @state() private secretInput = '';
   @state() private spaces: SpaceResponse[] = [];
   @state() private newSpaceName = '';
+  @state() private newSpaceQuotaMb = '';
   @state() private isCreatingSpace = false;
   @state() private isConnecting = false;
   @state() private errorMessage = '';
@@ -79,6 +80,11 @@ export class AdminView extends BaseElement {
   private formatDate(value: string) {
     const parsed = new Date(value);
     return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
+  }
+
+  private formatBytesAsMb(bytes: number) {
+    const mb = bytes / (1024 * 1024);
+    return mb % 1 === 0 ? `${mb} MB` : `${mb.toFixed(1)} MB`;
   }
 
   private createSpaceCardState(): SpaceCardState {
@@ -284,6 +290,7 @@ export class AdminView extends BaseElement {
     this.serverUrlInput = nextServerUrl;
     this.spaces = [];
     this.newSpaceName = '';
+    this.newSpaceQuotaMb = '';
     this.spaceCardState = {};
     this.errorMessage = '';
   };
@@ -297,11 +304,20 @@ export class AdminView extends BaseElement {
     const serverUrl = this.adminServerUrl;
     const adminSecret = this.adminSecret;
 
+    const quotaMb = this.newSpaceQuotaMb.trim();
+    const maxUploadSize =
+      quotaMb !== '' ? Math.round(parseFloat(quotaMb) * 1024 * 1024) : null;
+
+    if (maxUploadSize !== null && (!Number.isFinite(maxUploadSize) || maxUploadSize <= 0)) {
+      this.errorMessage = 'Upload quota must be a positive number';
+      return;
+    }
+
     this.isCreatingSpace = true;
     this.errorMessage = '';
 
     try {
-      const space = await createSpace(serverUrl, adminSecret, this.newSpaceName);
+      const space = await createSpace(serverUrl, adminSecret, this.newSpaceName, maxUploadSize);
 
       if (!this.isCurrentSession(serverUrl, adminSecret)) {
         return;
@@ -309,6 +325,7 @@ export class AdminView extends BaseElement {
 
       this.setSpaces([space, ...this.spaces]);
       this.newSpaceName = '';
+      this.newSpaceQuotaMb = '';
       void this.loadSpaceCollections(space.id, serverUrl, adminSecret);
     } catch (error) {
       if (this.isUnauthorizedError(error)) {
@@ -630,25 +647,42 @@ export class AdminView extends BaseElement {
     return html`
       <form
         @submit=${this.handleCreateSpace}
-        class="flex gap-3 rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3"
+        class="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3"
       >
-        <input
-          id="space-name"
-          type="text"
-          .value=${this.newSpaceName}
-          @input=${(e: InputEvent) =>
-            (this.newSpaceName = (e.target as HTMLInputElement).value)}
-          placeholder="New space name…"
-          class="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-          ?disabled=${this.isCreatingSpace}
-        />
-        <button
-          type="submit"
-          ?disabled=${this.isCreatingSpace || !this.newSpaceName.trim()}
-          class="shrink-0 rounded-full bg-emerald-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          ${this.isCreatingSpace ? 'Creating…' : 'Create'}
-        </button>
+        <div class="flex gap-3">
+          <input
+            id="space-name"
+            type="text"
+            .value=${this.newSpaceName}
+            @input=${(e: InputEvent) =>
+              (this.newSpaceName = (e.target as HTMLInputElement).value)}
+            placeholder="New space name…"
+            class="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+            ?disabled=${this.isCreatingSpace}
+          />
+          <button
+            type="submit"
+            ?disabled=${this.isCreatingSpace || !this.newSpaceName.trim()}
+            class="shrink-0 rounded-full bg-emerald-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ${this.isCreatingSpace ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+        <div class="flex items-center gap-3">
+          <input
+            id="space-quota"
+            type="number"
+            min="0"
+            step="any"
+            .value=${this.newSpaceQuotaMb}
+            @input=${(e: InputEvent) =>
+              (this.newSpaceQuotaMb = (e.target as HTMLInputElement).value)}
+            placeholder="Upload quota (MB)"
+            class="w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
+            ?disabled=${this.isCreatingSpace}
+          />
+          <span class="text-xs text-slate-500">Default: server configured</span>
+        </div>
       </form>
 
       ${this.errorMessage
@@ -673,6 +707,9 @@ export class AdminView extends BaseElement {
           <p class="mt-0.5 font-mono text-xs text-slate-500">${space.id}</p>
           <p class="text-xs text-slate-500">
             Created ${this.formatDate(space.createdAt)}
+          </p>
+          <p class="text-xs text-slate-500">
+            Upload quota: ${this.formatBytesAsMb(space.effectiveMaxUploadSize)}${space.maxUploadSize == null ? ' (default)' : ''}
           </p>
         </div>
 
