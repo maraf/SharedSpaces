@@ -1209,4 +1209,162 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).items).toHaveLength(1);
     });
   });
+
+  describe('visibility change reconnect', () => {
+    let addEventListenerSpy: ReturnType<typeof vi.spyOn>;
+    let removeEventListenerSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      addEventListenerSpy = vi.spyOn(document, 'addEventListener');
+      removeEventListenerSpy = vi.spyOn(document, 'removeEventListener');
+    });
+
+    it('registers visibilitychange listener on connect', () => {
+      document.body.appendChild(element);
+      expect(addEventListenerSpy).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+    });
+
+    it('removes visibilitychange listener on disconnect', () => {
+      document.body.appendChild(element);
+      const handler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'visibilitychange'
+      )?.[1];
+
+      element.remove();
+
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('visibilitychange', handler);
+    });
+
+    it('reconnects when page becomes visible and connection is disconnected', async () => {
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      // Capture the handleVisibilityChange handler
+      const visibilityHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'visibilitychange'
+      )?.[1] as () => void;
+      expect(visibilityHandler).toBeDefined();
+
+      // Spy on startSignalR
+      const startSignalRSpy = vi.spyOn(element as any, 'startSignalR');
+
+      // Set connection state to disconnected
+      (element as any).connectionState = 'disconnected';
+      await element.updateComplete;
+
+      // Mock document.visibilityState as visible
+      Object.defineProperty(document, 'visibilityState', {
+        writable: true,
+        configurable: true,
+        value: 'visible',
+      });
+
+      // Trigger the visibility change
+      visibilityHandler();
+      await element.updateComplete;
+
+      expect(startSignalRSpy).toHaveBeenCalled();
+    });
+
+    it('does NOT reconnect when page becomes visible but connection is already connected', async () => {
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      const visibilityHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'visibilitychange'
+      )?.[1] as () => void;
+
+      const startSignalRSpy = vi.spyOn(element as any, 'startSignalR');
+
+      // Connection is already connected
+      (element as any).connectionState = 'connected';
+      await element.updateComplete;
+
+      Object.defineProperty(document, 'visibilityState', {
+        writable: true,
+        configurable: true,
+        value: 'visible',
+      });
+
+      visibilityHandler();
+      await element.updateComplete;
+
+      expect(startSignalRSpy).not.toHaveBeenCalled();
+    });
+
+    it('does NOT reconnect when page becomes hidden', async () => {
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      const visibilityHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'visibilitychange'
+      )?.[1] as () => void;
+
+      const startSignalRSpy = vi.spyOn(element as any, 'startSignalR');
+
+      (element as any).connectionState = 'disconnected';
+      await element.updateComplete;
+
+      Object.defineProperty(document, 'visibilityState', {
+        writable: true,
+        configurable: true,
+        value: 'hidden',
+      });
+
+      visibilityHandler();
+      await element.updateComplete;
+
+      expect(startSignalRSpy).not.toHaveBeenCalled();
+    });
+
+    it('does NOT reconnect when page becomes visible but connection is connecting', async () => {
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      const visibilityHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'visibilitychange'
+      )?.[1] as () => void;
+
+      const startSignalRSpy = vi.spyOn(element as any, 'startSignalR');
+
+      (element as any).connectionState = 'connecting';
+      await element.updateComplete;
+
+      Object.defineProperty(document, 'visibilityState', {
+        writable: true,
+        configurable: true,
+        value: 'visible',
+      });
+
+      visibilityHandler();
+      await element.updateComplete;
+
+      expect(startSignalRSpy).not.toHaveBeenCalled();
+    });
+
+    it('does NOT reconnect when page becomes visible but connection is reconnecting', async () => {
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      const visibilityHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'visibilitychange'
+      )?.[1] as () => void;
+
+      const startSignalRSpy = vi.spyOn(element as any, 'startSignalR');
+
+      (element as any).connectionState = 'reconnecting';
+      await element.updateComplete;
+
+      Object.defineProperty(document, 'visibilityState', {
+        writable: true,
+        configurable: true,
+        value: 'visible',
+      });
+
+      visibilityHandler();
+      await element.updateComplete;
+
+      expect(startSignalRSpy).not.toHaveBeenCalled();
+    });
+  });
 });
