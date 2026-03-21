@@ -95,6 +95,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Admin space management lives in `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`, where both `POST /v1/spaces` and `GET /v1/spaces` use `AdminAuthenticationFilter`, and listing returns `SpaceResponse` ordered newest-first for admin space selection.
 - Admin space management now also covers `/v1/spaces/{spaceId}/members` and `/v1/spaces/{spaceId}/invitations`: member listings return `MemberResponse` newest-first, revocation is idempotent via `POST .../members/{memberId}/revoke`, and invitation listings/deletes never expose hashed PIN values.
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
+- Server container publishing uses .NET SDK container support (`EnableSdkContainerSupport`) in `.csproj`, targeting `ghcr.io/maraf/sharedspaces-server` with tag format `{VersionPrefix}-{RuntimeIdentifier}`.
+- The `server-container.yml` workflow triggers on `server-*` tags, extracts version via shell parameter expansion (`${GITHUB_REF_NAME#server-}`), and publishes for `linux-x64` using `dotnet publish` with `-p:PublishProfile=DefaultContainer`.
 
 ## Team Updates (2026-03-17 Continued)
 
