@@ -465,3 +465,41 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 
 **Coordination:** Coordinator amended light DOM fix into same commit via orchestration.
 
+
+## Learnings
+
+### Drag Event Testing Patterns
+- **Mock DataTransfer for type checking:** Use `Object.defineProperty(event, 'dataTransfer', { value: mockDataTransfer })` to set `types` array. Browser DataTransfer.types is read-only, so we mock the entire dataTransfer object with `types: ['Files']` for file drags or `types: ['text/plain']` for text drags.
+- **Test helper pattern:** Create `createDragEvent(type, includeFiles)` helper that returns DragEvent with properly mocked dataTransfer. This centralizes the mock setup and makes tests more readable.
+- **Counter balance testing:** Test that `dragCounter` stays balanced across nested enter/leave pairs, cannot go negative even with unbalanced events, and that non-file drags don't affect the counter.
+- **File type gating:** Gate drag overlay on `dataTransfer.types.includes('Files')` to avoid showing overlay for text/link drags. Apply the same check in both `handleDragEnter` and `handleDragLeave` so counter stays balanced.
+- **Clamp counter at zero:** Use `if (this.dragCounter > 0) { this.dragCounter--; }` pattern to prevent negative values from browser quirks or unbalanced dragenter/dragleave events.
+
+## 2025-01-19T21-49 — PR #82 Review Feedback: Drag/Drop Fixes
+
+**Status:** ✅ COMPLETE  
+**Files Modified:**
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` (drag handlers)
+- `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts` (new test suite)
+
+**Work Summary:**
+- **File type gating:** Added `dataTransfer.types.includes('Files')` check to `handleDragEnter` and `handleDragLeave` so non-file drags (text/links) don't trigger the "Drop files here" overlay
+- **Counter clamping:** Added `if (this.dragCounter > 0)` guard before decrementing in `handleDragLeave` to prevent negative values from unbalanced dragenter/dragleave events
+- **Comprehensive test suite:** Added 10 new tests in `describe('Drag and Drop', ...)` covering:
+  - Document-level listener registration/cleanup
+  - File drag triggers overlay, non-file drag ignored
+  - Counter cannot go negative
+  - Drop handlers reset state correctly
+  - Nested dragenter/dragleave pairs work correctly
+  - Non-file drags don't affect counter balance
+
+**Validation:**
+- All 262 tests (including 10 new drag/drop tests): ✅ PASS
+- Linting: ✅ PASS
+
+**Key Patterns Used:**
+- Mock DataTransfer with `Object.defineProperty(event, 'dataTransfer', { value: mockDataTransfer })`
+- Test helper `createDragEvent(type, includeFiles)` for DRY test setup
+- Access private methods/state via `(element as any).methodName`
+- Use `vi.spyOn()` to mock `uploadFiles` method
+

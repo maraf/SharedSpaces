@@ -1845,4 +1845,61 @@ Adopt a unified "compose box" pattern for input areas with action buttons:
 
 ---
 
+### Drag/Drop File Type Gating & Counter Clamping
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Wash (Frontend Dev)  
+**PR:** #82  
+**Status:** ✅ Implemented
+
+#### Context
+
+PR #82 review feedback identified two issues in the space-view drag/drop overlay behavior:
+1. The overlay appeared for ANY drag operation (including text selections and links), not just files
+2. The `dragCounter` could go negative due to unbalanced browser `dragenter`/`dragleave` events, causing the overlay to get stuck
+
+#### Decision
+
+1. **File type gating:** Check `e.dataTransfer?.types.includes('Files')` in both `handleDragEnter` and `handleDragLeave` before updating counter/overlay state. This ensures only file drags trigger the "Drop files here" overlay.
+
+2. **Counter clamping:** Guard the decrement with `if (this.dragCounter > 0)` to prevent negative values from browser quirks or nested element events.
+
+#### Rationale
+
+- **Better UX:** Users dragging text or links within the page won't see a confusing file drop overlay
+- **Robustness:** Prevents counter drift from unbalanced events (common with nested elements)
+- **Symmetry:** Applying the Files check to both enter and leave keeps the counter balanced
+
+#### Implementation
+
+- Modified `src/SharedSpaces.Client/src/features/space-view/space-view.ts`:
+  - `handleDragEnter()` now checks `dataTransfer.types.includes('Files')`
+  - `handleDragLeave()` now checks `dataTransfer.types.includes('Files')` and guards decrement
+- Added 10 comprehensive tests to `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+
+#### Testing
+
+- File drags trigger overlay, non-file drags ignored
+- Counter cannot go negative
+- Nested enter/leave pairs work correctly
+- Drop handlers reset state properly
+- Non-file drags don't affect counter balance
+- All 262 tests passing
+
+#### Pattern for Future Drag/Drop
+
+When implementing drag/drop with overlay:
+1. Always gate on specific dataTransfer types (Files, text/uri-list, etc.)
+2. Use a counter for nested element tracking
+3. Clamp counter at 0 to handle browser quirks
+4. Test with both file and non-file drag events
+5. Mock DataTransfer.types via `Object.defineProperty` in tests
+
+#### Impact
+
+- Drag/drop overlay only appears for actual file drags
+- Robust to browser event ordering issues
+- All existing tests continue to pass
+
+---
 
