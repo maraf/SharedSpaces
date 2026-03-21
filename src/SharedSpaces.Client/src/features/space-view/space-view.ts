@@ -4,6 +4,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { BaseElement } from '../../lib/base-element';
 import type { AppViewChangeDetail } from '../../lib/navigation';
 import { getToken, removeToken } from '../../lib/token-storage';
+import { formatRelativeTime } from '../../lib/format-time';
 import {
   SignalRClient,
   type ConnectionState,
@@ -219,6 +220,8 @@ export class SpaceView extends BaseElement {
 
     const token = this.token; // Capture for closure
 
+    this.connectionState = 'connecting';
+
     this.signalRClient = new SignalRClient({
       serverUrl: this.serverUrl,
       spaceId: this.spaceId,
@@ -310,38 +313,43 @@ export class SpaceView extends BaseElement {
 
     try {
       const itemId = crypto.randomUUID();
+      this.pendingItemIds.add(itemId);
       let uploaded = false;
 
-      if (share.type === 'text' && share.content) {
-        const item = await shareText(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          share.content,
-          this.token,
-        );
-        this.items = [item, ...this.items];
-        uploaded = true;
-      } else if (share.type === 'file' && share.fileData) {
-        const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
-        const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
-        const item = await shareFile(
-          this.serverUrl,
-          this.spaceId,
-          itemId,
-          file,
-          this.token,
-        );
-        this.items = [item, ...this.items];
-        uploaded = true;
-      }
+      try {
+        if (share.type === 'text' && share.content) {
+          const item = await shareText(
+            this.serverUrl,
+            this.spaceId,
+            itemId,
+            share.content,
+            this.token,
+          );
+          this.items = [item, ...this.items];
+          uploaded = true;
+        } else if (share.type === 'file' && share.fileData) {
+          const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
+          const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
+          const item = await shareFile(
+            this.serverUrl,
+            this.spaceId,
+            itemId,
+            file,
+            this.token,
+          );
+          this.items = [item, ...this.items];
+          uploaded = true;
+        }
 
-      if (uploaded) {
-        await removePendingShare(share.id);
-        this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
-        this.notifyPendingSharesChanged();
-      } else {
-        this.uploadError = 'Shared item has no content to upload.';
+        if (uploaded) {
+          await removePendingShare(share.id);
+          this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
+          this.notifyPendingSharesChanged();
+        } else {
+          this.uploadError = 'Shared item has no content to upload.';
+        }
+      } finally {
+        this.pendingItemIds.delete(itemId);
       }
     } catch (error) {
       this.uploadError =
@@ -673,22 +681,8 @@ export class SpaceView extends BaseElement {
 
   private formatTime(iso: string): string {
     try {
-      const now = Date.now();
       const date = new Date(iso);
-      const diffMs = now - date.getTime();
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-
-      if (diffSec < 60) return 'just now';
-      if (diffMin < 60) return `${diffMin}m ago`;
-      if (diffHour < 24) return `${diffHour}h ago`;
-      if (diffDay < 7) return `${diffDay}d ago`;
-
-      // Older than a week: show short date like "Mar 19"
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return `${months[date.getMonth()]} ${date.getDate()}`;
+      return formatRelativeTime(date);
     } catch {
       return iso;
     }

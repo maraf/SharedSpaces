@@ -124,6 +124,8 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+- **Share target duplicate item fix (2026-03-19, Issue #73):** Fixed duplicate item bug in share_target flow where shared files appeared twice in the item list (one from local add, one from SignalR broadcast). Root cause: `uploadPendingShare()` in `src/SharedSpaces.Client/src/features/space-view/space-view.ts` added items directly to `this.items` without using the `pendingItemIds` deduplication mechanism that `uploadFiles()` and `handleTextSubmit()` already used. The fix wraps the upload logic with `this.pendingItemIds.add(itemId)` before upload and `this.pendingItemIds.delete(itemId)` in a finally block, ensuring `handleItemAdded()` skips the SignalR broadcast when the item ID is in the pending set. This mirrors the existing race condition fix from commit 3502e56 and maintains consistency across all upload paths (manual file, text submit, and share target).
+
 - **Web Share Target API requirements research (2026-03-19):** Chrome-only platform feature for registering app as share destination in OS share menu. Requires: (1) manifest.json with `share_target` entry specifying POST multipart endpoint, (2) service worker to intercept POST to `/share-receive`, extract form data, and redirect with 303 See Other, (3) new Lit component `share-accept-view` to show shared content + space selector + optional auth integration, (4) sessionStorage to pass share data from SW to client (IndexedDB migration in #28 offline work). Firefox has limited support; Safari has none. Key design decisions open: support unauthenticated shares (affects complexity), GET vs POST method (POST recommended for files), multi-server space routing, inline vs preview display of shared content. Architecture fits as Phase 4-5 polish (not blocking core functionality). Comprehensive decision doc created in `.squad/decisions/inbox/wash-share-target-frontend.md` with 7 open questions for Marek.
 - **Light DOM composition rule (2026-03-18):** Components extending `src/SharedSpaces.Client/src/lib/base-element.ts` cannot rely on `<slot>` because `createRenderRoot()` returns `this` and Lit will overwrite light-DOM children on render. Reusable wrappers like `src/SharedSpaces.Client/src/components/view-card.ts` should accept content through a property such as `.body=${html`...`}` or a template helper instead of child nodes. **Wash fixed this in commit 6e5c13a:** migrated `view-card.ts` and its 3 consumers (admin-view.ts, join-view.ts, space-view.ts) to use property-based body templates. Rule: any BaseElement-based component must use property-driven templates for composition, not slots.
 - Re-checking the Lit option in 2026 changed the risk profile: routing is still the weakest area (deprecated Vaadin Router, `@lit-labs/router` still Labs), but Tailwind, testing, and SignalR are no longer show-stoppers. Lit can render in light DOM for Tailwind, use Vitest + Playwright credibly, and consume the framework-agnostic SignalR JS client without special adapters.
@@ -259,11 +261,53 @@ Finalized dead space removal UI implementation:
 
 - **Connection status dot in nav pills:** Moved connection status from a separate pill in `space-view.ts renderHeader()` into a colored dot inside each space navigation pill in `app-shell.ts`. Pattern: `space-view` dispatches `connection-state-change` custom event (bubbles+composed) on `connectionState` reactive prop changes. `app-shell` listens on `<main>`, stores `Record<string, ConnectionState>` keyed by spaceId, and renders a 2×2 dot (`h-2 w-2 rounded-full`) before space name text. Colors: gray=no state, green=connected, orange=reconnecting, red=disconnected. State persists when switching spaces (no reset to gray). Stale entries for removed spaces are harmless since pills don't render.
   - Key files: `app-shell.ts` (spaceConnectionStates, handleConnectionStateChange, dotColor, pill rendering), `space-view.ts` (updated lifecycle, removed renderHeader)
+
+- **Connection dot stale state bug fix:** When navigating away from space view, `<space-view>` is removed from DOM and its `disconnectedCallback` fires `stopSignalR()`, but Lit doesn't run reactive updates on disconnected elements — so the `connection-state-change` CustomEvent never dispatches and the nav pill dot stays green. Fix: added `willUpdate()` override in `app-shell.ts` to detect `view` changing from `'space'` to any other view, and directly set `spaceConnectionStates[currentSpaceId]` to `'disconnected'`. Using `willUpdate` (not `updated`) means the state change is included in the same render cycle — no extra re-render needed. This is a general Lit pattern: parent components should not rely on child CustomEvents for cleanup when the child is about to be removed from DOM.
+  - Key file: `app-shell.ts` (willUpdate override, lines ~94-104)
+
+## Team Update: Connection Dot Navigation Fix (2026-03-20)
+
+**Coordinated by:** Scribe  
+**Agents:** Wash (fix), Zoe (tests), Coordinator (lint)
+
+**Summary:** Fixed connection dot not updating when navigating away from space-view. App-shell now uses willUpdate() to proactively reset connection state when view changes from 'space' to other routes. Zoe added comprehensive 14-test suite validating three-layer connection cleanup lifecycle (SignalR client → space-view → app-shell). Coordinator fixed eslint config to permit any in test files per pre-existing convention.
+
+**Key Pattern:** willUpdate() in parent components provides a proactive fallback for cleanup when child elements are removed from DOM, because Lit doesn't fire reactive updates on disconnected elements.
+
+**Test Coverage:** 138 passing tests (↑14 new). All linting passes. Three-layer coverage (unit-style direct method testing) avoids flakiness from async Lit lifecycle timing.
+
+**Files Modified:**
+- app-shell.ts (willUpdate)
+- space-view.test.ts (5 new tests)
+- signalr-client.test.ts (1 new test)
+- app-shell.test.ts (8 new tests, created)
+- eslint.config.js (allow any in tests)
+  - Key files: `app-shell.ts` (spaceConnectionStates, handleConnectionStateChange, dotColor, pill rendering), `space-view.ts` (updated lifecycle, removed renderHeader)
 - **Vite define for build-time injection (2026-03-19):** Added client version label using Vite's `define` option to inject `__APP_VERSION__` at build time from `package.json`. Pattern: import pkg from './package.json', add `define: { __APP_VERSION__: JSON.stringify(pkg.version) }` to vite.config.ts, create `src/vite-env.d.ts` with `declare const __APP_VERSION__: string`, then reference `__APP_VERSION__` directly in component templates. Version displays as small muted label (`text-xs text-slate-500`) next to SharedSpaces heading in app-shell.ts. This ensures displayed version always matches build. File: `src/SharedSpaces.Client/src/vite-env.d.ts` for type declarations.
 
 - **CI/CD workflows for client (2026-03-21):** Created `client-publish.yml` and `client-deploy.yml` workflows. Updated `vite.config.ts` to prefer `process.env.VITE_APP_VERSION` over `pkg.version` for version injection — package.json stays at `0.0.0`. Publish workflow: triggers on `client-*` tags, builds with `--base ./` (relative paths) and VITE_APP_VERSION from tag, zips dist/, uploads to GH Release (creates release if it doesn't exist, uploads to existing release otherwise). Deploy workflow: manual `workflow_dispatch` with `tag` input, downloads prebuilt zip from GH Release, asserts exactly one zip, unzips, and deploys via `actions/upload-pages-artifact` + `actions/deploy-pages`. No Node.js, no npm, no CNAME detection at deploy time. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`, `src/SharedSpaces.Client/vite.config.ts`.
 
+## Team Update: Per-Space Upload Quota (2026-03-21, Issue #72)
+
+**Kaylee + Wash + Zoe completed per-space upload quota feature:**
+
+- **Kaylee (Backend):** Implemented `Space.MaxUploadSize` property (nullable long), EF migration, quota validation in create endpoint (rejects ≤ 0 or > 100MB), and enforcement in upload endpoint (resolves `maxUploadSize ?? serverDefault`). API contract: `CreateSpaceRequest.MaxUploadSize`, `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`. Commit: 78909a3.
+
+- **Wash (Frontend):** Updated `admin-api.ts` types to match backend contract. Added quota input field (MB-based, `Math.round(parseFloat(mb) * 1024 * 1024)` conversion) to create form with two-row layout for mobile responsiveness. Space list displays effective quota with "(default)" label when `maxUploadSize` is null. Commit: 326c4b9.
+
+- **Zoe (Tester):** Wrote 9 integration tests — 6 admin endpoint tests (quota validation, rejection, display) and 3 upload enforcement tests (per-space limit, fallback to server default). Updated test DTOs. All 100 tests passing. Commit: d5e1d0c.
+
+**Key Design Decision:** Nullable column distinguishes "not set" from "explicitly set to default". Server default (100MB) acts as ceiling — prevents quotas exceeding storage capacity. Resolved in two places: API response (display) and upload validation (enforcement).
+
+**Status:** ✅ Feature complete and tested. Recorded in `.squad/decisions.md`.
+
 - **Build-once-deploy-anywhere refactor (2025-07-17, PR #61):** Reworked `client-publish.yml` and `client-deploy.yml` to follow "build once, deploy anywhere." Publish now builds with `--base ./` (relative asset paths), zips, and uploads to GH Release. Deploy downloads the prebuilt zip via `gh release download` instead of rebuilding from source — no Node.js, no npm, no CNAME detection. Relative base paths (`./`) work at any deployment path (custom domain root or `/repo-name/` subpath), eliminating the CNAME-sniffing logic entirely. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`. Decision doc: `.squad/decisions/inbox/wash-deploy-prebuilt.md`.
+
+- **Connection dot color behavior refinement:** Improved dot color transitions to avoid the jarring gray→red→green flash when selecting a space, and the misleading red dot on non-selected spaces. Three coordinated changes:
+  1. `signalr-client.ts`: Added `'connecting'` to `ConnectionState` type union and mapped `HubConnectionState.Connecting` in the `state` getter.
+  2. `space-view.ts`: Set `connectionState = 'connecting'` before calling `signalRClient.start()` so the dot goes orange immediately.
+  3. `app-shell.ts`: In `willUpdate()`, departing space state is now *deleted* from the map (object destructuring) instead of set to `'disconnected'`, so the dot falls through to gray. In `dotColor()`, `'connecting'` maps to amber alongside `'reconnecting'`, and `'disconnected'` only shows red when the space is the actively-viewed one (`this.view === 'space' && this.currentSpaceId === spaceId`); otherwise gray.
+  - Result: gray (no state) → orange (connecting/reconnecting) → green (connected). Red only appears for genuinely broken connections on the active space. Non-selected spaces revert to neutral gray.
 
 ## Session 2026-03-19 — Issue #54 Item Card Redesign
 
@@ -332,3 +376,32 @@ Applied review feedback from Copilot reviewer and Marek:
 - **Vite `?raw` imports for SVG icons:** Use `import svg from 'package/icon.svg?raw'` to get raw SVG strings at build time. Pair with `unsafeHTML` from Lit to render them. Requires `declare module '*.svg?raw'` in `vite-env.d.ts` for TypeScript. String-replace width/height attributes before rendering to control sizing. This is the preferred pattern over inline SVG paths when icons come from an npm package.
 - **`unsafeHTML` safety model:** Only safe for trusted build-time content (npm packages). Never use for user-supplied strings. This is a Lit directive, not a security bypass — it just opts out of Lit's template escaping.
 - **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
+
+### Issue #72: Per-space upload quota UI (2026-03-21)
+
+**Task:** Add upload quota input to admin create-space form; show effective quota in space list.
+
+**Changes:**
+- `admin-api.ts` — Added `maxUploadSize: number | null` and `effectiveMaxUploadSize: number` to `SpaceResponse`. Added optional `maxUploadSize` param to `createSpace()`.
+- `admin-view.ts` — Added `newSpaceQuotaMb` state for MB input. Create form now has a second row with quota input (`w-40`, `type="number"`) and "Default: 100 MB" hint. Space cards show effective quota with "(default)" suffix when no custom value set.
+
+**Patterns:**
+- MB-to-bytes conversion: `Math.round(parseFloat(mb) * 1024 * 1024)` on submit. Input uses `type="number"` with `step="any"` for decimal MB values.
+- The form layout changed from single-row `flex` to `space-y-3` with two rows to accommodate the quota field without overflowing on mobile.
+- `formatBytesAsMb()` helper added for consistent byte→MB display across the view.
+- **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
+
+- **Day-based time labels (Issue #74, 2026-03-20):** Refactored duplicate relative time formatting logic from `space-view.ts` and `app-shell.ts` into a shared utility `src/SharedSpaces.Client/src/lib/format-time.ts`. New format uses calendar day comparison (not 24-hour diff) for better UX:
+  - Same calendar day → "Today" (replaces "just now", "Xm ago", "Xh ago")
+  - Previous calendar day → "Yesterday"
+  - 2-6 days ago → "Xd ago"
+  - 7+ days → "Mar 19" (existing short date format)
+  - Pattern: `formatRelativeTime(date: Date): string` exported function. Components parse their input (ISO string or Unix timestamp) to Date, then call the utility. Keeps try/catch error handling in component methods. Calendar day comparison normalizes both dates to start-of-day (midnight) and compares the diff in days, so an item shared at 11pm shows "Today" at 1am the next day → "Yesterday". Key files: `lib/format-time.ts`, `features/space-view/space-view.ts` (formatTime method), `app-shell.ts` (formatTimestamp method).
+## 2026-03-21 — Share Target Dedup Fix #73
+
+**Status:** Completed  
+**Session:** .squad/log/2026-03-21T13-15-30Z-fix-share-target-dedup.md  
+
+Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds tracking to uploadPendingShare(). Matches existing dedup pattern from uploadFiles() and handleTextSubmit(). Tests added by Zoe (215/215 passing).
+
+**Impact:** Issue #73 resolved, 3 regression tests covering all upload paths.

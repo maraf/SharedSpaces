@@ -16,6 +16,7 @@ import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
+import { formatRelativeTime } from './lib/format-time';
 import type { ConnectionState } from './lib/signalr-client';
 import {
   clearPendingShares,
@@ -110,6 +111,17 @@ export class AppShell extends BaseElement {
     this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
     this.headerResizeObserver?.disconnect();
     document.documentElement.style.removeProperty('--header-height');
+  }
+
+  override willUpdate(changed: Map<string, unknown>) {
+    if (changed.has('view')) {
+      const oldView = changed.get('view') as string | undefined;
+      if (oldView === 'space' && this.view !== 'space' && this.currentSpaceId) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [this.currentSpaceId]: _, ...rest } = this.spaceConnectionStates;
+        this.spaceConnectionStates = rest;
+      }
+    }
   }
 
   private handleSwMessage = (event: MessageEvent) => {
@@ -226,10 +238,14 @@ export class AppShell extends BaseElement {
     switch (state) {
       case 'connected':
         return 'bg-emerald-400';
+      case 'connecting':
       case 'reconnecting':
         return 'bg-amber-400';
       case 'disconnected':
-        return 'bg-red-400';
+        // Red only for the actively-viewed space with a real problem
+        return this.view === 'space' && this.currentSpaceId === spaceId
+          ? 'bg-red-400'
+          : 'bg-slate-500';
       default:
         return 'bg-slate-500';
     }
@@ -567,23 +583,8 @@ export class AppShell extends BaseElement {
 
   private formatTimestamp(ts: number): string {
     try {
-      const diffMs = Date.now() - ts;
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-
-      if (diffSec < 60) return 'just now';
-      if (diffMin < 60) return `${diffMin}m ago`;
-      if (diffHour < 24) return `${diffHour}h ago`;
-      if (diffDay < 7) return `${diffDay}d ago`;
-
       const date = new Date(ts);
-      const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-      ];
-      return `${months[date.getMonth()]} ${date.getDate()}`;
+      return formatRelativeTime(date);
     } catch {
       return '';
     }

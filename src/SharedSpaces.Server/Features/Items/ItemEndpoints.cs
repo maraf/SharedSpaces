@@ -178,11 +178,11 @@ public static class ItemEndpoints
             return Results.BadRequest(new { Error = "ContentType must be either 'text' or 'file'" });
         }
 
-        var spaceExists = await db.Spaces
+        var space = await db.Spaces
             .AsNoTracking()
-            .AnyAsync(existingSpace => existingSpace.Id == spaceId, cancellationToken);
+            .SingleOrDefaultAsync(existingSpace => existingSpace.Id == spaceId, cancellationToken);
 
-        if (!spaceExists)
+        if (space is null)
         {
             return Results.NotFound(new { Error = "Space not found" });
         }
@@ -239,7 +239,8 @@ public static class ItemEndpoints
             var currentItemSize = existingItem?.FileSize ?? 0L;
             var projectedUsage = currentUsage - currentItemSize + request.File.Length;
 
-            if (projectedUsage > storageOptions.Value.MaxSpaceQuotaBytes)
+            var quota = space.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes;
+            if (projectedUsage > quota)
             {
                 return Results.Json(new { Error = "Space storage quota exceeded" }, statusCode: StatusCodes.Status413PayloadTooLarge);
             }

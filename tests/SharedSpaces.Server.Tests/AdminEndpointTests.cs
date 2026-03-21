@@ -133,6 +133,80 @@ public class AdminEndpointTests
         space!.Name.Should().Be("My Space");
     }
 
+    // ========== Space Creation Quota Tests ==========
+
+    [Fact]
+    public async Task CreateSpace_WithMaxUploadSize_Returns201WithQuotaFields()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await CreateSpaceAsync(client, "Quota Space", TestWebApplicationFactory.AdminSecret, maxUploadSize: 50_000_000);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var space = await ReadJsonAsync<SpaceResponse>(response);
+        space.Should().NotBeNull();
+        space!.MaxUploadSize.Should().Be(50_000_000);
+        space.EffectiveMaxUploadSize.Should().Be(50_000_000);
+    }
+
+    [Fact]
+    public async Task CreateSpace_WithoutMaxUploadSize_ReturnsServerDefaultAsEffective()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await CreateSpaceAsync(client, "Default Quota Space", TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var space = await ReadJsonAsync<SpaceResponse>(response);
+        space.Should().NotBeNull();
+        space!.MaxUploadSize.Should().BeNull();
+        space.EffectiveMaxUploadSize.Should().Be(104_857_600);
+    }
+
+    [Fact]
+    public async Task CreateSpace_WithMaxUploadSizeExceedingServerLimit_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await CreateSpaceAsync(client, "Over Limit Space", TestWebApplicationFactory.AdminSecret, maxUploadSize: 200_000_000);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("must not exceed server limit");
+    }
+
+    [Fact]
+    public async Task CreateSpace_WithZeroMaxUploadSize_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await CreateSpaceAsync(client, "Zero Quota Space", TestWebApplicationFactory.AdminSecret, maxUploadSize: 0);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("greater than 0");
+    }
+
+    [Fact]
+    public async Task CreateSpace_WithNegativeMaxUploadSize_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await CreateSpaceAsync(client, "Negative Quota Space", TestWebApplicationFactory.AdminSecret, maxUploadSize: -100);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("greater than 0");
+    }
+
     // ========== Space Listing Tests ==========
 
     [Fact]
@@ -187,6 +261,37 @@ public class AdminEndpointTests
         var spaces = await ReadJsonAsync<SpaceResponse[]>(response);
         spaces.Should().NotBeNull();
         spaces!.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListSpaces_IncludesQuotaFields()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var spaceWithQuota = new Space { Id = Guid.NewGuid(), Name = "Quota Space", MaxUploadSize = 50_000_000 };
+        var spaceWithoutQuota = new Space { Id = Guid.NewGuid(), Name = "Default Space" };
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.Spaces.AddRange(spaceWithQuota, spaceWithoutQuota);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await ListSpacesAsync(client, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var spaces = await ReadJsonAsync<SpaceResponse[]>(response);
+        spaces.Should().NotBeNull();
+        var actualSpaces = spaces!;
+        actualSpaces.Should().HaveCount(2);
+
+        var quotaSpace = actualSpaces.Single(s => s.Id == spaceWithQuota.Id);
+        quotaSpace.MaxUploadSize.Should().Be(50_000_000);
+        quotaSpace.EffectiveMaxUploadSize.Should().Be(50_000_000);
+
+        var defaultSpace = actualSpaces.Single(s => s.Id == spaceWithoutQuota.Id);
+        defaultSpace.MaxUploadSize.Should().BeNull();
+        defaultSpace.EffectiveMaxUploadSize.Should().Be(104_857_600);
     }
 
     // ========== Invitation Generation Tests ==========
@@ -701,14 +806,15 @@ public class AdminEndpointTests
     private static async Task<HttpResponseMessage> CreateSpaceAsync(
         HttpClient client,
         string name,
-        string? adminSecret)
+        string? adminSecret,
+        long? maxUploadSize = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/spaces");
         if (!string.IsNullOrWhiteSpace(adminSecret))
         {
             request.Headers.Add("X-Admin-Secret", adminSecret);
         }
-        request.Content = JsonContent.Create(new CreateSpaceRequest(name));
+        request.Content = JsonContent.Create(new CreateSpaceRequest(name, maxUploadSize));
         return await client.SendAsync(request);
     }
 
@@ -862,9 +968,9 @@ public class AdminEndpointTests
 
     // ========== DTOs ==========
 
-    private sealed record CreateSpaceRequest(string Name);
+    private sealed record CreateSpaceRequest(string Name, long? MaxUploadSize = null);
 
-    private sealed record SpaceResponse(Guid Id, string Name, DateTime CreatedAt);
+    private sealed record SpaceResponse(Guid Id, string Name, DateTime CreatedAt, long? MaxUploadSize, long EffectiveMaxUploadSize);
 
     private sealed record CreateInvitationRequest(string? ClientAppUrl);
 

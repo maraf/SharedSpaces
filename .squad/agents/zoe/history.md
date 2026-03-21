@@ -270,8 +270,51 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - SignalR client state tracking uses a getter that maps `HubConnectionState` enum values to simplified `ConnectionState` union type ('connected' | 'disconnected' | 'reconnecting'); tests should verify state transitions via connection lifecycle callbacks (onreconnecting, onreconnected, onclose).
 - Testing Lit component race conditions requires a hybrid strategy: use integration tests with controlled async timing for end-to-end flows, but prefer direct method invocation (unit-style) for logic verification to avoid test flakiness from unpredictable async component initialization timing.
 - Space-view deduplication tests verify two dedup mechanisms: `items.some()` check blocks items already in the list, and `pendingItemIds.has()` blocks SignalR events for items currently being uploaded (before API response completes); both mechanisms must pass for correct behavior.
+- Lit `updated()` does NOT fire on disconnected elements; when `space-view.disconnectedCallback()` sets `connectionState = 'disconnected'`, the `connection-state-change` event won't dispatch. App-shell's `willUpdate()` handles this by detecting view changes away from 'space' and directly updating `spaceConnectionStates`.
+- Testing Lit custom elements with private members requires `(element as any)` casts for internal state access; this pattern is established across all client test files and produces `no-explicit-any` lint warnings that are tolerated in tests.
+- App-shell test file (`src/SharedSpaces.Client/src/app-shell.test.ts`) must mock `@microsoft/signalr`, `jwt-decode`, and `./lib/idb-storage` because app-shell imports space-view (which imports signalr-client) and uses jwt-decode and idb-storage directly.
+- For Lit component `handleConnectionStateChange` testing, call the handler method directly rather than dispatching events, because the handler is bound to a child `<main>` element via Lit template — events dispatched on the host element don't reach child-bound listeners.
+
+## Team Update: Connection Dot Navigation Fix (2026-03-20)
+
+## Team Update: Per-Space Upload Quota (2026-03-21, Issue #72)
+
+**Kaylee + Wash + Zoe completed per-space upload quota feature:**
+
+- **Kaylee (Backend):** Implemented `Space.MaxUploadSize` property (nullable long), EF migration, quota validation in create endpoint (rejects ≤ 0 or > 100MB), and enforcement in upload endpoint (resolves `maxUploadSize ?? serverDefault`). API contract: `CreateSpaceRequest.MaxUploadSize`, `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`. Commit: 78909a3.
+
+- **Wash (Frontend):** Updated `admin-api.ts` types to match backend contract. Added quota input field (MB-based, `Math.round(parseFloat(mb) * 1024 * 1024)` conversion) to create form with two-row layout for mobile responsiveness. Space list displays effective quota with "(default)" label when `maxUploadSize` is null. Commit: 326c4b9.
+
+- **Zoe (Tester):** Wrote 9 integration tests — 6 admin endpoint tests (quota validation, rejection, display) and 3 upload enforcement tests (per-space limit, fallback to server default). Updated test DTOs. All 100 tests passing. Commit: d5e1d0c.
+
+**Key Design Decision:** Nullable column distinguishes "not set" from "explicitly set to default". Server default (100MB) acts as ceiling — prevents quotas exceeding storage capacity. Resolved in two places: API response (display) and upload validation (enforcement).
+
+**Status:** ✅ Feature complete and tested. Recorded in `.squad/decisions.md`.
+
+**Coordinated by:** Scribe  
+**Agents:** Wash (fix), Zoe (tests), Coordinator (lint)
+
+**Summary:** Fixed connection dot not updating when navigating away from space-view. App-shell now uses willUpdate() to proactively reset connection state when view changes from 'space' to other routes. Zoe added comprehensive 14-test suite validating three-layer connection cleanup lifecycle (SignalR client → space-view → app-shell). Coordinator fixed eslint config to permit any in test files per pre-existing convention.
+
+**Key Pattern:** willUpdate() in parent components provides a proactive fallback for cleanup when child elements are removed from DOM, because Lit doesn't fire reactive updates on disconnected elements.
+
+**Test Coverage:** 138 passing tests (↑14 new). All linting passes. Three-layer coverage (unit-style direct method testing) avoids flakiness from async Lit lifecycle timing.
+
+**Files Modified:**
+- app-shell.ts (willUpdate)
+- space-view.test.ts (5 new tests)
+- signalr-client.test.ts (1 new test)
+- app-shell.test.ts (8 new tests, created)
+- eslint.config.js (allow any in tests)
 - Delete confirmation overlay (issue #53): tested via direct method invocation on SpaceView — `handleDeleteRequest`, `cancelDelete`, `confirmDelete`, `getItemPreviewLabel`. Edge cases: empty content, boundary-length text (exactly 40 chars), trailing whitespace trimming on truncation, file items bypass truncation, missing token guard clause, auth vs non-auth API failure handling, sequential delete-confirm-delete flows.
 - When production code renames methods (e.g., `handleDelete` → `confirmDelete`), pre-existing tests that call the old name will fail with "not a function" — always check and fix stale test references when testing a feature that refactored method names.
+
+## Learnings
+
+- `ConnectionState` type now includes `'connecting'` for the initial connection phase; `signalr-client.ts` state getter maps `HubConnectionState.Connecting` → `'connecting'`; `space-view.ts` sets `connectionState = 'connecting'` before calling `start()` in `startSignalR()`.
+- `app-shell.ts` `willUpdate()` removes the departing space's key from `spaceConnectionStates` (delete instead of setting 'disconnected') so it falls to the gray default dot color.
+- `app-shell.ts` `dotColor()` returns `bg-red-400` for 'disconnected' only when `this.view === 'space'` and `this.currentSpaceId === spaceId`; otherwise disconnected falls to gray (`bg-slate-500`). Both 'connecting' and 'reconnecting' map to amber (`bg-amber-400`).
+- When testing `startSignalR()` in space-view, call it directly with properties pre-set (`serverUrl`, `spaceId`, `token`) rather than going through the full `loadData` flow; `resolveToken()` reads from `getTokens()` via a JSON-based localStorage key (`sharedspaces:tokens`), so attribute-only mocking won't populate the token.
 
 ## Learnings (2026-03-19 Continued)
 
@@ -289,3 +332,76 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Truthy/type-only assertions are a false sense of security — if every extension returned the same icon/color, those tests would still pass. Always assert specific expected values for at least one representative per category.
 - Cross-category distinctness tests ("image color ≠ code color") catch regressions where category mappings accidentally collapse to the same value, complementing per-extension assertions.
 - When source and tests evolve in parallel branches, colorClass string assertions are more stable than SVG content assertions since color mappings change less frequently than icon markup.
+
+- Both InvitationEndpoints.CreateInvitation and TokenEndpoints.ExchangePinForToken build serverUrl from httpRequest.Scheme and httpRequest.Host; forwarded header tests must send X-Forwarded-Proto and X-Forwarded-Host via HttpRequestMessage.Headers.Add() since HttpClient extension methods don't support custom headers.
+- ForwardedHeadersTests.cs covers 8 integration tests for issue #69: 4 for invitation URL generation and 4 for token server_url JWT claim, each testing X-Forwarded-Proto alone, X-Forwarded-Host alone, both together, and no-forwarded-headers default.
+- Current ForwardedHeadersOptions in Program.cs only enables XForwardedFor | XForwardedProto; XForwardedHost support requires adding ForwardedHeaders.XForwardedHost to the flags — tests for X-Forwarded-Host will fail until that's done.
+
+## Team Updates (Issue #72)
+
+**Zoe completed per-space upload quota tests:** Wrote 9 integration tests covering the full quota feature:
+- **AdminEndpointTests.cs (6 tests):** Space creation with explicit quota (201 + fields), without quota (defaults), exceeds server limit (400), zero (400), negative (400), list spaces includes quota fields
+- **ItemEndpointTests.cs (3 tests):** Upload within per-space quota (201), upload exceeding per-space quota (413), upload without per-space quota falls back to server default (413)
+- Updated test DTOs: `CreateSpaceRequest` and `SpaceResponse` now include `MaxUploadSize`/`EffectiveMaxUploadSize` fields; `CreateSpaceAsync` helper accepts optional `maxUploadSize`
+- Updated `TestWebApplicationFactory.CreateSpaceAsync` in ItemEndpointTests to accept optional `maxUploadSize` parameter for space seeding
+- All 100 tests passing (91 existing + 9 new). Branch: `squad/72-per-space-upload-quota`, commit: d5e1d0c
+
+## Learnings
+
+- Per-space quota tests need two distinct patterns: (1) AdminEndpointTests use default server quota (100MB) and test via HTTP API creation, (2) ItemEndpointTests seed spaces with `MaxUploadSize` directly via factory helper and use default or custom `maxSpaceQuotaBytes` constructor param to control server default.
+- `SpaceResponse` now includes `MaxUploadSize` (nullable) and `EffectiveMaxUploadSize` (always populated); effective = space-specific ?? server default. Both fields returned from POST /v1/spaces and GET /v1/spaces.
+- Upload quota enforcement uses `space.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes` — per-space quota takes priority when set, otherwise falls back to server-wide `Storage:MaxSpaceQuotaBytes` config (default 104,857,600 = 100MB).
+
+## Learnings (Issue #74 - Relative Time Formatting Tests)
+
+**Time-dependent test patterns for client utilities:**
+- Use Vitest's `vi.useFakeTimers()` and `vi.setSystemTime()` to mock the current time, enabling deterministic testing of relative time functions that depend on `new Date()`
+- Always pair fake timers with cleanup: `vi.useRealTimers()` in `afterEach()` to prevent test pollution
+- Helper pattern: `mockNow(dateStr: string)` wrapper reduces boilerplate and ensures consistent fake timer setup across tests
+
+**Calendar day boundary testing (the critical tests):**
+- Time utilities with "Today/Yesterday" logic must test calendar day boundaries, not 24-hour periods — 11:59 PM → 12:01 AM transition is distinct from same-day time differences
+- Edge case: 23 hours 59 minutes on same calendar day = "Today"; 1 hour across midnight = "Yesterday"
+- DST, leap years, month/year boundaries all require explicit test coverage as calendar math can hide bugs in edge cases
+
+**Relative time function test suite structure (28 tests for formatRelativeTime):**
+1. **Today** block (5 tests): current moment, 1 min ago, 6 hours ago, midnight, 11:59 PM same-day
+2. **Yesterday** block (5 tests): previous calendar day, midnight boundary crossing, any time on previous day
+3. **X days ago** block (4 tests): 2d, 3d, 6d boundary cases
+4. **Short date format** (7+ days, 4 tests): 7 days, 30 days, 365 days, all 12 month abbreviations
+5. **Edge cases** (7 tests): future dates (clock skew), same exact moment (0ms), month/year/leap year boundaries, DST
+6. **Calendar day precision** (3 tests): explicit tests showing calendar math vs. 24-hour elapsed time
+
+**File location and test execution:**
+- Client lib tests live co-located: `src/SharedSpaces.Client/src/lib/format-time.test.ts` next to `format-time.ts`
+- Run single test file: `cd src/SharedSpaces.Client && npx vitest run src/lib/format-time.test.ts`
+- Vitest configured in package.json: `"test": "vitest run"`, `"test:watch": "vitest"`
+
+## Learnings (2026-03-21)
+
+**Share Target Deduplication Tests (Issue #73 Regression Prevention):**
+
+- Added comprehensive regression tests for the `uploadPendingShare()` deduplication fix in `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+- Test file structure: 3 new tests in "Scenario 6: Share Target Deduplication (Issue #73)" describe block covering:
+  1. Text shares via share_target: `pendingItemIds` prevents SignalR duplicate when uploading shared text
+  2. File shares via share_target: `pendingItemIds` prevents SignalR duplicate when uploading shared file
+  3. Cleanup on failure: `pendingItemIds` is cleaned up even when share upload fails (tests the `finally` block)
+- Key test pattern: Use delayed API promise resolution (`uploadPromise` with manual `uploadResolve()` callback) to simulate race condition where SignalR `ItemAdded` event arrives before API response completes
+- After calling `uploadPendingShare()`, wait 10ms for `pendingItemIds.add(itemId)` to execute before triggering SignalR handler
+- Verify items list remains empty when SignalR event arrives during pending upload (blocked by `pendingItemIds` check)
+- Verify `pendingItemIds` cleanup happens in both success and failure paths (tests the `finally` block behavior)
+- File share tests create `Uint8Array` fileData and mock `PendingShareItem` with `type: 'file'`, `fileName`, `fileType`, and `fileData` properties
+- Test suite now has 215 passing tests (up from 212), including 39 tests in space-view.test.ts
+- Key file paths:
+  - Implementation: `src/SharedSpaces.Client/src/features/space-view/space-view.ts` (uploadPendingShare method, lines 307-360)
+  - Tests: `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts` (lines 899-1211, new tests at end of dedup section)
+- Testing framework: Vitest 4.1.0 with happy-dom, follows existing patterns for mock setup, SignalR handler capture, and async timing control
+
+## 2026-03-21 — Share Target Dedup Regression Tests
+
+**Status:** Completed  
+**Session:** .squad/log/2026-03-21T13-15-30Z-fix-share-target-dedup.md  
+
+Added 3 comprehensive regression tests for Issue #73 fix in share_target deduplication. Tests cover text share, file share, and cleanup-on-failure scenarios. Test suite: 215/215 passing (3 new tests).
+
+**Impact:** Issue #73 protected from regression. All upload paths now have consistent dedup test coverage.

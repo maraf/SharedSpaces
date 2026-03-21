@@ -1181,6 +1181,7 @@ Replaced the separate status pill with a small colored **dot inside each space n
 - **Zoe:** Tests referencing `renderHeader()` or the old status pill text ("Connected", "Disconnected") will need updating.
 - **All:** The `connection-state-change` event is now part of the space-view → app-shell contract.
 
+
 # Client Version Injection via Git Tag
 
 **Decision Date:** 2026-03-21
@@ -1418,3 +1419,239 @@ README.md is now scannable, welcoming, and informative for:
 - Developers wanting to run the dev environment
 
 Deep architecture details are no longer in the README but can be extracted from the codebase or future docs.
+
+---
+
+## Per-Space Upload Quota (#72)
+
+**Date:** 2026-03-21  
+**Status:** ✅ Completed  
+**Deciders:** Kaylee (Backend), Wash (Frontend), Zoe (Tester)  
+
+### Context
+
+SharedSpaces needs per-space upload quotas to allow admins to enforce different storage limits across spaces within a single deployment. This supports multi-tenant use cases where different teams or projects have different storage budgets.
+
+### Decision
+
+Implement per-space quota as a nullable `long? MaxUploadSize` on the Space entity:
+- When null: server-wide default applies (100MB)
+- When set: cannot exceed server-wide default (validated at creation)
+- Resolved in two places: API response (`EffectiveMaxUploadSize`) and upload enforcement
+
+### Rationale
+
+- **Nullable over default-value:** Distinguishes "not set" from "explicitly set to default", allowing safe server-default changes later
+- **Server default as ceiling:** Prevents misconfiguration and storage overrun
+- **Dual resolution:** API truthfulness + consistent upload enforcement
+- **Mobile-first form:** Two-row layout accommodates quota input without overflow
+
+### Implementation
+
+**Backend (Kaylee):**
+- Domain: `Space.MaxUploadSize` property
+- Migration: Nullable INTEGER column
+- Validation: Create endpoint rejects quota ≤ 0 or > 100MB
+- Enforcement: Upload reads `space.MaxUploadSize ?? serverDefault`
+
+**Frontend (Wash):**
+- API types: `SpaceResponse.MaxUploadSize`, `SpaceResponse.EffectiveMaxUploadSize`
+- Form: MB-based input (`Math.round(parseFloat(mb) * 1024 * 1024)` conversion)
+- Display: Space list shows effective quota with "(default)" label
+
+**Tests (Zoe):**
+- 6 admin endpoint tests: validation, rejection, display
+- 3 upload enforcement tests: per-space limit, server-default fallback
+- 100/100 tests passing
+
+### Files Affected
+
+**Backend:**
+- `Domain/Space.cs` — Property added
+- `Configurations/SpaceConfiguration.cs` — Nullable column config
+- `Features/Spaces/Models.cs` — Request/Response DTOs
+- `Features/Spaces/SpaceEndpoints.cs` — Create/list validation
+- `Features/Items/ItemEndpoints.cs` — Upload enforcement
+- Migration — `AddSpaceMaxUploadSize`
+
+**Frontend:**
+- `src/SharedSpaces.Client/src/features/admin/admin-api.ts` — SpaceResponse + createSpace signature
+- `src/SharedSpaces.Client/src/features/admin/admin-view.ts` — Form UI, conversion, display
+
+**Tests:**
+- `AdminEndpointTests` — 6 new tests
+- `ItemEndpointTests` — 3 new tests
+- Test DTOs updated with quota fields
+
+### Outcome
+
+Feature complete and tested. Admins can now set custom quotas per space; null quotas fall back to server default.
+# Decision: Share Target Deduplication Fix
+
+**Date:** 2026-03-19  
+**Author:** Wash (Frontend Dev)  
+**Status:** Implemented  
+**Related Issue:** #73 — Duplicate item when file is shared through share_target
+
+## Context
+
+When a file is shared to SharedSpaces from another app (via the Web Share Target API), after selecting a space and uploading, the item appears twice in the list. A reload fixes it — indicating an in-memory duplication bug, not a server-side issue.
+
+The duplicate only occurs in the share_target flow, not in:
+- Manual file upload (drag-and-drop or file picker)
+- Text item submission
+- Offline queue uploads
+
+## Root Cause
+
+The `uploadPendingShare()` method in `src/SharedSpaces.Client/src/features/space-view/space-view.ts` was adding items directly to `this.items` without using the `pendingItemIds` deduplication mechanism.
+
+### How Deduplication Works Elsewhere
+
+In `uploadFiles()` and `handleTextSubmit()`:
+1. Generate itemId
+2. Add itemId to `this.pendingItemIds` Set **before upload**
+3. Call API (shareFile/shareText)
+4. Add returned item to `this.items`
+5. Remove itemId from `this.pendingItemIds` in finally block
+
+When SignalR receives an `ItemAdded` event, `handleItemAdded()` checks:
+```typescript
+if (this.items.some((item) => item.id === payload.id)) return;
+if (this.pendingItemIds.has(payload.id)) return;  // ← Prevents duplicate!
+```
+
+### What Was Missing in uploadPendingShare()
+
+```typescript
+private async uploadPendingShare(share: PendingShareItem) {
+  // ...
+  const itemId = crypto.randomUUID();
+  // ❌ Never added to pendingItemIds!
+  const item = await shareFile(...);
+  this.items = [item, ...this.items];  // Local add
+  // SignalR broadcasts ItemAdded → handleItemAdded adds again → DUPLICATE
+}
+```
+
+## Decision
+
+Wrap the upload logic in `uploadPendingShare()` with `pendingItemIds` tracking, mirroring the pattern in `uploadFiles()` and `handleTextSubmit()`.
+
+### Implementation
+
+```typescript
+private async uploadPendingShare(share: PendingShareItem) {
+  // ...
+  const itemId = crypto.randomUUID();
+  this.pendingItemIds.add(itemId);  // ✅ Track before upload
+  let uploaded = false;
+
+  try {
+    if (share.type === 'text' && share.content) {
+      const item = await shareText(...);
+      this.items = [item, ...this.items];
+      uploaded = true;
+    } else if (share.type === 'file' && share.fileData) {
+      const item = await shareFile(...);
+      this.items = [item, ...this.items];
+      uploaded = true;
+    }
+    // ... remove from pending shares
+  } finally {
+    this.pendingItemIds.delete(itemId);  // ✅ Clean up in finally
+  }
+}
+```
+
+## Rationale
+
+- **Consistency:** All three upload paths (manual, text, share target) now use the same deduplication pattern
+- **Race condition safety:** The `pendingItemIds` mechanism was already proven effective by commit 3502e56 (Issue #26 fix for uploader-side duplicates)
+- **Minimal change:** No new state or logic; just extends existing pattern to a third code path
+- **Non-blocking:** Failure to upload still cleans up the pending ID via finally block
+
+## Alternatives Considered
+
+1. **Skip local add, rely only on SignalR** — Would introduce UI lag (user waits for server broadcast instead of instant feedback). Rejected.
+2. **Debounce SignalR events** — Complex, doesn't address root cause. Rejected.
+3. **Server-side dedup by itemId** — Server already deduplicates correctly; bug is client-side only. Rejected.
+
+## Consequences
+
+- **Positive:**
+  - Share target flow now matches behavior of manual upload and text submit
+  - No more duplicate items from share_target
+  - Code is more maintainable with consistent patterns across all upload paths
+- **Negative:** None
+- **Testing:** TypeScript compilation passes. Lint passes. Build fails on pre-existing bootstrap-icons import issue (unrelated).
+
+## Verification
+
+1. Lint: ✅ Pass
+2. TypeScript: ✅ Pass
+3. Build: ⚠️ Pre-existing bootstrap-icons import error (not introduced by this change)
+4. Manual testing: Should verify by sharing a file from another app, selecting a space, and confirming single item appears
+
+## Related Commits
+
+- 3502e56 — Original `pendingItemIds` deduplication fix for race condition (Issue #26)
+- Current commit — Extends pattern to `uploadPendingShare()`
+
+
+---
+
+# Decision: Share Target Deduplication Test Strategy
+
+**Date:** 2026-03-21  
+**Status:** Implemented  
+**Agent:** Zoe  
+**Context:** Issue #73 regression prevention
+
+## Problem
+
+Wash fixed a duplicate item bug in the share_target flow (`uploadPendingShare`) by adding `pendingItemIds` tracking (matching the pattern in `uploadFiles` and `handleTextSubmit`). Without regression tests, this fix could be accidentally reverted or broken by future refactoring.
+
+## Decision
+
+Added 3 comprehensive tests in `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts` under "Scenario 6: Share Target Deduplication (Issue #73)":
+
+1. **Text share deduplication**: Verifies `pendingItemIds` prevents SignalR `ItemAdded` from duplicating a text item shared via share_target when the SignalR event arrives before the API response completes
+2. **File share deduplication**: Same coverage for file shares (tests the file upload branch of `uploadPendingShare`)
+3. **Cleanup on failure**: Verifies the `finally` block cleans up `pendingItemIds` even when upload fails, preventing permanent ID pollution
+
+## Implementation Pattern
+
+Each test follows the existing race-condition test patterns in the file:
+
+- Use delayed API promise resolution (`uploadPromise` with manual `uploadResolve()`) to simulate the race condition
+- Wait 10ms after calling `uploadPendingShare()` for `pendingItemIds.add(itemId)` to execute
+- Trigger SignalR `ItemAdded` handler while the upload is pending
+- Verify items list remains empty (SignalR blocked by `pendingItemIds` check)
+- Complete API response and verify item added exactly once
+- Verify `pendingItemIds` cleaned up after upload completes or fails
+
+## Consequences
+
+**Positive:**
+- Regression protection for Issue #73 fix
+- Consistent test coverage across all three upload paths (uploadFiles, handleTextSubmit, uploadPendingShare)
+- Tests document the dedup mechanism for future maintainers
+- Test suite now has 215 passing tests (up from 212)
+
+**Negative:**
+- None; tests follow existing patterns and add minimal maintenance burden
+
+## Alternatives Considered
+
+1. **E2E Playwright test only**: Would catch the bug but be slower, more brittle, and not document the specific dedup mechanism
+2. **No tests**: Unacceptable — this was a real user-facing bug that caused duplicate items
+
+## Verification
+
+All 215 tests pass, including the 3 new share_target dedup tests:
+```
+✓ src/features/space-view/space-view.test.ts (39 tests) 864ms
+  - Scenario 6: Share Target Deduplication (Issue #73) (3 tests)
+```
+

@@ -2,6 +2,8 @@ export interface SpaceResponse {
   id: string;
   name: string;
   createdAt: string;
+  maxUploadSize: number | null;
+  effectiveMaxUploadSize: number;
 }
 
 export interface InvitationResponse {
@@ -112,13 +114,17 @@ export async function createSpace(
   apiBaseUrl: string,
   adminSecret: string,
   name: string,
+  maxUploadSize?: number | null,
 ): Promise<SpaceResponse> {
   try {
     const base = normalizeApiBaseUrl(apiBaseUrl);
     const response = await fetch(`${base}/v1/spaces`, {
       method: 'POST',
       headers: createAdminHeaders(adminSecret, true),
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({
+        name,
+        ...(maxUploadSize != null ? { maxUploadSize } : {}),
+      }),
     });
 
     await throwForFailedResponse(response, { includeBadRequestMessage: true });

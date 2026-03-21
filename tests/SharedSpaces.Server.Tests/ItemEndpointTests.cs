@@ -354,6 +354,79 @@ public class ItemEndpointTests
         itemCount.Should().Be(1);
     }
 
+    // ========== Per-Space Upload Quota Tests ==========
+
+    [Fact]
+    public async Task UpsertFileItem_WithinPerSpaceQuota_Succeeds()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Small Quota Space", maxUploadSize: 1024);
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var itemId = Guid.NewGuid();
+        var fileBytes = Enumerable.Repeat((byte)'a', 256).ToArray();
+
+        var response = await UpsertFileItemAsync(client, space.Id, itemId, fileBytes, "small.txt", token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SpaceItemResponse>(response);
+        body.Id.Should().Be(itemId);
+        body.FileSize.Should().Be(fileBytes.LongLength);
+    }
+
+    [Fact]
+    public async Task UpsertFileItem_ExceedingPerSpaceQuota_Returns413()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Tight Quota Space", maxUploadSize: 1024);
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        await factory.CreateItemAsync(
+            space.Id,
+            member.Id,
+            contentType: "file",
+            content: "existing.bin",
+            sharedAt: DateTime.UtcNow.AddMinutes(-1),
+            fileSize: 900);
+
+        var response = await UpsertFileItemAsync(
+            client,
+            space.Id,
+            Guid.NewGuid(),
+            Enumerable.Repeat((byte)'x', 200).ToArray(),
+            "overflow.bin",
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        var itemCount = await factory.WithDbContextAsync(db => db.SpaceItems.CountAsync(item => item.SpaceId == space.Id));
+        itemCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UpsertFileItem_WithoutPerSpaceQuota_UsesServerDefault()
+    {
+        await using var factory = new TestWebApplicationFactory(maxSpaceQuotaBytes: 1024);
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var response = await UpsertFileItemAsync(
+            client,
+            space.Id,
+            Guid.NewGuid(),
+            Enumerable.Repeat((byte)'z', 2000).ToArray(),
+            "too-large.bin",
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+    }
+
     [Fact]
     public async Task DeleteItem_DeletesExistingItem_Returns204()
     {
@@ -564,14 +637,15 @@ public class ItemEndpointTests
             });
         }
 
-        public async Task<Space> CreateSpaceAsync(string name = "Test Space")
+        public async Task<Space> CreateSpaceAsync(string name = "Test Space", long? maxUploadSize = null)
         {
             return await WithDbContextAsync(async db =>
             {
                 var space = new Space
                 {
                     Id = Guid.NewGuid(),
-                    Name = name
+                    Name = name,
+                    MaxUploadSize = maxUploadSize
                 };
 
                 db.Spaces.Add(space);
