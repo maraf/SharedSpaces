@@ -30,6 +30,7 @@ jobs:
       - name: Publish container
         run: >
           dotnet publish src/SharedSpaces.Server/SharedSpaces.Server.csproj
+          --configuration Release
           --os linux
           --arch x64
           -p:PublishProfile=DefaultContainer
