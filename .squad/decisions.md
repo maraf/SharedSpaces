@@ -1180,3 +1180,63 @@ Replaced the separate status pill with a small colored **dot inside each space n
 
 - **Zoe:** Tests referencing `renderHeader()` or the old status pill text ("Connected", "Disconnected") will need updating.
 - **All:** The `connection-state-change` event is now part of the space-view → app-shell contract.
+
+## Server Container Build Pipeline
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active  
+**Issue:** #58  
+**PR:** #59
+
+### Context
+We need a way to build and publish Docker container images for the server project to `ghcr.io`.
+
+### Decision
+- Use .NET SDK built-in container support (`EnableSdkContainerSupport`) rather than a Dockerfile
+- Container images are published to `ghcr.io/maraf/sharedspaces-server`
+- Image tags follow the format `{version}-{rid}` (e.g., `2.1.3-linux-x64`)
+- Workflow triggers on `server-*` git tags; version is extracted from the tag name
+- Only `linux-x64` is published for now; additional RIDs can be added as matrix entries later
+
+### Rationale
+- SDK container support keeps the build declarative in MSBuild (no Dockerfile to maintain)
+- Tag-triggered CI means container builds are explicit and version-controlled
+- `packages: write` permission + `GITHUB_TOKEN` avoids needing separate registry credentials
+- MSBuild properties make the build reproducible and version-aware
+
+### Implementation
+- Modified `src/SharedSpaces.Server/SharedSpaces.Server.csproj` with MSBuild container properties
+- Added `.github/workflows/server-container.yml` workflow triggered on `server-*` tags
+- Workflow extracts version via shell parameter expansion (`${GITHUB_REF_NAME#server-}`)
+- Uses `dotnet publish` with `-p:PublishProfile=DefaultContainer` for container build
+
+### Files Modified
+- `src/SharedSpaces.Server/SharedSpaces.Server.csproj` — Added container metadata
+- `.github/workflows/server-container.yml` — New workflow for tag-triggered builds
+
+## Copilot Directive: UI Screenshot Testing
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Marek Fišera (via Copilot)  
+**Status:** Active
+
+### Context
+Ensuring consistent UI across screen sizes and preventing regressions requires systematic screenshot capture and comparison.
+
+### Decision
+- Any agent making UI changes must run `npx playwright test` from `src/SharedSpaces.Client` before and after changes
+- Capture baseline screenshots before modifications
+- Recapture after changes to identify regressions
+- Compare screenshots especially on mobile (390 × 844) for overflow, text truncation, and layout shifts
+- Include updated screenshots in the commit
+
+### Rationale
+- Playwright snapshots provide objective regression detection
+- Mobile-first inspection catches layout issues before they reach production
+- Screenshots are version-controlled, enabling easy diff review
+- Baseline/comparison workflow is documented in `.github/skills/playwright-screenshots/SKILL.md`
+
+### Scope
+- Applies to all UI modifications (components, templates, styles, layout)
+- Mobile layout checks include: text overflow, button wrapping, pill bar issues, truncated labels, modal scrolling
