@@ -244,5 +244,21 @@ test.describe('Screenshot Capture', () => {
       await navigateToAdminSignedIn(page);
       await capture(page, 'admin-spaces', vp);
     });
+
+    test(`space view - delete confirmation - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Click the first space pill to enter space view
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+      // Click the delete (trash) button on the first item card
+      const deleteBtn = page.locator('space-view button[aria-label="Delete item"]').first();
+      await deleteBtn.click();
+      await page.waitForTimeout(500);
+      await capture(page, 'space-delete-confirm', vp);
+    });
   }
 });
