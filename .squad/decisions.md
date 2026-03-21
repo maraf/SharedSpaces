@@ -1181,6 +1181,7 @@ Replaced the separate status pill with a small colored **dot inside each space n
 - **Zoe:** Tests referencing `renderHeader()` or the old status pill text ("Connected", "Disconnected") will need updating.
 - **All:** The `connection-state-change` event is now part of the space-view → app-shell contract.
 
+
 # Client Version Injection via Git Tag
 
 **Decision Date:** 2026-03-21

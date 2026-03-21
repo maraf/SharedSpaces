@@ -29,6 +29,7 @@ vi.mock('@microsoft/signalr', () => {
     HubConnectionBuilder: MockHubConnectionBuilder,
     HubConnectionState: {
       Connected: 'Connected',
+      Connecting: 'Connecting',
       Disconnected: 'Disconnected',
       Reconnecting: 'Reconnecting',
       Disconnecting: 'Disconnecting',
@@ -168,6 +169,18 @@ describe('SignalRClient', () => {
       await client.stop();
 
       expect(client.state).toBe('disconnected');
+    });
+
+    it('state getter returns connecting when HubConnectionState is Connecting', () => {
+      const client = new SignalRClient({
+        serverUrl,
+        spaceId,
+        accessTokenFactory,
+      });
+
+      mockConnection.state = 'Connecting';
+
+      expect(client.state).toBe('connecting');
     });
 
     it('reports reconnecting state during reconnection', () => {
@@ -415,6 +428,31 @@ describe('SignalRClient', () => {
       }
 
       expect(client.state).toBe('disconnected');
+    });
+
+    it('calls onStateChange with disconnected when onclose fires', async () => {
+      const onStateChange = vi.fn();
+      const client = new SignalRClient({
+        serverUrl,
+        spaceId,
+        accessTokenFactory,
+        onStateChange,
+      });
+
+      mockConnection.start.mockImplementation(async () => {
+        mockConnection.state = 'Connected';
+      });
+
+      await client.start();
+      onStateChange.mockClear();
+
+      // Simulate connection close
+      const closeHandler = mockConnection.onclose.mock.calls[0]?.[0];
+      expect(closeHandler).toBeDefined();
+      mockConnection.state = 'Disconnected';
+      closeHandler();
+
+      expect(onStateChange).toHaveBeenCalledWith('disconnected');
     });
 
     it('continues to deliver events after stop (handlers registered in constructor)', async () => {

@@ -32,6 +32,7 @@ vi.mock('@microsoft/signalr', () => {
     HubConnectionBuilder: MockHubConnectionBuilder,
     HubConnectionState: {
       Connected: 'Connected',
+      Connecting: 'Connecting',
       Disconnected: 'Disconnected',
       Reconnecting: 'Reconnecting',
       Disconnecting: 'Disconnecting',
@@ -747,6 +748,121 @@ describe('SpaceView - Deduplication Logic', () => {
         items = (element as any).items as SpaceItemResponse[];
         expect(items).toHaveLength(0);
       }
+    });
+  });
+
+  describe('Connection Lifecycle', () => {
+    it('disconnectedCallback calls stopSignalR and stops the SignalR connection', async () => {
+      // Create a mock SignalR client on the element directly
+      const mockClient = {
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        state: 'connected' as const,
+      };
+      (element as any).signalRClient = mockClient;
+      (element as any).connectionState = 'connected';
+
+      // Mount element to establish connected state
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Remove from DOM — triggers disconnectedCallback → stopSignalR
+      element.remove();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(mockClient.stop).toHaveBeenCalled();
+    });
+
+    it('sets signalRClient to undefined after disconnection', async () => {
+      const mockClient = {
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        state: 'connected' as const,
+      };
+      (element as any).signalRClient = mockClient;
+
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Verify signalRClient exists while connected
+      expect((element as any).signalRClient).toBeDefined();
+
+      // Disconnect
+      element.remove();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // signalRClient cleaned up
+      expect((element as any).signalRClient).toBeUndefined();
+    });
+
+    it('sets connectionState to disconnected after stopSignalR', async () => {
+      const mockClient = {
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        state: 'connected' as const,
+      };
+      (element as any).signalRClient = mockClient;
+      (element as any).connectionState = 'connected';
+
+      // Call stopSignalR directly
+      await (element as any).stopSignalR();
+
+      expect((element as any).connectionState).toBe('disconnected');
+      expect((element as any).signalRClient).toBeUndefined();
+    });
+
+    it('dispatches connection-state-change event when connectionState changes while connected', async () => {
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const stateChanges: Array<{ spaceId: string; state: string }> = [];
+      element.addEventListener('connection-state-change', ((event: CustomEvent) => {
+        stateChanges.push(event.detail);
+      }) as EventListener);
+
+      // Directly change connectionState (simulating onStateChange callback)
+      (element as any).spaceId = spaceId;
+      (element as any).connectionState = 'connected';
+      await element.updateComplete;
+
+      expect(stateChanges.length).toBeGreaterThan(0);
+      expect(stateChanges[0]).toEqual({ spaceId, state: 'connected' });
+    });
+
+    it('does not dispatch connection-state-change when spaceId is not set', async () => {
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const stateChanges: Array<{ spaceId: string; state: string }> = [];
+      element.addEventListener('connection-state-change', ((event: CustomEvent) => {
+        stateChanges.push(event.detail);
+      }) as EventListener);
+
+      // Change connectionState without a spaceId
+      (element as any).spaceId = undefined;
+      (element as any).connectionState = 'connected';
+      await element.updateComplete;
+
+      expect(stateChanges).toHaveLength(0);
+    });
+  });
+
+  describe('startSignalR sets connecting state', () => {
+    it('sets connectionState to connecting before start() resolves', async () => {
+      let stateAtStartCall: string | undefined;
+      mockSignalRConnection.start.mockImplementation(async () => {
+        stateAtStartCall = (element as any).connectionState;
+        mockSignalRConnection.state = 'Connected';
+      });
+
+      // Set required properties directly (same pattern as Connection Lifecycle tests)
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      await (element as any).startSignalR();
+
+      expect(stateAtStartCall).toBe('connecting');
     });
   });
 

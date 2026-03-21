@@ -259,11 +259,39 @@ Finalized dead space removal UI implementation:
 
 - **Connection status dot in nav pills:** Moved connection status from a separate pill in `space-view.ts renderHeader()` into a colored dot inside each space navigation pill in `app-shell.ts`. Pattern: `space-view` dispatches `connection-state-change` custom event (bubbles+composed) on `connectionState` reactive prop changes. `app-shell` listens on `<main>`, stores `Record<string, ConnectionState>` keyed by spaceId, and renders a 2×2 dot (`h-2 w-2 rounded-full`) before space name text. Colors: gray=no state, green=connected, orange=reconnecting, red=disconnected. State persists when switching spaces (no reset to gray). Stale entries for removed spaces are harmless since pills don't render.
   - Key files: `app-shell.ts` (spaceConnectionStates, handleConnectionStateChange, dotColor, pill rendering), `space-view.ts` (updated lifecycle, removed renderHeader)
+
+- **Connection dot stale state bug fix:** When navigating away from space view, `<space-view>` is removed from DOM and its `disconnectedCallback` fires `stopSignalR()`, but Lit doesn't run reactive updates on disconnected elements — so the `connection-state-change` CustomEvent never dispatches and the nav pill dot stays green. Fix: added `willUpdate()` override in `app-shell.ts` to detect `view` changing from `'space'` to any other view, and directly set `spaceConnectionStates[currentSpaceId]` to `'disconnected'`. Using `willUpdate` (not `updated`) means the state change is included in the same render cycle — no extra re-render needed. This is a general Lit pattern: parent components should not rely on child CustomEvents for cleanup when the child is about to be removed from DOM.
+  - Key file: `app-shell.ts` (willUpdate override, lines ~94-104)
+
+## Team Update: Connection Dot Navigation Fix (2026-03-20)
+
+**Coordinated by:** Scribe  
+**Agents:** Wash (fix), Zoe (tests), Coordinator (lint)
+
+**Summary:** Fixed connection dot not updating when navigating away from space-view. App-shell now uses willUpdate() to proactively reset connection state when view changes from 'space' to other routes. Zoe added comprehensive 14-test suite validating three-layer connection cleanup lifecycle (SignalR client → space-view → app-shell). Coordinator fixed eslint config to permit any in test files per pre-existing convention.
+
+**Key Pattern:** willUpdate() in parent components provides a proactive fallback for cleanup when child elements are removed from DOM, because Lit doesn't fire reactive updates on disconnected elements.
+
+**Test Coverage:** 138 passing tests (↑14 new). All linting passes. Three-layer coverage (unit-style direct method testing) avoids flakiness from async Lit lifecycle timing.
+
+**Files Modified:**
+- app-shell.ts (willUpdate)
+- space-view.test.ts (5 new tests)
+- signalr-client.test.ts (1 new test)
+- app-shell.test.ts (8 new tests, created)
+- eslint.config.js (allow any in tests)
+  - Key files: `app-shell.ts` (spaceConnectionStates, handleConnectionStateChange, dotColor, pill rendering), `space-view.ts` (updated lifecycle, removed renderHeader)
 - **Vite define for build-time injection (2026-03-19):** Added client version label using Vite's `define` option to inject `__APP_VERSION__` at build time from `package.json`. Pattern: import pkg from './package.json', add `define: { __APP_VERSION__: JSON.stringify(pkg.version) }` to vite.config.ts, create `src/vite-env.d.ts` with `declare const __APP_VERSION__: string`, then reference `__APP_VERSION__` directly in component templates. Version displays as small muted label (`text-xs text-slate-500`) next to SharedSpaces heading in app-shell.ts. This ensures displayed version always matches build. File: `src/SharedSpaces.Client/src/vite-env.d.ts` for type declarations.
 
 - **CI/CD workflows for client (2026-03-21):** Created `client-publish.yml` and `client-deploy.yml` workflows. Updated `vite.config.ts` to prefer `process.env.VITE_APP_VERSION` over `pkg.version` for version injection — package.json stays at `0.0.0`. Publish workflow: triggers on `client-*` tags, builds with `--base ./` (relative paths) and VITE_APP_VERSION from tag, zips dist/, uploads to GH Release (creates release if it doesn't exist, uploads to existing release otherwise). Deploy workflow: manual `workflow_dispatch` with `tag` input, downloads prebuilt zip from GH Release, asserts exactly one zip, unzips, and deploys via `actions/upload-pages-artifact` + `actions/deploy-pages`. No Node.js, no npm, no CNAME detection at deploy time. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`, `src/SharedSpaces.Client/vite.config.ts`.
 
 - **Build-once-deploy-anywhere refactor (2025-07-17, PR #61):** Reworked `client-publish.yml` and `client-deploy.yml` to follow "build once, deploy anywhere." Publish now builds with `--base ./` (relative asset paths), zips, and uploads to GH Release. Deploy downloads the prebuilt zip via `gh release download` instead of rebuilding from source — no Node.js, no npm, no CNAME detection. Relative base paths (`./`) work at any deployment path (custom domain root or `/repo-name/` subpath), eliminating the CNAME-sniffing logic entirely. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`. Decision doc: `.squad/decisions/inbox/wash-deploy-prebuilt.md`.
+
+- **Connection dot color behavior refinement:** Improved dot color transitions to avoid the jarring gray→red→green flash when selecting a space, and the misleading red dot on non-selected spaces. Three coordinated changes:
+  1. `signalr-client.ts`: Added `'connecting'` to `ConnectionState` type union and mapped `HubConnectionState.Connecting` in the `state` getter.
+  2. `space-view.ts`: Set `connectionState = 'connecting'` before calling `signalRClient.start()` so the dot goes orange immediately.
+  3. `app-shell.ts`: In `willUpdate()`, departing space state is now *deleted* from the map (object destructuring) instead of set to `'disconnected'`, so the dot falls through to gray. In `dotColor()`, `'connecting'` maps to amber alongside `'reconnecting'`, and `'disconnected'` only shows red when the space is the actively-viewed one (`this.view === 'space' && this.currentSpaceId === spaceId`); otherwise gray.
+  - Result: gray (no state) → orange (connecting/reconnecting) → green (connected). Red only appears for genuinely broken connections on the active space. Non-selected spaces revert to neutral gray.
 
 ## Session 2026-03-19 — Issue #54 Item Card Redesign
 
