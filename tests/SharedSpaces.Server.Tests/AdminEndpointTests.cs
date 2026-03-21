@@ -1,5 +1,9 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
@@ -9,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -655,6 +660,137 @@ public class AdminEndpointTests
         secondResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
+    [Fact]
+    public async Task RemoveMember_RevokedMemberWithItems_ReturnsNoContentAndDeletesMemberAndItems()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var textItemId = Guid.NewGuid();
+        var textResponse = await UpsertTextItemAsync(client, space.Id, textItemId, "member text", token);
+        textResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var fileItemId = Guid.NewGuid();
+        var fileBytes = Enumerable.Repeat((byte)'x', 100).ToArray();
+        var fileResponse = await UpsertFileItemAsync(client, space.Id, fileItemId, fileBytes, "test.bin", token);
+        fileResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var revokeResponse = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        revokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var removeResponse = await RemoveMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var listMembersResponse = await ListMembersAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+        var members = await ReadJsonAsync<MemberResponse[]>(listMembersResponse);
+        members.Should().NotContain(m => m.Id == member.Id);
+
+        var listItemsResponse = await ListItemsAsync(client, space.Id, token);
+        listItemsResponse.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+
+        var memberExists = await factory.WithDbContextAsync(db => db.SpaceMembers.AnyAsync(m => m.Id == member.Id));
+        memberExists.Should().BeFalse();
+
+        var itemsExist = await factory.WithDbContextAsync(db => db.SpaceItems.AnyAsync(item => item.MemberId == member.Id));
+        itemsExist.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RemoveMember_RevokedMemberWithoutItems_ReturnsNoContent()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        var revokeResponse = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        revokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var removeResponse = await RemoveMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var listMembersResponse = await ListMembersAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+        var members = await ReadJsonAsync<MemberResponse[]>(listMembersResponse);
+        members.Should().NotContain(m => m.Id == member.Id);
+
+        var memberExists = await factory.WithDbContextAsync(db => db.SpaceMembers.AnyAsync(m => m.Id == member.Id));
+        memberExists.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RemoveMember_NonRevokedMember_ReturnsConflict()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        var removeResponse = await RemoveMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var error = await ReadJsonAsync<ErrorResponse>(removeResponse);
+        error.Should().NotBeNull();
+
+        var memberExists = await factory.WithDbContextAsync(db => db.SpaceMembers.AnyAsync(m => m.Id == member.Id));
+        memberExists.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RemoveMember_MemberNotFound_ReturnsNotFound()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+
+        var removeResponse = await RemoveMemberAsync(client, space.Id, Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(removeResponse);
+        error.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RemoveMember_SpaceNotFound_ReturnsNotFound()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var removeResponse = await RemoveMemberAsync(client, Guid.NewGuid(), Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(removeResponse);
+        error.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RemoveMember_MissingAdminSecret_ReturnsUnauthorized()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        var revokeResponse = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        revokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var removeResponse = await RemoveMemberAsync(client, space.Id, member.Id, adminSecret: null);
+
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var memberExists = await factory.WithDbContextAsync(db => db.SpaceMembers.AnyAsync(m => m.Id == member.Id));
+        memberExists.Should().BeTrue();
+    }
+
     // ========== Invitation Management Tests ==========
 
     [Fact]
@@ -919,6 +1055,21 @@ public class AdminEndpointTests
         return await client.SendAsync(request);
     }
 
+    private static async Task<HttpResponseMessage> RemoveMemberAsync(
+        HttpClient client,
+        Guid spaceId,
+        Guid memberId,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/v1/spaces/{spaceId}/members/{memberId}");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
+        return await client.SendAsync(request);
+    }
+
     private static async Task<HttpResponseMessage> ListInvitationsAsync(
         HttpClient client,
         Guid spaceId,
@@ -958,6 +1109,88 @@ public class AdminEndpointTests
             request.Headers.Add("X-Admin-Secret", adminSecret);
         }
 
+        return await client.SendAsync(request);
+    }
+
+    private static string GenerateTestJwt(Guid memberId, Guid spaceId, string displayName)
+    {
+        var claims = new[]
+        {
+            new Claim("sub", memberId.ToString()),
+            new Claim("display_name", displayName),
+            new Claim("space_id", spaceId.ToString()),
+            new Claim("server_url", TestWebApplicationFactory.ServerUrl)
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestWebApplicationFactory.JwtSigningKey));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            claims: claims,
+            signingCredentials: creds
+        );
+
+        var tokenHandler = new JwtSecurityTokenHandler();
+        return tokenHandler.WriteToken(token);
+    }
+
+    private static async Task<HttpResponseMessage> UpsertTextItemAsync(
+        HttpClient client,
+        Guid spaceId,
+        Guid itemId,
+        string content,
+        string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"/v1/spaces/{spaceId}/items/{itemId}");
+        using var form = new MultipartFormDataContent();
+
+        form.Add(new StringContent(itemId.ToString()), "id");
+        form.Add(new StringContent("text"), "contentType");
+        form.Add(new StringContent(content), "content");
+        request.Content = form;
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> UpsertFileItemAsync(
+        HttpClient client,
+        Guid spaceId,
+        Guid itemId,
+        byte[] fileBytes,
+        string fileName,
+        string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"/v1/spaces/{spaceId}/items/{itemId}");
+        using var form = new MultipartFormDataContent();
+        using var fileContent = new StreamContent(new MemoryStream(fileBytes));
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        form.Add(new StringContent(itemId.ToString()), "id");
+        form.Add(new StringContent("file"), "contentType");
+        form.Add(fileContent, "file", fileName);
+        request.Content = form;
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> ListItemsAsync(
+        HttpClient client,
+        Guid spaceId,
+        string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/spaces/{spaceId}/items");
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
         return await client.SendAsync(request);
     }
 

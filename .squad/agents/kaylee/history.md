@@ -232,3 +232,17 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 **Key Design Decision:** Nullable column distinguishes "not set" from "explicitly set to default". Server default (100MB) acts as ceiling — prevents quotas exceeding storage capacity. Resolved in two places: API response (display) and upload validation (enforcement).
 
 **Status:** ✅ Feature complete and tested. Recorded in `.squad/decisions.md`.
+
+## Team Update: Member Deletion Endpoint (2026-03-22, Issue #93)
+
+**Kaylee completed DELETE member endpoint for Issue #93:**
+
+- **Endpoint:** `DELETE /v1/spaces/{spaceId:guid}/members/{memberId:guid}`
+- **Admin-only:** Uses `AdminAuthenticationFilter` like the revoke endpoint
+- **Validation:** Returns 404 if space or member not found; returns 409 Conflict if member is not revoked
+- **Cleanup:** Finds all SpaceItems for the member, deletes file storage for file-type items, removes items from DB, removes member record
+- **SignalR:** Broadcasts `ItemDeletedEvent` for each deleted item to notify connected clients
+- **Pattern:** Follows existing `DeleteItem` pattern in `ItemEndpoints.cs` for file cleanup and SignalR notification
+- **Learnings:** DELETE operations require revocation check (409 if not revoked), file cleanup before DB removal, SignalR notification after DB commit
+- **File:** `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs` (added imports for IFileStorage and ISpaceHubNotifier)
+- **Build:** Verified with `dotnet build --no-restore` — successful compilation

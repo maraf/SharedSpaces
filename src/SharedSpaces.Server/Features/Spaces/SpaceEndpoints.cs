@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
+using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -23,6 +24,9 @@ public static class SpaceEndpoints
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
         group.MapPost("/{spaceId:guid}/members/{memberId:guid}/revoke", RevokeMember)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
+        group.MapDelete("/{spaceId:guid}/members/{memberId:guid}", DeleteMember)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
         return app;
@@ -137,6 +141,69 @@ public static class SpaceEndpoints
         {
             member.IsRevoked = true;
             await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> DeleteMember(
+        Guid spaceId,
+        Guid memberId,
+        AppDbContext db,
+        IFileStorage fileStorage,
+        ISpaceHubNotifier hubNotifier,
+        CancellationToken cancellationToken)
+    {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
+        var member = await db.SpaceMembers
+            .SingleOrDefaultAsync(existingMember => existingMember.SpaceId == spaceId && existingMember.Id == memberId, cancellationToken);
+
+        if (member is null)
+        {
+            return Results.NotFound(new { Error = "Member not found" });
+        }
+
+        if (!member.IsRevoked)
+        {
+            return Results.Conflict(new { Error = "Member must be revoked before deletion" });
+        }
+
+        var items = await db.SpaceItems
+            .Where(item => item.MemberId == memberId && item.SpaceId == spaceId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase);
+            if (isFile)
+            {
+                try
+                {
+                    await fileStorage.DeleteAsync(spaceId, item.Id, cancellationToken);
+                }
+                catch
+                {
+                    // Best-effort file cleanup
+                }
+            }
+        }
+
+        db.SpaceItems.RemoveRange(items);
+        db.SpaceMembers.Remove(member);
+        await db.SaveChangesAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            var itemDeletedEvent = new ItemDeletedEvent(item.Id, spaceId);
+            await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
         }
 
         return Results.NoContent();

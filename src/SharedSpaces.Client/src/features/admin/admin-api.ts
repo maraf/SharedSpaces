@@ -224,6 +224,30 @@ export async function listInvitations(
   }
 }
 
+export async function removeMember(
+  apiBaseUrl: string,
+  adminSecret: string,
+  spaceId: string,
+  memberId: string,
+): Promise<void> {
+  try {
+    const base = normalizeApiBaseUrl(apiBaseUrl);
+    const encodedSpaceId = encodeURIComponent(spaceId);
+    const encodedMemberId = encodeURIComponent(memberId);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodedSpaceId}/members/${encodedMemberId}`,
+      {
+        method: 'DELETE',
+        headers: createAdminHeaders(adminSecret),
+      },
+    );
+
+    await throwForFailedResponse(response, { notFoundMessage: 'Member not found' });
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
 export async function deleteInvitation(
   apiBaseUrl: string,
   adminSecret: string,
