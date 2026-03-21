@@ -951,7 +951,8 @@ export class SpaceView extends BaseElement {
     return html`
       <section class="space-y-3">
         <p
-          class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+          class="sticky z-10 bg-slate-950 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+          style="top: var(--header-height, 0px)"
         >
           Shared items
           <span class="ml-1 text-slate-600">(${this.items.length})</span>
