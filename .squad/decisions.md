@@ -1277,3 +1277,29 @@ No hardcoded base path input needed. Workflow logic:
 - Base path always matches actual GH Pages configuration
 - No manual workflow parameter needed
 - Deploy logic adapts automatically when custom domain is added/removed
+
+# Deploy from Prebuilt Release Artifact
+
+**Decision Date:** 2026-03-21
+**Decided By:** Wash (Frontend Dev)
+**Status:** Active
+
+## Context
+
+The `client-deploy.yml` workflow was rebuilding the client from source on every deploy. This duplicated the build already performed by `client-publish.yml` and introduced CNAME-sniffing logic to determine the Vite `base` path at deploy time. Rebuilding from source violates the "build once, deploy anywhere" principle — the deploy could produce a different artifact than what was tested.
+
+## Decision
+
+1. **Publish with relative base:** `client-publish.yml` now passes `--base ./` to Vite, making all asset references relative (`./assets/foo.js` instead of `/assets/foo.js`). The resulting zip works at any deployment path without rebuilding.
+
+2. **Deploy downloads the release zip:** `client-deploy.yml` no longer checks out code, installs Node.js, or runs `npm ci` / `npm run build`. It uses `gh release download` to fetch the prebuilt zip from the GitHub Release, unzips it, and deploys via GitHub Pages actions.
+
+3. **No CNAME detection needed:** Relative asset paths (`./`) work whether the site is served from a custom domain root or a `/repo-name/` subpath, so the base-path detection logic is removed entirely.
+
+## Consequences
+
+- **Faster deploys:** No build step means deploy takes seconds, not minutes.
+- **Reproducible:** What you publish is exactly what gets deployed — no build drift.
+- **Simpler workflow:** Deploy is ~20 lines instead of ~50. No Node.js, no npm, no git checkout.
+- **Rollback is trivial:** Point `tag` input at any previous release tag.
+- **Trade-off:** If a build is broken, you find out at publish time, not deploy time. This is the correct place to catch it.
