@@ -2042,3 +2042,63 @@ Implemented a comprehensive server URL history feature:
 - Could add URL validation before saving
 - Could show last-used timestamp next to each URL
 - Could group URLs by domain for better organization at scale
+
+
+---
+
+# Textarea Auto-grow Implementation
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Wash (Frontend Dev)  
+**Related Issue:** #84  
+**PR:** #90  
+**Status:** Active
+
+## Context
+
+The space-view share interface needed an improved text composition experience. Users typing longer messages had to manually resize the textarea or deal with limited vertical space.
+
+## Decision
+
+Implemented auto-grow textarea with the following specifications:
+
+1. **Starting height:** `rows="1"` — Compact by default, expands with user input
+2. **Max height:** `200px` — Prevents excessive space consumption on mobile (390×844 viewport)
+3. **Overflow behavior:** `overflow-y: auto` — Scroll when content exceeds max-height
+4. **Manual resize:** Disabled (`resize-none`) — Auto-grow provides superior UX
+
+## Rationale
+
+- **200px max-height:** Allows ~10 rows at text-sm (14px), balancing composition space with mobile UX
+- **Starting at 1 row:** Modern composable pattern (like chat apps) provides responsive, space-saving feel
+- **Disabled resize:** Auto-grow replaces manual resizing, preventing layout inconsistencies
+- **Scroll on overflow:** Natural behavior once max-height reached, familiar to users
+
+## Technical Implementation
+
+**File:** `src/SharedSpaces.Client/src/features/space-view/space-view.ts`
+
+- `autoResizeTextarea(textarea)` — Sets height to auto, then scrollHeight for accurate sizing
+- `resetTextareaHeight()` — Clears height constraint after text submission
+- Integrated into `handleTextInput` (keystroke) and `handleTextSubmit` (post-send reset)
+
+**Testing:** 25 comprehensive unit tests in `textarea-autogrow.test.ts` covering:
+- Height calculation and clamping
+- Scroll behavior at max-height
+- Reset behavior on submit
+- Edge cases (empty, very long text, etc.)
+- All 312 tests passing, no regressions
+
+## Impact
+
+- Users can comfortably compose multi-paragraph messages
+- Mobile layout remains usable and responsive
+- Familiar, modern UX pattern improves perceived quality
+- No breaking changes to existing functionality
+
+## Alternatives Considered
+
+1. **Fixed-height with scrollbar** — Rejected: Less responsive, less modern feel
+2. **Unlimited growth** — Rejected: Would break mobile layouts, consume excessive screen
+3. **Manual resize only** — Rejected: Worse UX than auto-grow, inconsistent sizing
+
