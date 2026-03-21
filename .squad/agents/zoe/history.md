@@ -301,3 +301,20 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - `app-shell.ts` `willUpdate()` removes the departing space's key from `spaceConnectionStates` (delete instead of setting 'disconnected') so it falls to the gray default dot color.
 - `app-shell.ts` `dotColor()` returns `bg-red-400` for 'disconnected' only when `this.view === 'space'` and `this.currentSpaceId === spaceId`; otherwise disconnected falls to gray (`bg-slate-500`). Both 'connecting' and 'reconnecting' map to amber (`bg-amber-400`).
 - When testing `startSignalR()` in space-view, call it directly with properties pre-set (`serverUrl`, `spaceId`, `token`) rather than going through the full `loadData` flow; `resolveToken()` reads from `getTokens()` via a JSON-based localStorage key (`sharedspaces:tokens`), so attribute-only mocking won't populate the token.
+
+## Learnings (2026-03-19 Continued)
+
+**File type icon utility test patterns (Issue #54 support):**
+- Lit `TemplateResult` objects are JavaScript objects with specific shape; tests verify `typeof result.svg === 'object'` and truthy value, not template rendering output
+- File extension detection must be case-insensitive (`.JPG` === `.jpg`) to handle varied user file naming conventions
+- Edge cases: empty strings, no-extension filenames, multi-dot filenames (`my.file.name.pdf`) all require explicit coverage
+- Icon utilities return structured results (`{ svg: TemplateResult, colorClass: string }`), enabling type-safe assertions on both shape and color class format
+- Tailwind color class validation: check string pattern (`/^(text-|bg-|border-)/`) to verify utility returns valid CSS class names
+- Tests for parallel implementation work (while building the source) should be written first, committed even when they fail due to missing source file, establishing TDD contract before implementation lands
+- Co-located test pattern (`*.test.ts` next to `*.ts` source) scales well for utility libraries; vitest runs individual test files with `npx vitest run src/lib/file-icons.test.ts`
+
+## Learnings (PR #64 Review Feedback)
+
+- Truthy/type-only assertions are a false sense of security — if every extension returned the same icon/color, those tests would still pass. Always assert specific expected values for at least one representative per category.
+- Cross-category distinctness tests ("image color ≠ code color") catch regressions where category mappings accidentally collapse to the same value, complementing per-extension assertions.
+- When source and tests evolve in parallel branches, colorClass string assertions are more stable than SVG content assertions since color mappings change less frequently than icon markup.

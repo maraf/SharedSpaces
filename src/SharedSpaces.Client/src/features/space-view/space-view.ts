@@ -28,6 +28,7 @@ import {
   type PendingShareItem,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
+import { getFileTypeIcon, getTextItemIcon } from '../../lib/file-icons';
 import {
   queueForOffline,
   getOfflineQueueCount,
@@ -827,36 +828,41 @@ export class SpaceView extends BaseElement {
 
         <ul class="space-y-1.5">
           ${this.pendingShares.map(
-            (share) => html`
-              <li
-                class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
-              >
-                <span class="shrink-0 text-sm" aria-hidden="true">
-                  ${share.type === 'file' ? '📄' : '📝'}
-                </span>
-                <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
-                  ${share.type === 'file'
-                    ? share.fileName ?? 'File'
-                    : (share.content ?? '').substring(0, 100)}
-                </span>
-                <button
-                  @click=${() => this.uploadPendingShare(share)}
-                  ?disabled=${this.isUploading}
-                  class="shrink-0 rounded px-2 py-1 text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
-                  title="Upload this item"
+            (share) => {
+              const icon = share.type === 'file' 
+                ? getFileTypeIcon(share.fileName ?? 'file', 18)
+                : getTextItemIcon(18);
+              return html`
+                <li
+                  class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
                 >
-                  Upload
-                </button>
-                <button
-                  @click=${() => this.dismissPendingShare(share)}
-                  class="shrink-0 rounded p-1 text-slate-500 hover:text-red-400"
-                  title="Dismiss"
-                  aria-label="Dismiss shared item"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-              </li>
-            `,
+                  <span class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+                    ${icon.svg}
+                  </span>
+                  <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
+                    ${share.type === 'file'
+                      ? share.fileName ?? 'File'
+                      : (share.content ?? '').substring(0, 100)}
+                  </span>
+                  <button
+                    @click=${() => this.uploadPendingShare(share)}
+                    ?disabled=${this.isUploading}
+                    class="shrink-0 rounded px-2 py-1 text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
+                    title="Upload this item"
+                  >
+                    Upload
+                  </button>
+                  <button
+                    @click=${() => this.dismissPendingShare(share)}
+                    class="shrink-0 rounded p-1 text-slate-500 hover:text-red-400"
+                    title="Dismiss"
+                    aria-label="Dismiss shared item"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                  </button>
+                </li>
+              `;
+            },
           )}
         </ul>
       </section>
@@ -965,22 +971,8 @@ export class SpaceView extends BaseElement {
       <li
         class="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
       >
-        <div class="space-y-1">
-          <!-- Row 1: Content (single line, truncated, clickable for text) -->
-          <div class="min-w-0">
-            ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
-          </div>
-          <!-- Row 2: Actions + relative time -->
-          <div class="flex items-center gap-1">
-            ${isFile ? this.renderDownloadButton(item) : this.renderCopyButton(item)}
-            ${this.renderDeleteButton(item)}
-            <time
-              class="ml-auto text-xs text-slate-500"
-              datetime=${item.sharedAt}
-            >
-              ${this.formatTime(item.sharedAt)}
-            </time>
-          </div>
+        <div class="flex items-center gap-3">
+          ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
         </div>
         ${showOverlay ? this.renderDeleteConfirmOverlay(item) : nothing}
       </li>
@@ -997,8 +989,8 @@ export class SpaceView extends BaseElement {
         aria-label=${copied ? 'Copied to clipboard' : 'Copy text to clipboard'}
       >
         ${copied
-          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
-          : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+          : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
       </button>
     `;
   }
@@ -1011,7 +1003,7 @@ export class SpaceView extends BaseElement {
         title="Delete item"
         aria-label="Delete item"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
       </button>
     `;
   }
@@ -1024,38 +1016,62 @@ export class SpaceView extends BaseElement {
         title="Download file"
         aria-label="Download file"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
       </button>
     `;
   }
 
   private renderTextContent(item: SpaceItemResponse) {
+    const icon = getTextItemIcon();
     return html`
-      <p
-        class="cursor-pointer truncate text-sm text-slate-200 hover:text-slate-100"
-        @click=${() => this.handleTextClick(item)}
-        title="Click to view full text"
-      >
-        ${item.content}
-      </p>
+      <!-- Left: Icon -->
+      <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+        ${icon.svg}
+      </div>
+      <!-- Center: Content -->
+      <div class="min-w-0 flex-1">
+        <p
+          class="cursor-pointer truncate text-sm font-medium text-slate-200 hover:text-slate-100"
+          @click=${() => this.handleTextClick(item)}
+          title="Click to view full text"
+        >
+          ${item.content}
+        </p>
+        <p class="text-xs text-slate-500">
+          <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
+        </p>
+      </div>
+      <!-- Right: Actions -->
+      <div class="flex shrink-0 items-center gap-1">
+        ${this.renderCopyButton(item)}
+        ${this.renderDeleteButton(item)}
+      </div>
     `;
   }
 
   private renderFileContent(item: SpaceItemResponse) {
+    const icon = getFileTypeIcon(item.content);
     return html`
-      <div class="flex items-center gap-2">
-        <span class="text-base" aria-hidden="true">📄</span>
-        <div class="min-w-0">
-          <p
-            class="truncate text-sm font-medium text-slate-200"
-            title=${item.content}
-          >
-            ${item.content}
-          </p>
-          <p class="text-xs text-slate-500">
-            ${this.formatFileSize(item.fileSize)}
-          </p>
-        </div>
+      <!-- Left: Icon -->
+      <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+        ${icon.svg}
+      </div>
+      <!-- Center: Content -->
+      <div class="min-w-0 flex-1">
+        <p
+          class="truncate text-sm font-medium text-slate-200"
+          title=${item.content}
+        >
+          ${item.content}
+        </p>
+        <p class="text-xs text-slate-500">
+          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
+        </p>
+      </div>
+      <!-- Right: Actions -->
+      <div class="flex shrink-0 items-center gap-1">
+        ${this.renderDownloadButton(item)}
+        ${this.renderDeleteButton(item)}
       </div>
     `;
   }
