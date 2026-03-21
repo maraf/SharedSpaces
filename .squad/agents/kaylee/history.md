@@ -194,3 +194,13 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 **Recommendation:**
 - Phase 1 (MVP): Backend endpoint with PIN validation, auto-generated item ID, system/anonymous member
 - Phase 2 (Polish): Service worker for offline queuing and sync
+
+## Team Updates (2026-03-21)
+
+**Kaylee completed Issue #58 (Server Container Build):**
+- Implemented Docker container building via .NET SDK built-in support (`EnableSdkContainerSupport`)
+- Modified `src/SharedSpaces.Server/SharedSpaces.Server.csproj` with container metadata (registry, repository, base image)
+- Added `.github/workflows/server-container.yml` workflow triggered on `server-*` git tags
+- Workflow extracts version via parameter expansion and publishes to `ghcr.io/maraf/sharedspaces-server` with tag format `{version}-linux-x64`
+- PR #59 opened; architecture documented in `.squad/decisions.md`
+- Decision: SDK container support (declarative, no Dockerfile), tag-driven CI (explicit versioning), single RID now, extensible matrix for future multi-arch
