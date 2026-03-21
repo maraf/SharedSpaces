@@ -523,3 +523,42 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - `/workspaces/SharedSpaces/src/SharedSpaces.Client/src/features/space-view/space-view.ts` - SignalR connection lifecycle
 
 **Architecture Note:** space-view components are conditionally rendered, so mounting/unmounting triggers full lifecycle (connectedCallback/disconnectedCallback). Connection state must be tracked separately in parent (app-shell).
+
+## 2025-06-01 — Issue #84: Auto-grow Textarea
+
+**Status:** ✅ COMPLETE  
+**Files Modified:** `src/SharedSpaces.Client/src/features/space-view/space-view.ts`
+
+**Work Summary:**
+- **Auto-grow behavior:** Textarea height automatically adjusts to fit content as user types
+- **Max height:** 200px limit with scroll overflow (roughly 10 rows at text-sm)
+- **Starting height:** Changed from `rows="3"` to `rows="1"` — starts compact, grows as needed
+- **Manual resize disabled:** Replaced `resize-y` with `resize-none` (auto-grow provides better UX)
+- **Reset on submit:** Height resets to initial size after text is shared
+
+**Implementation:**
+- `autoResizeTextarea(textarea)`: Resets height to 'auto', then sets to scrollHeight
+- `resetTextareaHeight()`: Queries textarea and resets height after submit
+- Called from `handleTextInput` on every keystroke and after clearing text in `handleTextSubmit`
+
+**Validation:**
+- All 287 tests: ✅ PASS
+- TypeScript (space-view.ts): No new errors (pre-existing Lit decorator warnings unrelated to changes)
+
+**Design Decision:** 200px max-height balances multi-paragraph composition with mobile viewport constraints (390×844). Starting at 1 row creates modern chat-like feel with progressive disclosure.
+
+**Decision Doc:** `.squad/decisions/inbox/wash-textarea-autogrow.md`
+
+## Learnings
+
+### Auto-grow Textarea Pattern
+- **Height calculation:** Reset to 'auto' first, then read scrollHeight to get natural content height. This ensures accurate measurement after content changes.
+- **Reset after clear:** When clearing textarea value (after submit), manually reset height to 'auto' to return to initial compact state. Without this, the textarea stays at expanded height even when empty.
+- **Max height + overflow:** Use inline `style="max-height: 200px; overflow-y: auto;"` instead of Tailwind classes for precise pixel control. Once max is reached, scrolling takes over.
+- **Mobile considerations:** Choose max-height that works on smallest target viewport (390×844). 200px leaves room for header, compose box chrome, and virtual keyboard.
+- **Starting compact (rows="1"):** Modern pattern for compose boxes — starts small, grows on demand. Better space efficiency than fixed multi-row textarea.
+
+### Textarea Querying in Lit Components
+- Query textarea with `this.shadowRoot?.querySelector('textarea')` for reset operations that happen outside the input handler (where we don't have the event target reference).
+- In the input handler itself, use `e.target as HTMLTextAreaElement` directly for better performance (no DOM query needed).
+

@@ -442,9 +442,26 @@ export class SpaceView extends BaseElement {
   }
 
   private handleTextInput = (e: Event) => {
-    this.textInput = (e.target as HTMLTextAreaElement).value;
+    const textarea = e.target as HTMLTextAreaElement;
+    this.textInput = textarea.value;
     this.uploadError = '';
+    this.autoResizeTextarea(textarea);
   };
+
+  private autoResizeTextarea(textarea: HTMLTextAreaElement) {
+    textarea.style.height = 'auto';
+    const maxHeight = 200;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
+  private resetTextareaHeight() {
+    // Query the textarea and reset its height
+    const textarea = this.querySelector('textarea');
+    if (textarea) {
+      textarea.style.height = 'auto';
+    }
+  }
 
   private handleTextSubmit = async () => {
     if (!this.textInput.trim() || !this.serverUrl || !this.spaceId || !this.token)
@@ -458,6 +475,7 @@ export class SpaceView extends BaseElement {
       if (!navigator.onLine) {
         await this.enqueueForOffline('text', { content: this.textInput.trim() });
         this.textInput = '';
+        this.resetTextareaHeight();
         return;
       }
 
@@ -473,6 +491,7 @@ export class SpaceView extends BaseElement {
         );
         this.items = [item, ...this.items];
         this.textInput = '';
+        this.resetTextareaHeight();
       } finally {
         this.pendingItemIds.delete(itemId);
       }
@@ -482,6 +501,7 @@ export class SpaceView extends BaseElement {
         try {
           await this.enqueueForOffline('text', { content: this.textInput.trim() });
           this.textInput = '';
+          this.resetTextareaHeight();
           return;
         } catch {
           // Fall through to normal error handling
@@ -910,7 +930,7 @@ export class SpaceView extends BaseElement {
             @input=${this.handleTextInput}
             @keydown=${this.handleTextKeydown}
             ?disabled=${this.isUploading}
-            class="w-full resize-y rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
+            class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
 
           <!-- Action bar -->
