@@ -180,21 +180,10 @@ public static class SpaceEndpoints
             .Where(item => item.MemberId == memberId && item.SpaceId == spaceId)
             .ToListAsync(cancellationToken);
 
-        foreach (var item in items)
-        {
-            var isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase);
-            if (isFile)
-            {
-                try
-                {
-                    await fileStorage.DeleteAsync(spaceId, item.Id, cancellationToken);
-                }
-                catch
-                {
-                    // Best-effort file cleanup
-                }
-            }
-        }
+        var fileItemIds = items
+            .Where(item => string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Id)
+            .ToList();
 
         db.SpaceItems.RemoveRange(items);
         db.SpaceMembers.Remove(member);
@@ -204,6 +193,18 @@ public static class SpaceEndpoints
         {
             var itemDeletedEvent = new ItemDeletedEvent(item.Id, spaceId);
             await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
+        }
+
+        foreach (var fileItemId in fileItemIds)
+        {
+            try
+            {
+                await fileStorage.DeleteAsync(spaceId, fileItemId, cancellationToken);
+            }
+            catch
+            {
+                // Best-effort file cleanup
+            }
         }
 
         return Results.NoContent();

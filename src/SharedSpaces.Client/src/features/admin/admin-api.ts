@@ -41,6 +41,7 @@ type BadRequestResponse = {
 type RequestErrorOptions = {
   notFoundMessage?: string;
   includeBadRequestMessage?: boolean;
+  includeConflictMessage?: boolean;
 };
 
 function normalizeApiBaseUrl(apiBaseUrl: string) {
@@ -77,6 +78,11 @@ async function throwForFailedResponse(
 
   if (response.status === 404 && options.notFoundMessage) {
     throw new AdminApiError(options.notFoundMessage, 404);
+  }
+
+  if (response.status === 409 && options.includeConflictMessage) {
+    const error = (await response.json().catch(() => ({}))) as { Error?: string; message?: string };
+    throw new AdminApiError(error.Error || error.message || 'Conflict', 409);
   }
 
   throw new AdminApiError(`Server error: ${response.statusText}`, response.status);
@@ -242,7 +248,10 @@ export async function removeMember(
       },
     );
 
-    await throwForFailedResponse(response, { notFoundMessage: 'Member not found' });
+    await throwForFailedResponse(response, {
+      notFoundMessage: 'Space or member not found',
+      includeConflictMessage: true,
+    });
   } catch (error) {
     wrapNetworkError(error);
   }
