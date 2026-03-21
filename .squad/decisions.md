@@ -1181,6 +1181,130 @@ Replaced the separate status pill with a small colored **dot inside each space n
 - **Zoe:** Tests referencing `renderHeader()` or the old status pill text ("Connected", "Disconnected") will need updating.
 - **All:** The `connection-state-change` event is now part of the space-view → app-shell contract.
 
+# Client Version Injection via Git Tag
+
+**Decision Date:** 2026-03-21
+**Decided By:** Marek Fišera (via Copilot)
+**Status:** Active
+
+## Context
+
+Team debated how to stamp the client version: mutate package.json at build time, or use git tags as the source of truth?
+
+## Decision
+
+**Git tag is the source of truth.** Version is injected via `VITE_APP_VERSION` environment variable at build time (from git tag), never by mutating package.json.
+
+- Local dev: `package.json` version used (fallback in vite.config.ts)
+- CI/CD tag build: `VITE_APP_VERSION=X.Y.Z vite build` (from git tag)
+- package.json remains at `0.0.0` (no mutation)
+
+## Implementation
+
+`src/SharedSpaces.Client/vite.config.ts` define option:
+```javascript
+define: {
+  __APP_VERSION__: JSON.stringify(
+    process.env.VITE_APP_VERSION || pkg.version
+  )
+}
+```
+
+Version displayed in app-shell.ts as small muted label next to SharedSpaces heading.
+
+## Impact
+
+- Client workflows use git tags as version source: `git tag client-X.Y.Z && git push --tags`
+- No package.json drift
+- Local dev always builds with package.json version (`0.0.0` or whatever's in the file)
+
+# Client is Environment-Agnostic
+
+**Decision Date:** 2026-03-21
+**Decided By:** Marek Fišera (via Copilot)
+**Status:** Active
+
+## Context
+
+Should the deploy pipeline include a `server-url` parameter to bind the client to a specific API server?
+
+## Decision
+
+**No.** The client is environment-agnostic by design. It discovers the server URL at runtime via the join flow (user enters server URL or scans QR code).
+
+The built artifact (dist/) contains no hardcoded server URL. Same build can run against any server.
+
+## Implementation
+
+- Deploy workflows contain no `server-url` input parameter
+- Join view handles server discovery and token validation
+- All `serverUrl` state comes from user input (join flow) or token storage
+
+## Impact
+
+- Single client build serves all deployments (dev, staging, prod)
+- No environment-specific artifact builds needed
+- Users control which server they join at runtime
+
+# Deploy Base Path from CNAME File
+
+> **⚠️ Superseded** — This original design was replaced by "Deploy from Prebuilt Release Artifact" (below). The deploy workflow no longer performs CNAME detection or rebuilds from source.
+
+**Decision Date:** 2026-03-21
+**Decided By:** Marek Fišera (via Copilot)
+**Status:** Superseded
+
+## Context
+
+GitHub Pages deploy needs to set Vite's `--base` path correctly: custom domain → `/`, project domain → `/repo-name/`. Should this be a workflow input or auto-detected?
+
+## Decision
+
+**Auto-detect at deploy time from CNAME file.** The deploy workflow reads the existing CNAME file on the gh-pages branch:
+- CNAME exists → custom domain → `base='/'`
+- CNAME missing → project domain → `base='/{repo-name}/'`
+
+No hardcoded base path input needed. Workflow logic:
+1. Checkout gh-pages branch (shallow, single file)
+2. Check if CNAME exists
+3. Run `vite build --base` with determined path
+4. Deploy via `actions/upload-pages-artifact` + `actions/deploy-pages`
+
+## Implementation
+
+`.github/workflows/client-deploy.yml`: bash script checks for CNAME, sets `BASE_PATH` env var, passed to `vite build --base $BASE_PATH`.
+
+## Impact
+
+- Base path always matches actual GH Pages configuration
+- No manual workflow parameter needed
+- Deploy logic adapts automatically when custom domain is added/removed
+
+# Deploy from Prebuilt Release Artifact
+
+**Decision Date:** 2026-03-21
+**Decided By:** Wash (Frontend Dev)
+**Status:** Active
+
+## Context
+
+The `client-deploy.yml` workflow was rebuilding the client from source on every deploy. This duplicated the build already performed by `client-publish.yml` and introduced CNAME-sniffing logic to determine the Vite `base` path at deploy time. Rebuilding from source violates the "build once, deploy anywhere" principle — the deploy could produce a different artifact than what was tested.
+
+## Decision
+
+1. **Publish with relative base:** `client-publish.yml` now passes `--base ./` to Vite, making all asset references relative (`./assets/foo.js` instead of `/assets/foo.js`). The resulting zip works at any deployment path without rebuilding.
+
+2. **Deploy downloads the release zip:** `client-deploy.yml` no longer checks out code, installs Node.js, or runs `npm ci` / `npm run build`. It uses `gh release download` to fetch the prebuilt zip from the GitHub Release, unzips it, and deploys via GitHub Pages actions.
+
+3. **No CNAME detection needed:** Relative asset paths (`./`) work whether the site is served from a custom domain root or a `/repo-name/` subpath, so the base-path detection logic is removed entirely.
+
+## Consequences
+
+- **Faster deploys:** No build step means deploy takes seconds, not minutes.
+- **Reproducible:** What you publish is exactly what gets deployed — no build drift.
+- **Simpler workflow:** Deploy is ~20 lines instead of ~50. No Node.js, no npm, no git checkout.
+- **Rollback is trivial:** Point `tag` input at any previous release tag.
+- **Trade-off:** If a build is broken, you find out at publish time, not deploy time. This is the correct place to catch it.
 ## Server Container Build Pipeline
 
 **Decision Date:** 2026-03-21  
