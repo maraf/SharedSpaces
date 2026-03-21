@@ -61,6 +61,7 @@ export class SpaceView extends BaseElement {
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private offlineQueueCount = 0;
   @state() private syncMessage = '';
+  @state() private deleteConfirmItemId: string | null = null;
 
   private token?: string;
   private lastLoadedKey = '';
@@ -590,8 +591,18 @@ export class SpaceView extends BaseElement {
     }
   };
 
-  private handleDelete = async (item: SpaceItemResponse) => {
+  private handleDeleteRequest = (item: SpaceItemResponse) => {
+    this.deleteConfirmItemId = item.id;
+  };
+
+  private cancelDelete = () => {
+    this.deleteConfirmItemId = null;
+  };
+
+  private confirmDelete = async (item: SpaceItemResponse) => {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    this.deleteConfirmItemId = null;
 
     // Optimistic removal
     this.items = this.items.filter((i) => i.id !== item.id);
@@ -946,10 +957,11 @@ export class SpaceView extends BaseElement {
 
   private renderItemCard(item: SpaceItemResponse) {
     const isFile = item.contentType === 'file';
+    const showOverlay = this.deleteConfirmItemId === item.id;
 
     return html`
       <li
-        class="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+        class="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
       >
         <div class="space-y-1">
           <!-- Row 1: Content (single line, truncated, clickable for text) -->
@@ -968,6 +980,7 @@ export class SpaceView extends BaseElement {
             </time>
           </div>
         </div>
+        ${showOverlay ? this.renderDeleteConfirmOverlay(item) : nothing}
       </li>
     `;
   }
@@ -991,7 +1004,7 @@ export class SpaceView extends BaseElement {
   private renderDeleteButton(item: SpaceItemResponse) {
     return html`
       <button
-        @click=${() => this.handleDelete(item)}
+        @click=${() => this.handleDeleteRequest(item)}
         class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-red-400"
         title="Delete item"
         aria-label="Delete item"
@@ -1040,6 +1053,46 @@ export class SpaceView extends BaseElement {
           <p class="text-xs text-slate-500">
             ${this.formatFileSize(item.fileSize)}
           </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private getItemPreviewLabel(item: SpaceItemResponse): string {
+    if (item.contentType === 'file') {
+      return item.content;
+    }
+    const maxLen = 40;
+    const text = item.content.trim();
+    if (text.length <= maxLen) return text;
+    return text.slice(0, maxLen).trimEnd() + '…';
+  }
+
+  private renderDeleteConfirmOverlay(item: SpaceItemResponse) {
+    const label = this.getItemPreviewLabel(item);
+    return html`
+      <div
+        class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-lg bg-slate-900/95 px-4 py-3 backdrop-blur-sm"
+      >
+        <p class="max-w-full text-center text-sm text-slate-200">
+          Delete
+          <span class="inline-block max-w-[200px] truncate align-bottom font-medium text-white"
+            >${label}</span
+          >?
+        </p>
+        <div class="flex gap-2">
+          <button
+            @click=${() => this.confirmDelete(item)}
+            class="cursor-pointer rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-500"
+          >
+            Delete
+          </button>
+          <button
+            @click=${this.cancelDelete}
+            class="cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     `;
