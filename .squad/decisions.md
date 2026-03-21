@@ -1785,3 +1785,64 @@ All 215 tests pass, including the 3 new share_target dedup tests:
   - Scenario 6: Share Target Deduplication (Issue #73) (3 tests)
 ```
 
+# Compact Compose Box Pattern for Input Areas
+
+**Decided By:** Wash (Frontend Dev)  
+**Date:** 2026-03-21  
+**Context:** Issue #76 — Compact new item form  
+**Status:** Proposed (for Mal review)
+
+## Decision
+
+Adopt a unified "compose box" pattern for input areas with action buttons:
+
+1. **Single container** — One rounded, bordered container wraps the entire compose area
+2. **Borderless textarea** — The textarea has `border-0 bg-transparent`; the container provides the border
+3. **Action bar** — A bottom row separated by `border-t`, containing left-aligned and right-aligned button groups
+4. **Focus styling** — Use `:focus-within` on the container to highlight the entire box when any child is focused
+5. **Drag-and-drop overlay** — Conditionally render an `absolute inset-0 z-10` overlay on the container when files are dragged over, with `backdrop-blur-sm` for frosted glass effect
+
+## Rationale
+
+- **Visual simplicity** — Reduces border clutter compared to separate textarea + button sections
+- **Modern UX** — Matches chat/messaging app conventions (Slack, Discord, WhatsApp, Telegram)
+- **Mobile-friendly** — Buttons inside the container reduce vertical space, action bar scales naturally with flexbox
+- **Accessible focus** — The entire compose box highlights on focus, making it clear where input is active
+
+## Implementation Details
+
+```html
+<div class="rounded-lg border focus-within:ring-2 focus-within:ring-sky-400/20">
+  <!-- Overlay when dragging files -->
+  ${dragOver ? html`<div class="absolute inset-0 z-10 backdrop-blur-sm">...</div>` : nothing}
+  
+  <!-- Textarea -->
+  <textarea class="border-0 bg-transparent ..."></textarea>
+  
+  <!-- Action bar -->
+  <div class="border-t flex justify-between">
+    <button>File Upload</button>
+    <button>Share</button>
+  </div>
+</div>
+```
+
+## Consequences
+
+- **Positive:** Cleaner UI, more compact space usage, modern chat-like feel
+- **Negative:** Container focus styling requires `:focus-within` (not supported in IE11, but we don't target IE)
+- **Future:** This pattern can be extracted into a reusable `<compose-box>` component if needed elsewhere
+
+## Alternatives Considered
+
+1. **Separate textarea + button row + drop zone** — Rejected: too much vertical space, visually cluttered
+2. **Floating action buttons** — Rejected: not mobile-friendly, obscures content on small screens
+
+---
+
+**Note to Mal:** This is a UI pattern decision. If approved, we can document it in a frontend style guide. If we need a reusable component, I can create `<compose-box>` later.
+
+
+---
+
+
