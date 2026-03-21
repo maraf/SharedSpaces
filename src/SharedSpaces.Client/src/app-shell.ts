@@ -232,13 +232,16 @@ export class AppShell extends BaseElement {
           ${!this.isOnline ? this.renderOfflineBanner() : nothing}
 
           <header class="flex flex-col gap-4">
-            <button
-              type="button"
-              class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
-              @click=${() => { this.view = 'home'; }}
-            >
-              SharedSpaces
-            </button>
+            <div class="flex items-center justify-between">
+              <button
+                type="button"
+                class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
+                @click=${() => { this.view = 'home'; }}
+              >
+                SharedSpaces
+              </button>
+              <span class="text-xs text-slate-500">v${__APP_VERSION__}</span>
+            </div>
 
             <nav class="flex items-center gap-2 flex-wrap">
               ${this.pendingShareCount > 0
