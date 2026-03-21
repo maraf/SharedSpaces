@@ -6,6 +6,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <IsPublishable>true</IsPublishable>
+    <EnableSdkContainerSupport>true</EnableSdkContainerSupport>
+    <ContainerRegistry>ghcr.io</ContainerRegistry>
+    <ContainerRepository>maraf/sharedspaces-server</ContainerRepository>
+    <ContainerImageTag>$(VersionPrefix)-$(RuntimeIdentifier)</ContainerImageTag>
+  </PropertyGroup>
+
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>SharedSpaces.Server.Tests</_Parameter1>

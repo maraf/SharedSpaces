@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import pkg from './package.json';
 
 /**
  * Fallback for /_share POST when the Service Worker isn't active yet
@@ -27,6 +28,9 @@ function shareTargetFallback(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.VITE_APP_VERSION || pkg.version),
+  },
   plugins: [
     tailwindcss(),
     shareTargetFallback(),

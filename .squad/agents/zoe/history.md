@@ -292,3 +292,5 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - signalr-client.test.ts (1 new test)
 - app-shell.test.ts (8 new tests, created)
 - eslint.config.js (allow any in tests)
+- Delete confirmation overlay (issue #53): tested via direct method invocation on SpaceView — `handleDeleteRequest`, `cancelDelete`, `confirmDelete`, `getItemPreviewLabel`. Edge cases: empty content, boundary-length text (exactly 40 chars), trailing whitespace trimming on truncation, file items bypass truncation, missing token guard clause, auth vs non-auth API failure handling, sequential delete-confirm-delete flows.
+- When production code renames methods (e.g., `handleDelete` → `confirmDelete`), pre-existing tests that call the old name will fail with "not a function" — always check and fix stale test references when testing a feature that refactored method names.

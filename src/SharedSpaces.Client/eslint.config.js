@@ -15,7 +15,7 @@ const browserGlobals = {
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules'],
+    ignores: ['dist', 'dev-dist', 'node_modules'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -41,7 +41,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.test.ts'],
+    files: ['**/*.test.ts', '**/*.spec.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },

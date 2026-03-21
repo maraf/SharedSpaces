@@ -95,6 +95,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Admin space management lives in `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`, where both `POST /v1/spaces` and `GET /v1/spaces` use `AdminAuthenticationFilter`, and listing returns `SpaceResponse` ordered newest-first for admin space selection.
 - Admin space management now also covers `/v1/spaces/{spaceId}/members` and `/v1/spaces/{spaceId}/invitations`: member listings return `MemberResponse` newest-first, revocation is idempotent via `POST .../members/{memberId}/revoke`, and invitation listings/deletes never expose hashed PIN values.
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
+- Server container publishing uses .NET SDK container support (`EnableSdkContainerSupport`) in `.csproj`, targeting `ghcr.io/maraf/sharedspaces-server` with tag format `{VersionPrefix}-{RuntimeIdentifier}`.
+- The `server-container.yml` workflow triggers on `server-*` tags, extracts version via shell parameter expansion (`${GITHUB_REF_NAME#server-}`), and publishes for `linux-x64` using `dotnet publish` with `-p:PublishProfile=DefaultContainer`.
 
 ## Team Updates (2026-03-17 Continued)
 
@@ -192,3 +194,13 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 **Recommendation:**
 - Phase 1 (MVP): Backend endpoint with PIN validation, auto-generated item ID, system/anonymous member
 - Phase 2 (Polish): Service worker for offline queuing and sync
+
+## Team Updates (2026-03-21)
+
+**Kaylee completed Issue #58 (Server Container Build):**
+- Implemented Docker container building via .NET SDK built-in support (`EnableSdkContainerSupport`)
+- Modified `src/SharedSpaces.Server/SharedSpaces.Server.csproj` with container metadata (registry, repository, base image)
+- Added `.github/workflows/server-container.yml` workflow triggered on `server-*` git tags
+- Workflow extracts version via parameter expansion and publishes to `ghcr.io/maraf/sharedspaces-server` with tag format `{version}-linux-x64`
+- PR #59 opened; architecture documented in `.squad/decisions.md`
+- Decision: SDK container support (declarative, no Dockerfile), tag-driven CI (explicit versioning), single RID now, extensible matrix for future multi-arch

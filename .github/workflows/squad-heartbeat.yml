@@ -22,6 +22,12 @@ permissions:
 
 jobs:
   heartbeat:
+    # Skip when the base "squad" label is added — squad-triage.yml handles that.
+    # This prevents Ralph from racing the triage workflow and double-assigning.
+    if: >-
+      github.event_name != 'issues'
+      || github.event.action != 'labeled'
+      || github.event.label.name != 'squad'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,13 +125,7 @@ jobs:
               return !labels.some(l => l.startsWith('go:'));
             });
 
-            // 4. Find go:yes issues missing release target
-            const goYesIssues = squadIssues.filter(issue => {
-              const labels = issue.labels.map(l => l.name);
-              return labels.includes('go:yes') && !labels.some(l => l.startsWith('release:'));
-            });
-
-            // 4b. Find issues missing type: label
+            // 4. Find issues missing type: label
             const missingType = squadIssues.filter(issue => {
               const labels = issue.labels.map(l => l.name);
               return !labels.some(l => l.startsWith('type:'));
@@ -153,9 +153,6 @@ jobs:
             }
             if (missingVerdict.length > 0) {
               summary.push(`⚪ **${missingVerdict.length} issue(s)** missing triage verdict (no \`go:\` label)`);
-            }
-            if (goYesIssues.length > 0) {
-              summary.push(`⚪ **${goYesIssues.length} approved issue(s)** missing release target (no \`release:\` label)`);
             }
             if (missingType.length > 0) {
               summary.push(`⚪ **${missingType.length} issue(s)** missing \`type:\` label`);

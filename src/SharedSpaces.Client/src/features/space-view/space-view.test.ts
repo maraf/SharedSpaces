@@ -728,7 +728,7 @@ describe('SpaceView - Deduplication Logic', () => {
         status: 204,
       });
 
-      await (element as any).handleDelete(uploadingItem);
+      await (element as any).confirmDelete(uploadingItem);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Verify item removed
@@ -894,6 +894,319 @@ describe('SpaceView - Deduplication Logic', () => {
       const items = (element as any).items as SpaceItemResponse[];
       expect(items).toHaveLength(1);
       expect(items[0].id).toBe(otherItemId);
+    });
+  });
+});
+
+describe('SpaceView - Delete Confirmation', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  function makeItem(overrides: Partial<SpaceItemResponse> = {}): SpaceItemResponse {
+    return {
+      id: 'item-1',
+      spaceId,
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'Hello world',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === `${serverUrl}:${spaceId}`) return token;
+      return null;
+    });
+
+    mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    globalThis.fetch = mockFetch;
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  describe('handleDeleteRequest', () => {
+    it('sets deleteConfirmItemId to the item id', () => {
+      const item = makeItem();
+      (element as any).handleDeleteRequest(item);
+      expect((element as any).deleteConfirmItemId).toBe(item.id);
+    });
+
+    it('does NOT remove the item from the list', () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).handleDeleteRequest(item);
+      expect((element as any).items).toHaveLength(1);
+      expect((element as any).items[0].id).toBe(item.id);
+    });
+
+    it('replaces a previous confirmation when a different item is requested', () => {
+      const item1 = makeItem({ id: 'item-1' });
+      const item2 = makeItem({ id: 'item-2' });
+      (element as any).items = [item1, item2];
+
+      (element as any).handleDeleteRequest(item1);
+      expect((element as any).deleteConfirmItemId).toBe('item-1');
+
+      (element as any).handleDeleteRequest(item2);
+      expect((element as any).deleteConfirmItemId).toBe('item-2');
+    });
+  });
+
+  describe('cancelDelete', () => {
+    it('clears deleteConfirmItemId', () => {
+      const item = makeItem();
+      (element as any).handleDeleteRequest(item);
+      expect((element as any).deleteConfirmItemId).toBe(item.id);
+
+      (element as any).cancelDelete();
+      expect((element as any).deleteConfirmItemId).toBeNull();
+    });
+
+    it('does NOT remove the item from the list', () => {
+      const item = makeItem();
+      (element as any).items = [item];
+
+      (element as any).handleDeleteRequest(item);
+      (element as any).cancelDelete();
+
+      expect((element as any).items).toHaveLength(1);
+      expect((element as any).items[0].id).toBe(item.id);
+    });
+  });
+
+  describe('confirmDelete', () => {
+    it('clears deleteConfirmItemId and removes item optimistically', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      (element as any).handleDeleteRequest(item);
+      await (element as any).confirmDelete(item);
+
+      expect((element as any).deleteConfirmItemId).toBeNull();
+      expect((element as any).items).toHaveLength(0);
+    });
+
+    it('calls deleteItem API with correct parameters', async () => {
+      const item = makeItem({ id: 'del-id' });
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+      await (element as any).confirmDelete(item);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining(`/v1/spaces/${spaceId}/items/del-id`),
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+
+    it('reverts item on API failure (non-auth error)', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+      await (element as any).confirmDelete(item);
+
+      // Item should be restored
+      expect((element as any).items).toHaveLength(1);
+      expect((element as any).items[0].id).toBe(item.id);
+    });
+
+    it('does NOT revert on 401 auth failure (shows error instead)', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 });
+
+      await (element as any).confirmDelete(item);
+
+      expect((element as any).items).toHaveLength(0);
+      expect((element as any).connectionErrorType).toBe('auth');
+    });
+
+    it('is a no-op when token is missing', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = undefined;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      await (element as any).confirmDelete(item);
+
+      // Item should not be removed (guard clause exited early)
+      expect((element as any).items).toHaveLength(1);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getItemPreviewLabel', () => {
+    it('returns full content for file items', () => {
+      const item = makeItem({ contentType: 'file', content: 'document.pdf' });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe('document.pdf');
+    });
+
+    it('returns full content for short text', () => {
+      const item = makeItem({ content: 'Short note' });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe('Short note');
+    });
+
+    it('truncates text longer than 40 characters with ellipsis', () => {
+      const longText = 'A'.repeat(50);
+      const item = makeItem({ content: longText });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe('A'.repeat(40) + '…');
+      expect(label.length).toBe(41);
+    });
+
+    it('returns exactly 40 characters without truncation at boundary', () => {
+      const exactly40 = 'B'.repeat(40);
+      const item = makeItem({ content: exactly40 });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe(exactly40);
+    });
+
+    it('trims whitespace before measuring length', () => {
+      const item = makeItem({ content: '   padded text   ' });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe('padded text');
+    });
+
+    it('handles empty string content', () => {
+      const item = makeItem({ content: '' });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe('');
+    });
+
+    it('does not truncate long filenames for file items', () => {
+      const longFilename = 'a'.repeat(80) + '.pdf';
+      const item = makeItem({ contentType: 'file', content: longFilename });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe(longFilename);
+    });
+
+    it('trims trailing whitespace from truncated text', () => {
+      // 38 chars + 2 spaces + more chars = truncation at 40 should trimEnd
+      const text = 'A'.repeat(38) + '  ' + 'B'.repeat(10);
+      const item = makeItem({ content: text });
+      const label = (element as any).getItemPreviewLabel(item);
+      expect(label).toBe('A'.repeat(38) + '…');
+    });
+  });
+
+  describe('renderDeleteConfirmOverlay', () => {
+    it('contains "Delete" text and the preview label', () => {
+      const item = makeItem({ content: 'my note' });
+      const result = (element as any).renderDeleteConfirmOverlay(item);
+      // Lit TemplateResult: the strings should contain "Delete" and we can verify the structure
+      const strings = result.strings ?? result._$litType$?.strings ?? [];
+      const flatStrings = Array.from(strings).join('');
+      expect(flatStrings).toContain('Delete');
+      expect(flatStrings).toContain('Cancel');
+    });
+  });
+
+  describe('delete flow integration', () => {
+    it('full flow: request → confirm performs deletion', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      // Step 1: delete request shows overlay
+      (element as any).handleDeleteRequest(item);
+      expect((element as any).deleteConfirmItemId).toBe(item.id);
+      expect((element as any).items).toHaveLength(1);
+
+      // Step 2: confirm deletes the item
+      await (element as any).confirmDelete(item);
+      expect((element as any).deleteConfirmItemId).toBeNull();
+      expect((element as any).items).toHaveLength(0);
+    });
+
+    it('full flow: request → cancel preserves item', () => {
+      const item = makeItem();
+      (element as any).items = [item];
+
+      // Step 1: delete request
+      (element as any).handleDeleteRequest(item);
+      expect((element as any).deleteConfirmItemId).toBe(item.id);
+
+      // Step 2: cancel
+      (element as any).cancelDelete();
+      expect((element as any).deleteConfirmItemId).toBeNull();
+      expect((element as any).items).toHaveLength(1);
+    });
+
+    it('only shows overlay for the targeted item, not all items', () => {
+      const item1 = makeItem({ id: 'item-1' });
+      const item2 = makeItem({ id: 'item-2' });
+      (element as any).items = [item1, item2];
+
+      (element as any).handleDeleteRequest(item1);
+      expect((element as any).deleteConfirmItemId).toBe('item-1');
+
+      // item-2 should not have overlay
+      expect((element as any).deleteConfirmItemId).not.toBe('item-2');
+    });
+
+    it('confirm then request another item works correctly', async () => {
+      const item1 = makeItem({ id: 'item-1' });
+      const item2 = makeItem({ id: 'item-2' });
+      (element as any).items = [item1, item2];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      mockFetch.mockResolvedValue({ ok: true, status: 204 });
+
+      // Delete item1
+      (element as any).handleDeleteRequest(item1);
+      await (element as any).confirmDelete(item1);
+      expect((element as any).items).toHaveLength(1);
+
+      // Now request delete on item2
+      (element as any).handleDeleteRequest(item2);
+      expect((element as any).deleteConfirmItemId).toBe('item-2');
+      expect((element as any).items).toHaveLength(1);
     });
   });
 });
