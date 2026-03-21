@@ -436,3 +436,22 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 Added 3 comprehensive regression tests for Issue #73 fix in share_target deduplication. Tests cover text share, file share, and cleanup-on-failure scenarios. Test suite: 215/215 passing (3 new tests).
 
 **Impact:** Issue #73 protected from regression. All upload paths now have consistent dedup test coverage.
+
+## 2026-03-21 — Issue #86: WebSocket Connection State Fix (Wash)
+
+**Status:** Completed by Wash  
+**Related to Zoe's work:** Regression test assignment (abandoned)  
+
+Wash completed Issue #86 fix: WebSocket connection state indicator was showing confusing "reconnection" animations when switching between spaces due to stale state in `spaceConnectionStates` Record.
+
+**Fix:** Added space-switch detection in `app-shell.ts` `willUpdate()` to clear old space's connection state when `currentSpaceId` changes (not just when leaving space view entirely).
+
+**Test coverage:** Wash wrote 305 lines of comprehensive connection state tests, superseding Zoe's regression test assignment (which expired due to session timeout). Tests cover:
+- Connection state lifecycle on space switching
+- State cleanup scenarios  
+- Indicator accuracy verification
+- All 262+ client tests passing
+
+**Branch:** `squad/86-websocket-disconnect-switching` (2 commits)
+
+**Impact:** #86 fully resolved with complete test coverage. Indicator now accurately reflects current space's connection status.

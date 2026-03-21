@@ -1903,3 +1903,71 @@ When implementing drag/drop with overlay:
 
 ---
 
+
+---
+
+### WebSocket Connection State Cleanup on Space Switching
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Wash (Frontend Dev)  
+**Related Issue:** #86  
+**Status:** ✅ Implemented
+
+#### Context
+
+When switching between spaces in the app-shell navigation, the connection state indicator (colored dot) was showing reconnection behavior even when switching to a previously viewed space. The indicator would show "connecting" → "connected" as if the connection was being re-established.
+
+#### Investigation
+
+The actual WebSocket connections were being properly disconnected:
+- Space-view components are conditionally rendered in app-shell
+- When switching spaces, old space-view unmounts → `disconnectedCallback()` fires → SignalR connection stops
+- New space-view mounts → `connectedCallback()` fires → new SignalR connection starts
+
+However, the **connection state tracking** in app-shell had a bug:
+- `spaceConnectionStates` is a Record<spaceId, ConnectionState> that tracks per-space connection status
+- `willUpdate()` only cleared this state when **leaving the space view entirely** (view: 'space' → 'home')
+- It did NOT clear state when **switching between spaces** (Space A → Space B, where view stays 'space')
+- Result: Stale connection state persisted in the record, causing incorrect indicator display
+
+#### Decision
+
+Modified `app-shell.ts` `willUpdate()` to also clear connection state when `currentSpaceId` changes:
+
+```typescript
+// Clear connection state when switching between spaces
+if (changed.has('currentSpaceId')) {
+  const oldSpaceId = changed.get('currentSpaceId') as string | undefined;
+  if (oldSpaceId && oldSpaceId !== this.currentSpaceId) {
+    const { [oldSpaceId]: _, ...rest } = this.spaceConnectionStates;
+    this.spaceConnectionStates = rest;
+  }
+}
+```
+
+#### Rationale
+
+- **Correctness:** Connection state should only exist for the currently viewed space
+- **UX:** Prevents confusing "reconnection" animation when switching between spaces
+- **Clean state:** Old spaces' connection states are removed when no longer relevant
+- **Minimal change:** Only touches the state tracking, not the actual connection lifecycle
+
+#### Implementation
+
+- Modified `src/SharedSpaces.Client/src/app-shell.ts` — `willUpdate()` method
+- Added 305 lines of comprehensive connection state tests
+- Covers connection state lifecycle, space switching scenarios, state cleanup on navigation
+- All tests passing on `squad/86-websocket-disconnect-switching` branch
+
+#### Impact
+
+- Connection state dots now accurately reflect the current space's connection status
+- No stale state carried over when switching between spaces
+- Clear test coverage prevents regression
+
+#### Alternatives Considered
+
+1. **Keep all spaces connected** — Rejected: would require managing multiple simultaneous SignalR connections, increasing resource usage
+2. **Don't show dots for non-active spaces** — Rejected: dots provide useful at-a-glance status for recently used spaces
+3. **Reset state to 'disconnected' instead of removing** — Rejected: red dots on all inactive spaces would be visually noisy
+
