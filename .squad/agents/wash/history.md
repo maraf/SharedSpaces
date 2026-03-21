@@ -360,3 +360,10 @@ Applied review feedback from Copilot reviewer and Marek:
 - **Vite `?raw` imports for SVG icons:** Use `import svg from 'package/icon.svg?raw'` to get raw SVG strings at build time. Pair with `unsafeHTML` from Lit to render them. Requires `declare module '*.svg?raw'` in `vite-env.d.ts` for TypeScript. String-replace width/height attributes before rendering to control sizing. This is the preferred pattern over inline SVG paths when icons come from an npm package.
 - **`unsafeHTML` safety model:** Only safe for trusted build-time content (npm packages). Never use for user-supplied strings. This is a Lit directive, not a security bypass — it just opts out of Lit's template escaping.
 - **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
+
+- **Day-based time labels (Issue #74, 2026-03-20):** Refactored duplicate relative time formatting logic from `space-view.ts` and `app-shell.ts` into a shared utility `src/SharedSpaces.Client/src/lib/format-time.ts`. New format uses calendar day comparison (not 24-hour diff) for better UX:
+  - Same calendar day → "Today" (replaces "just now", "Xm ago", "Xh ago")
+  - Previous calendar day → "Yesterday"
+  - 2-6 days ago → "Xd ago"
+  - 7+ days → "Mar 19" (existing short date format)
+  - Pattern: `formatRelativeTime(date: Date): string` exported function. Components parse their input (ISO string or Unix timestamp) to Date, then call the utility. Keeps try/catch error handling in component methods. Calendar day comparison normalizes both dates to start-of-day (midnight) and compares the diff in days, so an item shared at 11pm shows "Today" at 1am the next day → "Yesterday". Key files: `lib/format-time.ts`, `features/space-view/space-view.ts` (formatTime method), `app-shell.ts` (formatTimestamp method).

@@ -16,6 +16,7 @@ import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
 import { getTokens } from './lib/token-storage';
+import { formatRelativeTime } from './lib/format-time';
 import type { ConnectionState } from './lib/signalr-client';
 import {
   clearPendingShares,
@@ -561,23 +562,8 @@ export class AppShell extends BaseElement {
 
   private formatTimestamp(ts: number): string {
     try {
-      const diffMs = Date.now() - ts;
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-
-      if (diffSec < 60) return 'just now';
-      if (diffMin < 60) return `${diffMin}m ago`;
-      if (diffHour < 24) return `${diffHour}h ago`;
-      if (diffDay < 7) return `${diffDay}d ago`;
-
       const date = new Date(ts);
-      const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-      ];
-      return `${months[date.getMonth()]} ${date.getDate()}`;
+      return formatRelativeTime(date);
     } catch {
       return '';
     }
