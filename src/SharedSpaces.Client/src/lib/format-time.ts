@@ -14,6 +14,8 @@ export function formatRelativeTime(date: Date): string {
   const diffMs = todayStart.getTime() - dateStart.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   
+  // Handle future dates (e.g., due to clock skew) by treating them as "Today"
+  if (diffDays < 0) return 'Today';
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d ago`;
