@@ -347,3 +347,32 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Client lib tests live co-located: `src/SharedSpaces.Client/src/lib/format-time.test.ts` next to `format-time.ts`
 - Run single test file: `cd src/SharedSpaces.Client && npx vitest run src/lib/format-time.test.ts`
 - Vitest configured in package.json: `"test": "vitest run"`, `"test:watch": "vitest"`
+
+## Learnings (2026-03-21)
+
+**Share Target Deduplication Tests (Issue #73 Regression Prevention):**
+
+- Added comprehensive regression tests for the `uploadPendingShare()` deduplication fix in `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+- Test file structure: 3 new tests in "Scenario 6: Share Target Deduplication (Issue #73)" describe block covering:
+  1. Text shares via share_target: `pendingItemIds` prevents SignalR duplicate when uploading shared text
+  2. File shares via share_target: `pendingItemIds` prevents SignalR duplicate when uploading shared file
+  3. Cleanup on failure: `pendingItemIds` is cleaned up even when share upload fails (tests the `finally` block)
+- Key test pattern: Use delayed API promise resolution (`uploadPromise` with manual `uploadResolve()` callback) to simulate race condition where SignalR `ItemAdded` event arrives before API response completes
+- After calling `uploadPendingShare()`, wait 10ms for `pendingItemIds.add(itemId)` to execute before triggering SignalR handler
+- Verify items list remains empty when SignalR event arrives during pending upload (blocked by `pendingItemIds` check)
+- Verify `pendingItemIds` cleanup happens in both success and failure paths (tests the `finally` block behavior)
+- File share tests create `Uint8Array` fileData and mock `PendingShareItem` with `type: 'file'`, `fileName`, `fileType`, and `fileData` properties
+- Test suite now has 215 passing tests (up from 212), including 39 tests in space-view.test.ts
+- Key file paths:
+  - Implementation: `src/SharedSpaces.Client/src/features/space-view/space-view.ts` (uploadPendingShare method, lines 307-360)
+  - Tests: `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts` (lines 899-1211, new tests at end of dedup section)
+- Testing framework: Vitest 4.1.0 with happy-dom, follows existing patterns for mock setup, SignalR handler capture, and async timing control
+
+## 2026-03-21 — Share Target Dedup Regression Tests
+
+**Status:** Completed  
+**Session:** .squad/log/2026-03-21T13-15-30Z-fix-share-target-dedup.md  
+
+Added 3 comprehensive regression tests for Issue #73 fix in share_target deduplication. Tests cover text share, file share, and cleanup-on-failure scenarios. Test suite: 215/215 passing (3 new tests).
+
+**Impact:** Issue #73 protected from regression. All upload paths now have consistent dedup test coverage.
