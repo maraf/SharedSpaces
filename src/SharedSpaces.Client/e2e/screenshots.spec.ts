@@ -207,7 +207,7 @@ test.describe('Screenshot Capture', () => {
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
-      await capture(page, 'space', vp, { fullPage: false });
+      await capture(page, 'space', vp);
     });
 
     test(`space view - dead space (auth) - ${vp.name}`, async ({ page }) => {

@@ -809,15 +809,11 @@ export class SpaceView extends BaseElement {
     }
 
     return html`
-      <div class="flex flex-col" style="height: calc(100svh - var(--header-height, 0px) - 3rem)">
-        <div class="shrink-0 space-y-8 pb-6">
-          ${this.renderSyncStatus()}
-          ${this.renderPendingSharesSection()}
-          ${this.renderUploadArea()}
-        </div>
-        <div class="min-h-0 flex-1 overflow-y-auto">
-          ${this.renderItemsList()}
-        </div>
+      <div class="space-y-8">
+        ${this.renderSyncStatus()}
+        ${this.renderPendingSharesSection()}
+        ${this.renderUploadArea()}
+        ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
       </div>
     `;
@@ -1015,7 +1011,8 @@ export class SpaceView extends BaseElement {
     return html`
       <section class="space-y-3">
         <p
-          class="sticky top-0 z-10 bg-slate-950 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+          class="sticky z-10 bg-slate-950 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+          style="top: var(--header-height, 0px)"
         >
           Shared items
           <span class="ml-1 text-slate-600">(${this.items.length})</span>
