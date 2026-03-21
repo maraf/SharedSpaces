@@ -116,7 +116,7 @@ async function injectTokens(page: Page, tokens: Record<string, string>) {
 
 async function navigateToAdminSignedIn(page: Page) {
   // Click the Admin pill in the nav bar
-  await page.click('button:has-text("Admin")');
+  await page.click('button[title="Admin panel"]');
   await page.waitForSelector('admin-view');
 
   await page.fill('#admin-server-url', SERVER_URL);

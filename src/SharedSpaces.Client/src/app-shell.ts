@@ -1,7 +1,10 @@
 import { provide } from '@lit/context';
 import { html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { jwtDecode } from 'jwt-decode';
+
+import databaseGearSvg from 'bootstrap-icons/icons/database-gear.svg?raw';
 
 import './features/admin/admin-view';
 import './features/join/join-view';
@@ -319,8 +322,9 @@ export class AppShell extends BaseElement {
                 @click=${() => { this.view = 'admin'; }}
                 class="${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
                 title="Admin panel"
+                aria-label="Admin panel"
               >
-                ⚙️ Admin
+                ${unsafeHTML(databaseGearSvg)}
               </button>
             </nav>
           </header>
