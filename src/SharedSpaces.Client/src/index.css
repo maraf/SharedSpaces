@@ -17,9 +17,47 @@ body {
   min-height: 100svh;
 }
 
+html {
+  /* Reserve scrollbar space to prevent layout shift on platforms with non-overlay scrollbars */
+  scrollbar-gutter: stable;
+}
+
 button,
 input,
 textarea,
 select {
   font: inherit;
+}
+
+/*
+ * Custom scrollbar styling — thin, subtle appearance.
+ * Note: transparent track is cosmetic only; whether scrollbars overlay
+ * content vs consume layout space is controlled by the browser/OS.
+ * scrollbar-gutter: stable (on html) reserves gutter space to prevent
+ * layout shift on platforms with classic (non-overlay) scrollbars.
+ */
+/* Webkit browsers (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+  scrollbar-gutter: stable;
 }
