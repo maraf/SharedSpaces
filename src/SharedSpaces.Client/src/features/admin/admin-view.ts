@@ -308,7 +308,7 @@ export class AdminView extends BaseElement {
     const maxUploadSize =
       quotaMb !== '' ? Math.round(parseFloat(quotaMb) * 1024 * 1024) : null;
 
-    if (maxUploadSize !== null && (Number.isNaN(maxUploadSize) || maxUploadSize <= 0)) {
+    if (maxUploadSize !== null && (!Number.isFinite(maxUploadSize) || maxUploadSize <= 0)) {
       this.errorMessage = 'Upload quota must be a positive number';
       return;
     }
@@ -681,7 +681,7 @@ export class AdminView extends BaseElement {
             class="w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
             ?disabled=${this.isCreatingSpace}
           />
-          <span class="text-xs text-slate-500">Default: 100 MB</span>
+          <span class="text-xs text-slate-500">Default: server configured</span>
         </div>
       </form>
 
