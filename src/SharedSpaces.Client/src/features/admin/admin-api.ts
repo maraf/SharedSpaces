@@ -211,6 +211,30 @@ export async function revokeMember(
   }
 }
 
+export async function unrevokeMember(
+  apiBaseUrl: string,
+  adminSecret: string,
+  spaceId: string,
+  memberId: string,
+): Promise<void> {
+  try {
+    const base = normalizeApiBaseUrl(apiBaseUrl);
+    const encodedSpaceId = encodeURIComponent(spaceId);
+    const encodedMemberId = encodeURIComponent(memberId);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodedSpaceId}/members/${encodedMemberId}/unrevoke`,
+      {
+        method: 'POST',
+        headers: createAdminHeaders(adminSecret),
+      },
+    );
+
+    await throwForFailedResponse(response, { notFoundMessage: 'Member not found' });
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
 export async function listInvitations(
   apiBaseUrl: string,
   adminSecret: string,
