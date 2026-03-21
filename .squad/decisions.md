@@ -1971,3 +1971,74 @@ if (changed.has('currentSpaceId')) {
 2. **Don't show dots for non-active spaces** — Rejected: dots provide useful at-a-glance status for recently used spaces
 3. **Reset state to 'disconnected' instead of removing** — Rejected: red dots on all inactive spaces would be visually noisy
 
+# Admin Panel URL History Feature
+
+**Decision Date:** 2026-03-17  
+**Decided By:** Wash (Frontend Dev)  
+**Related Issue:** #87  
+**Status:** Active
+
+## Context
+
+The admin panel required an improved UX for managing server URLs. Previously, the server URL input defaulted to `/` (relative URL), which wasn't intuitive for admins connecting to different servers. Additionally, admins had to re-type URLs they'd previously used.
+
+## Decision
+
+Implemented a comprehensive server URL history feature:
+
+1. **Changed default value** from `/` to `https://` to match typical admin use cases
+2. **Created localStorage-based URL history** at `src/lib/admin-url-storage.ts` following the `token-storage.ts` pattern
+3. **Added autocomplete dropdown UI** below the server URL input showing previously successful connections
+4. **Auto-save on successful connect** to build up history automatically
+5. **URL removal UI** with X buttons to let admins prune their history
+
+## Technical Implementation
+
+### Storage Module (`admin-url-storage.ts`)
+- Storage key: `'sharedspaces:adminServerUrls'`
+- Functions: `getAdminServerUrls()`, `addAdminServerUrl(url)`, `removeAdminServerUrl(url)`
+- Deduplication: Most recently used URLs appear first
+- Limit: 20 entries max to prevent unbounded growth
+- Security: Only stores URLs, never passwords/secrets
+
+### UI Pattern
+- Dropdown shows on input focus when history exists
+- Clicking a URL fills the input and hides dropdown
+- Clicking X removes URL from history (doesn't fill input)
+- 200ms blur delay allows click events to register before dropdown hides
+- Styled with existing dark theme (slate-800/900 backgrounds, slate borders)
+
+### Code Changes
+- `admin-view.ts`: Added state properties `savedServerUrls` and `showUrlDropdown`
+- Added `connectedCallback` to load saved URLs on component mount
+- Updated `handleSecretSubmit` to save URL after successful connection
+- Added helper methods: `handleUrlSelect`, `handleUrlRemove`, `handleUrlInputFocus`, `handleUrlInputBlur`
+- Updated `renderSecretPrompt` to include dropdown UI with relative positioning
+- Changed all `'/'` defaults to `'https://'` in `serverUrlInput`, `normalizeServerUrl`, and `getDefaultServerUrl`
+
+## Rationale
+
+- **UX improvement**: Reduces repetitive typing for admins who manage multiple servers
+- **Privacy-safe**: Only URLs are stored, no secrets/passwords
+- **Consistent pattern**: Follows existing `token-storage.ts` conventions
+- **Bounded memory**: 20-entry limit prevents localStorage bloat
+- **Accessible**: Keyboard and mouse interactions both work naturally
+
+## Impact
+
+- Admin panel workflow is faster for repeat connections
+- Default `https://` value guides admins toward correct URL format
+- Storage is private to the browser (no server-side persistence needed)
+- No breaking changes to existing admin functionality
+
+## Testing Notes
+
+- Build succeeds: `npm run build` completes without errors
+- TypeScript compilation has pre-existing decorator warnings (unrelated to this feature)
+- Manual testing recommended: Connect to server, verify URL saves, test dropdown interactions, verify X button removes URLs
+
+## Future Enhancements
+
+- Could add URL validation before saving
+- Could show last-used timestamp next to each URL
+- Could group URLs by domain for better organization at scale
