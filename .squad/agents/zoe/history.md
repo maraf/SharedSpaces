@@ -281,5 +281,11 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Edge cases: empty strings, no-extension filenames, multi-dot filenames (`my.file.name.pdf`) all require explicit coverage
 - Icon utilities return structured results (`{ svg: TemplateResult, colorClass: string }`), enabling type-safe assertions on both shape and color class format
 - Tailwind color class validation: check string pattern (`/^(text-|bg-|border-)/`) to verify utility returns valid CSS class names
-- Tests for parallel implementation work (Wash building source) should be written first, committed even when they fail due to missing source file, establishing TDD contract before implementation lands
+- Tests for parallel implementation work (while building the source) should be written first, committed even when they fail due to missing source file, establishing TDD contract before implementation lands
 - Co-located test pattern (`*.test.ts` next to `*.ts` source) scales well for utility libraries; vitest runs individual test files with `npx vitest run src/lib/file-icons.test.ts`
+
+## Learnings (PR #64 Review Feedback)
+
+- Truthy/type-only assertions are a false sense of security — if every extension returned the same icon/color, those tests would still pass. Always assert specific expected values for at least one representative per category.
+- Cross-category distinctness tests ("image color ≠ code color") catch regressions where category mappings accidentally collapse to the same value, complementing per-extension assertions.
+- When source and tests evolve in parallel branches, colorClass string assertions are more stable than SVG content assertions since color mappings change less frequently than icon markup.
