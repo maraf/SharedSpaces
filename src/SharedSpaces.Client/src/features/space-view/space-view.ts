@@ -519,6 +519,10 @@ export class SpaceView extends BaseElement {
 
   private handleDragEnter = (e: DragEvent) => {
     e.preventDefault();
+    // Only show overlay for file drags, not text/link drags
+    if (!e.dataTransfer?.types.includes('Files')) {
+      return;
+    }
     this.dragCounter++;
     if (this.dragCounter === 1) {
       this.dragOver = true;
@@ -531,7 +535,14 @@ export class SpaceView extends BaseElement {
 
   private handleDragLeave = (e: DragEvent) => {
     e.preventDefault();
-    this.dragCounter--;
+    // Only track file drags
+    if (!e.dataTransfer?.types.includes('Files')) {
+      return;
+    }
+    // Clamp counter to prevent negative values
+    if (this.dragCounter > 0) {
+      this.dragCounter--;
+    }
     if (this.dragCounter === 0) {
       this.dragOver = false;
     }

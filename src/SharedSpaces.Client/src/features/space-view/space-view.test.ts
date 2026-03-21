@@ -1691,4 +1691,258 @@ describe('SpaceView - Delete Confirmation', () => {
       expect(startSignalRSpy).not.toHaveBeenCalled();
     });
   });
+
+  describe('Drag and Drop', () => {
+    let addEventListenerSpy: ReturnType<typeof vi.spyOn>;
+    let removeEventListenerSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      addEventListenerSpy = vi.spyOn(document, 'addEventListener');
+      removeEventListenerSpy = vi.spyOn(document, 'removeEventListener');
+    });
+
+    // Helper to create a drag event with controllable dataTransfer.types
+    const createDragEvent = (type: string, includeFiles: boolean): DragEvent => {
+      const event = new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+      });
+      
+      // Mock dataTransfer with types property
+      const mockDataTransfer = {
+        types: includeFiles ? ['Files'] : ['text/plain'],
+        files: includeFiles ? ({} as FileList) : ({} as FileList),
+      };
+      
+      Object.defineProperty(event, 'dataTransfer', {
+        value: mockDataTransfer,
+        writable: false,
+      });
+      
+      return event;
+    };
+
+    it('registers document-level drag listeners on connect', () => {
+      document.body.appendChild(element);
+      
+      expect(addEventListenerSpy).toHaveBeenCalledWith('dragenter', expect.any(Function));
+      expect(addEventListenerSpy).toHaveBeenCalledWith('dragleave', expect.any(Function));
+      expect(addEventListenerSpy).toHaveBeenCalledWith('drop', expect.any(Function));
+      expect(addEventListenerSpy).toHaveBeenCalledWith('dragover', expect.any(Function));
+    });
+
+    it('removes document-level drag listeners on disconnect', () => {
+      document.body.appendChild(element);
+      
+      const dragEnterHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'dragenter'
+      )?.[1];
+      const dragLeaveHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'dragleave'
+      )?.[1];
+      const dropHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'drop'
+      )?.[1];
+      const dragOverHandler = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === 'dragover'
+      )?.[1];
+
+      element.remove();
+
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('dragenter', dragEnterHandler);
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('dragleave', dragLeaveHandler);
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('drop', dropHandler);
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('dragover', dragOverHandler);
+    });
+
+    it('dragOver toggles to true on file dragenter', () => {
+      expect((element as any).dragOver).toBe(false);
+      expect((element as any).dragCounter).toBe(0);
+
+      const event = createDragEvent('dragenter', true);
+      (element as any).handleDragEnter(event);
+
+      expect((element as any).dragCounter).toBe(1);
+      expect((element as any).dragOver).toBe(true);
+    });
+
+    it('dragOver stays false on non-file dragenter (text/link)', () => {
+      expect((element as any).dragOver).toBe(false);
+      expect((element as any).dragCounter).toBe(0);
+
+      const event = createDragEvent('dragenter', false);
+      (element as any).handleDragEnter(event);
+
+      // Counter and overlay should remain unchanged
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+    });
+
+    it('dragOver toggles to false when counter reaches 0', () => {
+      // Set up: enter once
+      (element as any).dragCounter = 0;
+      (element as any).dragOver = false;
+
+      const enterEvent = createDragEvent('dragenter', true);
+      (element as any).handleDragEnter(enterEvent);
+      expect((element as any).dragOver).toBe(true);
+      expect((element as any).dragCounter).toBe(1);
+
+      // Leave once
+      const leaveEvent = createDragEvent('dragleave', true);
+      (element as any).handleDragLeave(leaveEvent);
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+    });
+
+    it('dragCounter cannot go negative', () => {
+      // Start clean
+      (element as any).dragCounter = 0;
+      (element as any).dragOver = false;
+
+      // Dragleave without prior dragenter
+      const leaveEvent = createDragEvent('dragleave', true);
+      (element as any).handleDragLeave(leaveEvent);
+
+      // Counter should stay at 0, not go negative
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+
+      // Additional dragleave should still not go negative
+      (element as any).handleDragLeave(leaveEvent);
+      expect((element as any).dragCounter).toBe(0);
+    });
+
+    it('handleDocumentDrop resets both counter and dragOver', () => {
+      // Set up: simulated mid-drag state
+      (element as any).dragCounter = 3;
+      (element as any).dragOver = true;
+
+      const dropEvent = createDragEvent('drop', true);
+      (element as any).handleDocumentDrop(dropEvent);
+
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+    });
+
+    it('handleDrop on compose box resets state and processes files', async () => {
+      // Set up drag state
+      (element as any).dragCounter = 2;
+      (element as any).dragOver = true;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      // Mock uploadFiles
+      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+
+      // Create drop event with files
+      const dropEvent = createDragEvent('drop', true);
+      const mockFile = new File(['test'], 'test.txt', { type: 'text/plain' });
+      Object.defineProperty(dropEvent.dataTransfer, 'files', {
+        value: [mockFile],
+        writable: false,
+      });
+
+      await (element as any).handleDrop(dropEvent);
+
+      // State should be reset
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+
+      // uploadFiles should be called with the files
+      expect(uploadFilesSpy).toHaveBeenCalledWith([mockFile]);
+    });
+
+    it('handleDrop does not call uploadFiles if no files present', async () => {
+      (element as any).dragCounter = 1;
+      (element as any).dragOver = true;
+
+      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+
+      // Drop event with no files
+      const dropEvent = createDragEvent('drop', true);
+      Object.defineProperty(dropEvent.dataTransfer, 'files', {
+        value: [],
+        writable: false,
+      });
+
+      await (element as any).handleDrop(dropEvent);
+
+      // State still reset
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+
+      // But uploadFiles not called
+      expect(uploadFilesSpy).not.toHaveBeenCalled();
+    });
+
+    it('multiple nested dragenter/dragleave pairs work correctly', () => {
+      // Simulate nested elements: drag enters child, enters parent, leaves child, leaves parent
+      (element as any).dragCounter = 0;
+      (element as any).dragOver = false;
+
+      const enterEvent = createDragEvent('dragenter', true);
+      const leaveEvent = createDragEvent('dragleave', true);
+
+      // Enter element 1
+      (element as any).handleDragEnter(enterEvent);
+      expect((element as any).dragCounter).toBe(1);
+      expect((element as any).dragOver).toBe(true);
+
+      // Enter nested element 2
+      (element as any).handleDragEnter(enterEvent);
+      expect((element as any).dragCounter).toBe(2);
+      expect((element as any).dragOver).toBe(true);
+
+      // Enter nested element 3
+      (element as any).handleDragEnter(enterEvent);
+      expect((element as any).dragCounter).toBe(3);
+      expect((element as any).dragOver).toBe(true);
+
+      // Leave element 3
+      (element as any).handleDragLeave(leaveEvent);
+      expect((element as any).dragCounter).toBe(2);
+      expect((element as any).dragOver).toBe(true); // Still > 0
+
+      // Leave element 2
+      (element as any).handleDragLeave(leaveEvent);
+      expect((element as any).dragCounter).toBe(1);
+      expect((element as any).dragOver).toBe(true); // Still > 0
+
+      // Leave element 1
+      (element as any).handleDragLeave(leaveEvent);
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false); // Now false
+    });
+
+    it('non-file drags do not affect counter balance', () => {
+      // Start with file drag
+      (element as any).dragCounter = 0;
+      (element as any).dragOver = false;
+
+      const fileEnter = createDragEvent('dragenter', true);
+      (element as any).handleDragEnter(fileEnter);
+      expect((element as any).dragCounter).toBe(1);
+      expect((element as any).dragOver).toBe(true);
+
+      // Non-file drag enters (should be ignored)
+      const textEnter = createDragEvent('dragenter', false);
+      (element as any).handleDragEnter(textEnter);
+      expect((element as any).dragCounter).toBe(1); // Unchanged
+      expect((element as any).dragOver).toBe(true);
+
+      // Non-file drag leaves (should be ignored)
+      const textLeave = createDragEvent('dragleave', false);
+      (element as any).handleDragLeave(textLeave);
+      expect((element as any).dragCounter).toBe(1); // Still unchanged
+      expect((element as any).dragOver).toBe(true);
+
+      // File drag leaves (should decrement)
+      const fileLeave = createDragEvent('dragleave', true);
+      (element as any).handleDragLeave(fileLeave);
+      expect((element as any).dragCounter).toBe(0);
+      expect((element as any).dragOver).toBe(false);
+    });
+  });
 });
