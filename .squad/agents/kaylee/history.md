@@ -97,6 +97,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
 - Server container publishing uses .NET SDK container support (`EnableSdkContainerSupport`) in `.csproj`, targeting `ghcr.io/maraf/sharedspaces-server` with tag format `{VersionPrefix}-{RuntimeIdentifier}`.
 - The `server-container.yml` workflow triggers on `server-*` tags, extracts version via shell parameter expansion (`${GITHUB_REF_NAME#server-}`), and publishes for `linux-x64` using `dotnet publish` with `-p:PublishProfile=DefaultContainer`.
+- `ForwardedHeadersOptions` must clear `KnownIPNetworks` and `KnownProxies` for reverse proxy deployments (containers, cloud)—ASP.NET Core defaults to trusting only localhost, silently ignoring `X-Forwarded-*` headers from real proxies. Note: `KnownNetworks` is deprecated in .NET 10; use `KnownIPNetworks`.
+- `UseForwardedHeaders()` is placed first in the middleware pipeline (before CORS, auth, HTTPS redirection) so `HttpRequest.Scheme` and `HttpRequest.Host` reflect the proxy's values when endpoints generate URLs.
 
 ## Team Updates (2026-03-17 Continued)
 
