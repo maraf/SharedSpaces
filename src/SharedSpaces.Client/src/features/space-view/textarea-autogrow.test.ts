@@ -21,7 +21,7 @@ describe('Textarea Auto-Grow Behavior', () => {
 
   beforeEach(() => {
     textarea = document.createElement('textarea');
-    textarea.rows = 1;
+    textarea.rows = 3;
     textarea.style.cssText = 'width: 300px; box-sizing: border-box; resize: none;';
     document.body.appendChild(textarea);
   });
@@ -48,9 +48,16 @@ describe('Textarea Auto-Grow Behavior', () => {
     }
   };
 
+  /**
+   * Spec-verification tests: these confirm the expected defaults match what the
+   * space-view component template renders (rows="3", resize: none).
+   * They don't mount the Lit component; they verify the values our test setup
+   * mirrors from the production template so downstream tests start from a
+   * realistic baseline.
+   */
   describe('Initial state', () => {
-    it('starts with rows="1" (compact initial size)', () => {
-      expect(Number(textarea.rows)).toBe(1);
+    it('starts with rows="3" (matching production template)', () => {
+      expect(Number(textarea.rows)).toBe(3);
     });
 
     it('starts with resize: none to prevent manual resize', () => {
@@ -214,41 +221,46 @@ describe('Textarea Auto-Grow Behavior', () => {
   });
 
   describe('Reset on submit', () => {
-    it('returns to initial height when textarea is cleared (simulating submit)', () => {
-      // Add multiline content
+    it('returns to compact height when content is cleared and autoResize re-runs', () => {
+      // Grow textarea with multiline content
       textarea.value = 'Line 1\nLine 2\nLine 3\nLine 4';
       autoResize(textarea);
-      // Verify height was set (may be 0 in happy-dom without layout)
+      const grownHeight = parseInt(textarea.style.height);
       expect(textarea.style.height).toMatch(/^\d+px$/);
 
-      // Simulate submit: clear content and reset
+      // Simulate submit: clear content and re-run autoResize
+      // (production clears textInput, then resetTextareaHeight sets 'auto';
+      //  calling autoResize on empty content is the equivalent for our mock)
       textarea.value = '';
-      textarea.style.height = 'auto';
+      autoResize(textarea);
+      const resetHeight = parseInt(textarea.style.height);
 
-      const resetHeight = textarea.style.height;
-      expect(resetHeight).toBe('auto');
+      expect(resetHeight).toBeLessThan(grownHeight);
+      // Single empty line = 1 * LINE_HEIGHT
+      expect(resetHeight).toBe(LINE_HEIGHT);
     });
 
-    it('can grow again after being reset', () => {
+    it('can grow again after being reset via autoResize', () => {
       // Grow
       textarea.value = 'Line 1\nLine 2\nLine 3';
       autoResize(textarea);
       const firstGrowHeight = parseInt(textarea.style.height);
       expect(textarea.style.height).toMatch(/^\d+px$/);
 
-      // Reset
+      // Reset via autoResize (mirrors production reset flow)
       textarea.value = '';
-      textarea.style.height = 'auto';
+      autoResize(textarea);
+      const resetHeight = parseInt(textarea.style.height);
+      expect(resetHeight).toBeLessThan(firstGrowHeight);
 
-      // Grow again
+      // Grow again with same content
       textarea.value = 'New Line 1\nNew Line 2\nNew Line 3';
       autoResize(textarea);
       const secondGrowHeight = parseInt(textarea.style.height);
 
-      // Should set height on second grow (value depends on layout engine)
       expect(textarea.style.height).toMatch(/^\d+px$/);
-      // Heights should be consistent for same amount of content
-      expect(Math.abs(secondGrowHeight - firstGrowHeight)).toBeLessThan(10);
+      // Heights should be consistent for same line count
+      expect(secondGrowHeight).toBe(firstGrowHeight);
     });
   });
 

@@ -449,10 +449,10 @@ export class SpaceView extends BaseElement {
   };
 
   private autoResizeTextarea(textarea: HTMLTextAreaElement) {
-    // Reset height to auto to get the correct scrollHeight
     textarea.style.height = 'auto';
-    // Set height to scrollHeight to fit content
-    textarea.style.height = `${textarea.scrollHeight}px`;
+    const maxHeight = 200;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   }
 
   private resetTextareaHeight() {
@@ -923,7 +923,7 @@ export class SpaceView extends BaseElement {
 
           <!-- Textarea -->
           <textarea
-            rows="1"
+            rows="3"
             placeholder="Share some text…"
             aria-label="Text to share"
             .value=${this.textInput}
@@ -931,7 +931,6 @@ export class SpaceView extends BaseElement {
             @keydown=${this.handleTextKeydown}
             ?disabled=${this.isUploading}
             class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
-            style="max-height: 200px; overflow-y: auto;"
           ></textarea>
 
           <!-- Action bar -->
