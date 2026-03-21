@@ -1,5 +1,19 @@
 import { html } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { TemplateResult } from 'lit';
+
+// Import SVGs from bootstrap-icons package at build time
+import fileEarmarkImageSvg from 'bootstrap-icons/icons/file-earmark-image.svg?raw';
+import fileEarmarkPlaySvg from 'bootstrap-icons/icons/file-earmark-play.svg?raw';
+import fileEarmarkMusicSvg from 'bootstrap-icons/icons/file-earmark-music.svg?raw';
+import fileEarmarkPdfSvg from 'bootstrap-icons/icons/file-earmark-pdf.svg?raw';
+import fileEarmarkWordSvg from 'bootstrap-icons/icons/file-earmark-word.svg?raw';
+import fileEarmarkSpreadsheetSvg from 'bootstrap-icons/icons/file-earmark-spreadsheet.svg?raw';
+import fileEarmarkZipSvg from 'bootstrap-icons/icons/file-earmark-zip.svg?raw';
+import fileEarmarkCodeSvg from 'bootstrap-icons/icons/file-earmark-code.svg?raw';
+import fileEarmarkTextSvg from 'bootstrap-icons/icons/file-earmark-text.svg?raw';
+import fileEarmarkSvg from 'bootstrap-icons/icons/file-earmark.svg?raw';
+import chatSvg from 'bootstrap-icons/icons/chat.svg?raw';
 
 export interface FileIcon {
   svg: TemplateResult;
@@ -7,8 +21,20 @@ export interface FileIcon {
 }
 
 /**
+ * Takes a raw SVG string from bootstrap-icons and returns a Lit TemplateResult
+ * with the specified dimensions. Safe because SVGs come from the trusted
+ * bootstrap-icons npm package, not user input.
+ */
+function renderIcon(rawSvg: string, size: number): TemplateResult {
+  const resized = rawSvg
+    .replace(/width="16"/, `width="${size}"`)
+    .replace(/height="16"/, `height="${size}"`);
+  return html`${unsafeHTML(resized)}`;
+}
+
+/**
  * Returns an appropriate icon and color for a file based on its extension.
- * Uses Bootstrap Icons SVG paths.
+ * Uses SVGs imported from the bootstrap-icons package.
  */
 export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   const ext = filename.toLowerCase().split('.').pop() || '';
@@ -16,10 +42,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Images
   if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
-        <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkImageSvg, size),
       colorClass: 'text-purple-400',
     };
   }
@@ -27,9 +50,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Videos
   if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M0 12V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm6.79-6.907A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkPlaySvg, size),
       colorClass: 'text-pink-400',
     };
   }
@@ -37,10 +58,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Audio
   if (['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'wma'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M12 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8zM4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H4z"/>
-        <path d="M8 4.754a.5.5 0 0 1 .5.5v4.992a.5.5 0 0 1-.5.5.5.5 0 0 1-.5-.5V5.254a.5.5 0 0 1 .5-.5zM5.5 7.5a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-1 0V8a.5.5 0 0 1 .5-.5zm5 0a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-1 0V8a.5.5 0 0 1 .5-.5z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkMusicSvg, size),
       colorClass: 'text-teal-400',
     };
   }
@@ -48,10 +66,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // PDFs
   if (ext === 'pdf') {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/>
-        <path d="M4.603 12.087a.81.81 0 0 1-.438-.42c-.195-.388-.13-.776.08-1.102.198-.307.526-.568.897-.787a7.68 7.68 0 0 1 1.482-.645 19.701 19.701 0 0 0 1.062-2.227 7.269 7.269 0 0 1-.43-1.295c-.086-.4-.119-.796-.046-1.136.075-.354.274-.672.65-.823.192-.077.4-.12.602-.077a.7.7 0 0 1 .477.365c.088.164.12.356.127.538.007.187-.012.395-.047.614-.084.51-.27 1.134-.52 1.794a10.954 10.954 0 0 0 .98 1.686 5.753 5.753 0 0 1 1.334.05c.364.065.734.195.96.465.12.144.193.32.2.518.007.192-.047.382-.138.563a1.04 1.04 0 0 1-.354.416.856.856 0 0 1-.51.138c-.331-.014-.654-.196-.933-.417a5.716 5.716 0 0 1-.911-.95 11.642 11.642 0 0 0-1.997.406 11.311 11.311 0 0 1-1.021 1.51c-.29.35-.608.655-.926.787a.793.793 0 0 1-.58.029zm1.379-1.901c-.166.076-.32.156-.459.238-.328.194-.541.383-.647.547-.094.145-.096.25-.04.361.01.022.02.036.026.044a.27.27 0 0 0 .035-.012c.137-.056.355-.235.635-.572a8.18 8.18 0 0 0 .45-.606zm1.64-1.33a12.647 12.647 0 0 1 1.01-.193 11.666 11.666 0 0 1-.51-.858 20.741 20.741 0 0 1-.5 1.05zm2.446.45c.15.162.296.3.435.41.24.19.407.253.498.256a.107.107 0 0 0 .07-.015.307.307 0 0 0 .094-.125.436.436 0 0 0 .059-.2.095.095 0 0 0-.026-.063c-.052-.062-.2-.152-.518-.209a3.876 3.876 0 0 0-.612-.053zM8.078 5.8a6.7 6.7 0 0 0 .2-.828c.031-.188.043-.343.038-.465a.613.613 0 0 0-.032-.198.517.517 0 0 0-.145.04c-.087.035-.158.106-.196.283-.04.192-.03.469.046.822.024.111.054.227.09.346z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkPdfSvg, size),
       colorClass: 'text-red-400',
     };
   }
@@ -59,9 +74,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Documents (Word)
   if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M14 4.5V14a2 2 0 0 1-2 2h-1v-1h1a1 1 0 0 0 1-1V4.5h-2A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v9H2V2a2 2 0 0 1 2-2h5.5L14 4.5ZM3.517 14.841a1.13 1.13 0 0 0 .401.823c.13.108.289.192.478.252.19.061.411.091.665.091.338 0 .624-.053.859-.158.236-.105.416-.252.539-.44.125-.189.187-.408.187-.656 0-.224-.045-.41-.134-.56a1.001 1.001 0 0 0-.375-.357 2.027 2.027 0 0 0-.566-.21l-.621-.144a.97.97 0 0 1-.404-.176.37.37 0 0 1-.144-.299c0-.156.062-.284.185-.384.125-.101.296-.152.512-.152.143 0 .266.023.37.068a.624.624 0 0 1 .246.181.56.56 0 0 1 .12.258h.75a1.092 1.092 0 0 0-.2-.566 1.21 1.21 0 0 0-.5-.41 1.813 1.813 0 0 0-.78-.152c-.293 0-.551.05-.776.15-.225.099-.4.24-.527.421-.127.182-.19.395-.19.639 0 .201.04.376.122.524.082.149.2.27.352.367.152.095.332.167.539.213l.618.144c.207.049.361.113.463.193a.387.387 0 0 1 .152.326.505.505 0 0 1-.085.29.559.559 0 0 1-.255.193c-.111.047-.249.07-.413.07-.117 0-.223-.013-.32-.04a.838.838 0 0 1-.248-.115.578.578 0 0 1-.255-.384h-.765ZM.806 13.693c0-.248.034-.46.102-.633a.868.868 0 0 1 .302-.399.814.814 0 0 1 .475-.137c.15 0 .283.032.398.097a.7.7 0 0 1 .272.26.85.85 0 0 1 .12.381h.765v-.072a1.33 1.33 0 0 0-.466-.964 1.441 1.441 0 0 0-.489-.272 1.838 1.838 0 0 0-.606-.097c-.356 0-.66.074-.911.223-.25.148-.44.359-.572.632-.13.274-.196.6-.196.979v.498c0 .379.064.704.193.976.131.271.322.48.572.626.25.145.554.217.914.217.293 0 .554-.055.785-.164.23-.11.414-.26.55-.454a1.27 1.27 0 0 0 .226-.674v-.076h-.764a.799.799 0 0 1-.118.363.7.7 0 0 1-.272.25.874.874 0 0 1-.401.087.845.845 0 0 1-.478-.132.833.833 0 0 1-.299-.392 1.699 1.699 0 0 1-.102-.627v-.495Zm8.239 2.238h-.953l-1.338-3.999h.917l.896 3.138h.038l.888-3.138h.879l-1.327 3.999Z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkWordSvg, size),
       colorClass: 'text-blue-400',
     };
   }
@@ -69,9 +82,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Spreadsheets
   if (['xls', 'xlsx', 'csv', 'ods'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V9H3V2a1 1 0 0 1 1-1h5.5v2zM3 12v-2h2v2H3zm0 1h2v2H4a1 1 0 0 1-1-1v-1zm3 2v-2h3v2H6zm4 0v-2h3v1a1 1 0 0 1-1 1h-2zm3-3h-3v-2h3v2zm0-3V9h-3v2h3z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkSpreadsheetSvg, size),
       colorClass: 'text-green-400',
     };
   }
@@ -79,30 +90,22 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Archives
   if (['zip', 'tar', 'gz', 'rar', '7z', 'bz2', 'xz'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M6.5 7.5a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v.938l.4 1.599a1 1 0 0 1-.416 1.074l-.93.62a1 1 0 0 1-1.109 0l-.93-.62a1 1 0 0 1-.415-1.074l.4-1.599V7.5zm2 0h-1v.938a1 1 0 0 1-.03.243l-.4 1.598.93.62.93-.62-.4-1.598a1 1 0 0 1-.03-.243V7.5z"/>
-        <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm5.5-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H9v1H8V1H7.5v1h-1V1zM8 2.5V4H7V2.5h1zM7 5h1v1H7V5zm1 2v1H7V7h1z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkZipSvg, size),
       colorClass: 'text-amber-400',
     };
   }
 
-  // Code files
+  // Code files and HTML/CSS/Web share the same icon (deduplicated)
   if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'swift', 'kt'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294l4-13zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0zm6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkCodeSvg, size),
       colorClass: 'text-cyan-400',
     };
   }
 
-  // HTML/CSS/Web
   if (['html', 'css', 'scss', 'sass', 'less'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294l4-13zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0zm6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkCodeSvg, size),
       colorClass: 'text-orange-400',
     };
   }
@@ -110,19 +113,14 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
   // Text files
   if (['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'toml', 'ini', 'conf'].includes(ext)) {
     return {
-      svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M5 4a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm-.5 2.5A.5.5 0 0 1 5 6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zM5 8a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm0 2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1H5z"/>
-        <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm10-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z"/>
-      </svg>`,
+      svg: renderIcon(fileEarmarkTextSvg, size),
       colorClass: 'text-slate-400',
     };
   }
 
   // Default: generic file icon
   return {
-    svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-      <path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/>
-    </svg>`,
+    svg: renderIcon(fileEarmarkSvg, size),
     colorClass: 'text-slate-400',
   };
 }
@@ -132,9 +130,7 @@ export function getFileTypeIcon(filename: string, size: number = 24): FileIcon {
  */
 export function getTextItemIcon(size: number = 24): FileIcon {
   return {
-    svg: html`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16">
-      <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6 0-3.192-3.004-6-7-6S1 4.808 1 8c0 1.468.617 2.83 1.678 3.894zm-.493 3.905a21.682 21.682 0 0 1-.713.129c-.2.032-.352-.176-.273-.362a9.68 9.68 0 0 0 .244-.637l.003-.01c.248-.72.45-1.548.524-2.319C.743 11.37 0 9.76 0 8c0-3.866 3.582-7 8-7s8 3.134 8 7-3.582 7-8 7a9.06 9.06 0 0 1-2.347-.306c-.52.263-1.639.742-3.468 1.105z"/>
-    </svg>`,
+    svg: renderIcon(chatSvg, size),
     colorClass: 'text-sky-400',
   };
 }

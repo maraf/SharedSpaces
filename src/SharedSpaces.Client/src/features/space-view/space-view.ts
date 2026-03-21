@@ -834,7 +834,7 @@ export class SpaceView extends BaseElement {
                 <li
                   class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
                 >
-                  <span class="shrink-0 ${icon.colorClass}">
+                  <span class="shrink-0 ${icon.colorClass}" aria-hidden="true">
                     ${icon.svg}
                   </span>
                   <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
@@ -1023,7 +1023,7 @@ export class SpaceView extends BaseElement {
     const icon = getTextItemIcon();
     return html`
       <!-- Left: Icon -->
-      <div class="shrink-0 ${icon.colorClass}">
+      <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
         ${icon.svg}
       </div>
       <!-- Center: Content -->
@@ -1036,7 +1036,7 @@ export class SpaceView extends BaseElement {
           ${item.content}
         </p>
         <p class="text-xs text-slate-500">
-          ${this.formatTime(item.sharedAt)}
+          <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
         </p>
       </div>
       <!-- Right: Actions -->
@@ -1051,7 +1051,7 @@ export class SpaceView extends BaseElement {
     const icon = getFileTypeIcon(item.content);
     return html`
       <!-- Left: Icon -->
-      <div class="shrink-0 ${icon.colorClass}">
+      <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
         ${icon.svg}
       </div>
       <!-- Center: Content -->
@@ -1063,7 +1063,7 @@ export class SpaceView extends BaseElement {
           ${item.content}
         </p>
         <p class="text-xs text-slate-500">
-          ${this.formatFileSize(item.fileSize)} · ${this.formatTime(item.sharedAt)}
+          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
         </p>
       </div>
       <!-- Right: Actions -->
