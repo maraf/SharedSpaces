@@ -642,3 +642,10 @@ When implementing the auto-grow feature:
 - Tests written against API contract; endpoint already implemented by Kaylee
 - Branch: working on main/active development
 
+
+## Learnings (ItemCount in MemberResponse)
+
+- The `MemberResponse` DTO in test code must mirror the server's record exactly — updated from 4 fields to 5 by adding `int ItemCount`.
+- To verify computed item counts, create items via `UpsertTextItemAsync`/`UpsertFileItemAsync` with a member JWT, then call `ListMembersAsync` and assert `ItemCount` matches the number of items created.
+- Existing member tests (ListMembers, RevokeMember) that create members without items should assert `ItemCount == 0` to confirm the default/empty case.
+- DeleteMember tests already verify the member is absent from the list post-removal, which implicitly covers the item count disappearing — no separate ItemCount assertion needed there.

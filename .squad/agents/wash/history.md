@@ -617,3 +617,8 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - Show destructive colors (red tones) only on hover to signal the irreversible nature
 - Confirmation dialogs should clearly state what will be deleted: "member AND their items"
 - Use "cannot be undone" language to ensure user understands permanence
+
+#### Inline Metadata Display Pattern
+- Append secondary stats (e.g., item count) to existing metadata lines using a middle dot separator (`·`)
+- Use singular/plural ternary for counts: `${n} ${n === 1 ? 'item' : 'items'}`
+- Keeps layout stable — no extra rows or elements needed for simple numeric annotations

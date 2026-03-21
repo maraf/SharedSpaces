@@ -2422,3 +2422,27 @@ Also updated the 404 message from "Member not found" to "Space or member not fou
 - `src/SharedSpaces.Client/src/features/admin/admin-api.ts` — Extended `throwForFailedResponse` with `includeConflictMessage` option, updated 404 message
 - `src/SharedSpaces.Client/src/features/admin/admin-view.ts` — Pass `includeConflictMessage: true` when calling `removeMember()`
 
+# Decision: Correlated Subquery for MemberResponse ItemCount
+
+**Author:** Kaylee (Backend Dev)
+**Date:** 2026-03-22
+
+## Context
+
+The admin panel needs to show how many items each member has created in a space. We needed to add `ItemCount` to `MemberResponse`.
+
+## Decision
+
+Used a correlated subquery (`db.SpaceItems.Count(item => item.MemberId == member.Id && item.SpaceId == spaceId)`) inside the LINQ `.Select()` projection rather than loading a navigation property or performing a separate query.
+
+## Rationale
+
+- EF Core translates this to a single SQL query with a scalar subquery — no N+1 problem.
+- No new navigation properties or entity changes needed.
+- Keeps the query self-contained in the endpoint without additional joins or groupings.
+- Consistent with the existing read-only `AsNoTracking()` pattern used in the GetMembers endpoint.
+
+## Impact
+
+- `MemberResponse` record gains an `int ItemCount` parameter (positional record — any code constructing this record must be updated).
+- All 108 existing tests pass without modification.
