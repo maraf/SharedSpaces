@@ -989,7 +989,7 @@ export class AdminView extends BaseElement {
                     : null}
                 </div>
                 <p class="text-xs text-slate-500">
-                  Joined ${this.formatDate(member.joinedAt)}
+                  Joined ${this.formatDate(member.joinedAt)} · ${member.itemCount} ${member.itemCount === 1 ? 'item' : 'items'}
                 </p>
               </div>
 

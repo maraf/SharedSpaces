@@ -549,6 +549,7 @@ public class AdminEndpointTests
         actualMembers.Select(member => member.Id).Should().BeEquivalentTo([firstMember.Id, secondMember.Id]);
         actualMembers.Select(member => member.DisplayName).Should().BeEquivalentTo(["Taylor", "Jordan"]);
         actualMembers.Should().OnlyContain(member => !member.IsRevoked && member.JoinedAt != default);
+        actualMembers.Should().OnlyContain(member => member.ItemCount == 0);
     }
 
     [Fact]
@@ -595,6 +596,55 @@ public class AdminEndpointTests
     }
 
     [Fact]
+    public async Task GetMembers_ReturnsCorrectItemCount()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var text1Response = await UpsertTextItemAsync(client, space.Id, Guid.NewGuid(), "first note", token);
+        text1Response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var text2Response = await UpsertTextItemAsync(client, space.Id, Guid.NewGuid(), "second note", token);
+        text2Response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var fileBytes = Enumerable.Repeat((byte)'x', 50).ToArray();
+        var fileResponse = await UpsertFileItemAsync(client, space.Id, Guid.NewGuid(), fileBytes, "doc.bin", token);
+        fileResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var response = await ListMembersAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var members = await ReadJsonAsync<MemberResponse[]>(response);
+        members.Should().NotBeNull();
+        members!.Should().ContainSingle();
+        members!.Single().Id.Should().Be(member.Id);
+        members!.Single().ItemCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task GetMembers_ReturnsZeroItemCount_WhenMemberHasNoItems()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        var response = await ListMembersAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var members = await ReadJsonAsync<MemberResponse[]>(response);
+        members.Should().NotBeNull();
+        members!.Should().ContainSingle();
+        members!.Single().Id.Should().Be(member.Id);
+        members!.Single().ItemCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task RevokeMember_WithValidSecret_SetsMemberRevoked()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -612,6 +662,7 @@ public class AdminEndpointTests
         var members = await ReadJsonAsync<MemberResponse[]>(listResponse);
         members.Should().NotBeNull();
         members!.Should().ContainSingle(existingMember => existingMember.Id == member.Id && existingMember.IsRevoked);
+        members!.Single().ItemCount.Should().Be(0);
     }
 
     [Fact]
@@ -1211,7 +1262,7 @@ public class AdminEndpointTests
 
     private sealed record InvitationResponse(string InvitationString, string? QrCodeBase64);
 
-    private sealed record MemberResponse(Guid Id, string DisplayName, DateTime JoinedAt, bool IsRevoked);
+    private sealed record MemberResponse(Guid Id, string DisplayName, DateTime JoinedAt, bool IsRevoked, int ItemCount);
 
     private sealed record InvitationListResponse(Guid Id, Guid SpaceId);
 

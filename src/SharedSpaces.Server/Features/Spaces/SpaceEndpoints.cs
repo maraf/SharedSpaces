@@ -108,7 +108,12 @@ public static class SpaceEndpoints
             .AsNoTracking()
             .Where(member => member.SpaceId == spaceId)
             .OrderByDescending(member => member.JoinedAt)
-            .Select(member => new MemberResponse(member.Id, member.DisplayName, member.JoinedAt, member.IsRevoked))
+            .Select(member => new MemberResponse(
+                member.Id,
+                member.DisplayName,
+                member.JoinedAt,
+                member.IsRevoked,
+                db.SpaceItems.Count(item => item.MemberId == member.Id && item.SpaceId == spaceId)))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(response);

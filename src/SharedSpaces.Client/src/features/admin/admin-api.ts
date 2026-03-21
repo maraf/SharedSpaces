@@ -16,6 +16,7 @@ export interface MemberResponse {
   displayName: string;
   joinedAt: string;
   isRevoked: boolean;
+  itemCount: number;
 }
 
 export interface InvitationListResponse {
