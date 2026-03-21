@@ -16,6 +16,7 @@ export default defineConfig({
       name: 'screenshots',
       use: {
         browserName: 'chromium',
+        headless: false,
       },
     },
   ],

@@ -71,10 +71,16 @@ async function seedSpace(name: string) {
     body: JSON.stringify({ pin: pin2, displayName: 'Bob' }),
   });
 
-  // Add sample text items
+  // Add sample text items — enough to overflow and show the scrollbar
   for (const content of [
     'Welcome to SharedSpaces! 🚀',
     'This is a shared note visible to all members.',
+    'Here are the docs for the new API: https://api.example.com/v2/docs',
+    'Can someone review the pull request? It adds offline sync support.',
+    'Reminder: standup at 10 AM tomorrow 📅',
+    'The deployment went through — staging is green ✅',
+    'Updated the color tokens in the design system. Check Figma for the latest.',
+    'Quick thought: we should add rate limiting before launch.',
   ]) {
     const itemId = crypto.randomUUID();
     const form = new FormData();
@@ -88,21 +94,22 @@ async function seedSpace(name: string) {
     });
   }
 
-  // Add a sample file item
-  const fileItemId = crypto.randomUUID();
-  const fileForm = new FormData();
-  fileForm.append('id', fileItemId);
-  fileForm.append('contentType', 'file');
-  fileForm.append(
-    'file',
-    new Blob(['# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM'], { type: 'text/plain' }),
-    'meeting-notes.txt',
-  );
-  await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/items/${fileItemId}`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${aliceToken.token}` },
-    body: fileForm,
-  });
+  // Add sample file items
+  for (const file of [
+    { name: 'meeting-notes.txt', content: '# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM' },
+    { name: 'architecture.md', content: '# System Architecture\n\nClient → API Gateway → Services → Database' },
+  ]) {
+    const fileItemId = crypto.randomUUID();
+    const fileForm = new FormData();
+    fileForm.append('id', fileItemId);
+    fileForm.append('contentType', 'file');
+    fileForm.append('file', new Blob([file.content], { type: 'text/plain' }), file.name);
+    await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/items/${fileItemId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${aliceToken.token}` },
+      body: fileForm,
+    });
+  }
 
   return { space, invitation, token: aliceToken.token };
 }
@@ -130,12 +137,12 @@ async function navigateToAdminSignedIn(page: Page) {
   await page.waitForTimeout(500);
 }
 
-async function capture(page: Page, name: string, vp: ViewportSpec) {
+async function capture(page: Page, name: string, vp: ViewportSpec, { fullPage = true } = {}) {
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.waitForTimeout(300);
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
   const filePath = path.join(SCREENSHOTS_DIR, `${name}--${vp.name}.png`);
-  await page.screenshot({ path: filePath, fullPage: true });
+  await page.screenshot({ path: filePath, fullPage });
   console.log(`  ✓ ${name}--${vp.name}.png`);
 }
 
@@ -200,7 +207,7 @@ test.describe('Screenshot Capture', () => {
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
-      await capture(page, 'space', vp);
+      await capture(page, 'space', vp, { fullPage: false });
     });
 
     test(`space view - dead space (auth) - ${vp.name}`, async ({ page }) => {
@@ -253,7 +260,7 @@ test.describe('Screenshot Capture', () => {
       // Click the first space pill to enter space view
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
-      await page.waitForTimeout(1000);
+      await page.waitForSelector('space-view button[aria-label="Delete item"]', { timeout: 10_000 });
       // Click the delete (trash) button on the first item card
       const deleteBtn = page.locator('space-view button[aria-label="Delete item"]').first();
       await deleteBtn.click();
