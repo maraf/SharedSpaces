@@ -564,3 +564,15 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - Query textarea with `this.shadowRoot?.querySelector('textarea')` for reset operations that happen outside the input handler (where we don't have the event target reference).
 - In the input handler itself, use `e.target as HTMLTextAreaElement` directly for better performance (no DOM query needed).
 
+## PR #91: Scrollbar CSS Review (2026-03-21)
+
+**Task:** Address Copilot reviewer feedback on scrollbar styling in index.css
+
+**Objectives:**
+- Add `scrollbar-gutter: stable;` to prevent layout shift when scrollbars appear/disappear
+- Fix misleading comment in scrollbar CSS rule
+- Verify layout integrity
+- Commit and push changes
+
+**Status:** In Progress (spawned 2026-03-21T19:25:00Z)
+
