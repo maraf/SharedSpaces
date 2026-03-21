@@ -90,7 +90,10 @@ export class AppShell extends BaseElement {
     if (this.headerElement) {
       this.headerResizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
-          const height = entry.target.getBoundingClientRect().height;
+          const borderBoxSize = Array.isArray(entry.borderBoxSize)
+            ? entry.borderBoxSize[0]
+            : entry.borderBoxSize;
+          const height = borderBoxSize?.blockSize ?? entry.contentRect.height;
           document.documentElement.style.setProperty('--header-height', `${height}px`);
         }
       });
@@ -106,6 +109,7 @@ export class AppShell extends BaseElement {
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
     this.headerResizeObserver?.disconnect();
+    document.documentElement.style.removeProperty('--header-height');
   }
 
   private handleSwMessage = (event: MessageEvent) => {
