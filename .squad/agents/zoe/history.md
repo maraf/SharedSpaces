@@ -455,3 +455,75 @@ Wash completed Issue #86 fix: WebSocket connection state indicator was showing c
 **Branch:** `squad/86-websocket-disconnect-switching` (2 commits)
 
 **Impact:** #86 fully resolved with complete test coverage. Indicator now accurately reflects current space's connection status.
+
+## 2026-03-17 — Regression Tests for Issue #86 (WebSocket Disconnect on Space Switching)
+
+### Context
+Added comprehensive regression tests for Issue #86: "WebSocket is not disconnected when switching between spaces". The issue manifests as a stale connection dot indicator when users rapidly switch between spaces in the app-shell.
+
+### Test Coverage Added (7 tests)
+
+**File:** `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+**Test Suite:** "SpaceView - WebSocket Disconnect on Space Switching (Issue #86)"
+
+1. **calls stopSignalR when element is removed from DOM**
+   - Verifies `disconnectedCallback` triggers SignalR cleanup
+   - Tests that `stop()` is called, `signalRClient` is cleared, and state becomes 'disconnected'
+
+2. **emits connection-state-change event with correct spaceId when state changes**
+   - Tests the custom event emission that app-shell uses to update dot indicators
+   - Verifies event detail contains correct `spaceId` and `state`
+
+3. **each space-view instance tracks its own connection state independently**
+   - Validates that multiple space-view elements maintain isolated state
+   - Critical for preventing stale state bugs when switching spaces
+
+4. **startSignalR stops existing connection before starting new one**
+   - Ensures no connection leaks when re-initializing SignalR
+   - Tests cleanup before reconnection
+
+5. **stopSignalR clears signalRClient and sets state to disconnected**
+   - Direct test of the cleanup method
+   - Validates state transitions
+
+6. **connection state remains independent when multiple space-view elements exist**
+   - Simulates the actual app-shell behavior (multiple pill buttons)
+   - Verifies removing one space-view doesn't affect others
+
+7. **re-adding a space-view after removal creates fresh connection state**
+   - Tests that switching back to a previously viewed space doesn't reuse stale state
+   - Validates cleanup was thorough
+
+### Learnings
+
+**SignalR Mock Setup:**
+- The test file uses a shared `mockSignalRConnection` at the top level
+- `vi.clearAllMocks()` in `beforeEach` resets mock implementations
+- Need to re-mock `start`, `stop`, and `on` after `clearAllMocks()` in new test suites
+
+**Async Cleanup:**
+- `disconnectedCallback()` calls `stopSignalR()` but doesn't `await` it
+- Tests must wait ~50ms after DOM removal to verify cleanup completed
+- Use `await new Promise((resolve) => setTimeout(resolve, 50))` after `removeChild()`
+
+**Testing Patterns:**
+- Don't rely on full component initialization (loadData is async and won't complete in test timing)
+- Directly set internal state like `(element as any).signalRClient = mockClient`
+- Use `await (element as any).updateComplete` to trigger Lit's reactive update cycle
+- Test the behavior, not implementation details (e.g., "does cleanup happen?" not "does it call specific internal methods?")
+
+**Connection State Architecture:**
+- Each space-view instance is independent (no shared state)
+- `connectionState` is a Lit `@state()` property that triggers re-renders
+- Custom event `connection-state-change` bubbles to app-shell for dot indicator updates
+- Event detail: `{ spaceId: string, state: ConnectionState }`
+
+### Test Results
+✅ All 64 tests pass (57 existing + 7 new)
+⏱️ Test duration: ~910ms (well within acceptable range)
+
+### Next Steps for Wash
+These tests document the expected behavior. When Wash fixes the bug in production code, these tests should continue to pass, confirming the fix doesn't break existing behavior. The tests verify:
+- Proper cleanup on space switch
+- Independent state tracking per space
+- Correct event emission for dot indicator updates
