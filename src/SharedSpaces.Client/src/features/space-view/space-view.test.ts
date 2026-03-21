@@ -896,6 +896,330 @@ describe('SpaceView - Deduplication Logic', () => {
       expect(items[0].id).toBe(otherItemId);
     });
   });
+
+  describe('Scenario 6: Share Target Deduplication (Issue #73)', () => {
+    it('does not duplicate text item when shared via share_target and SignalR event arrives before API response', async () => {
+      // Mock API responses
+      const spaceInfo = {
+        id: spaceId,
+        name: 'Test Space',
+        createdAt: new Date().toISOString(),
+      };
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/v1/spaces/') && !url.includes('/items')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => spaceInfo,
+          });
+        }
+        if (url.endsWith('/items')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [],
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        });
+      });
+
+      // Mount and wait for initial load
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const sharedItemId = 'share-target-text-id';
+      const sharedItem: SpaceItemResponse = {
+        id: sharedItemId,
+        spaceId,
+        memberId: 'member-1',
+        contentType: 'text' as const,
+        content: 'Shared text content',
+        fileSize: 0,
+        sharedAt: new Date().toISOString(),
+      };
+
+      // Create delayed API response
+      let uploadResolve: (value: any) => void;
+      const uploadPromise = new Promise((resolve) => {
+        uploadResolve = resolve;
+      });
+
+      mockFetch.mockImplementationOnce(() => uploadPromise);
+
+      // Mock crypto.randomUUID
+      vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(sharedItemId);
+
+      // Simulate uploadPendingShare call with text share
+      (element as any).token = token;
+      const pendingShare = {
+        id: 'pending-share-1',
+        type: 'text' as const,
+        content: 'Shared text content',
+        timestamp: Date.now(),
+      };
+
+      const uploadSharePromise = (element as any).uploadPendingShare(pendingShare);
+
+      // Wait for pendingItemIds.add to execute
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Verify pendingItemIds contains the shared item
+      const pendingIds = (element as any).pendingItemIds as Set<string>;
+      expect(pendingIds.has(sharedItemId)).toBe(true);
+
+      // Simulate SignalR event arriving BEFORE API response completes
+      if (signalRItemAddedHandler) {
+        const signalRPayload: ItemAddedPayload = {
+          id: sharedItemId,
+          spaceId,
+          memberId: 'member-1',
+          displayName: 'User 1',
+          contentType: 'text',
+          content: 'Shared text content',
+          fileSize: 0,
+          sharedAt: sharedItem.sharedAt,
+        };
+
+        signalRItemAddedHandler(signalRPayload);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        // Verify item is NOT added via SignalR (blocked by pendingItemIds check)
+        const itemsAfterSignalR = (element as any).items as SpaceItemResponse[];
+        expect(itemsAfterSignalR).toHaveLength(0);
+      }
+
+      // Now complete the API response
+      uploadResolve!({
+        ok: true,
+        status: 200,
+        json: async () => sharedItem,
+      });
+
+      await uploadSharePromise;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Verify item was added via API response (no duplicate)
+      const itemsAfterUpload = (element as any).items as SpaceItemResponse[];
+      expect(itemsAfterUpload).toHaveLength(1);
+      expect(itemsAfterUpload[0].id).toBe(sharedItemId);
+
+      // Verify pendingItemIds was cleaned up
+      expect(pendingIds.has(sharedItemId)).toBe(false);
+    });
+
+    it('does not duplicate file item when shared via share_target and SignalR event arrives before API response', async () => {
+      // Mock API responses
+      const spaceInfo = {
+        id: spaceId,
+        name: 'Test Space',
+        createdAt: new Date().toISOString(),
+      };
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/v1/spaces/') && !url.includes('/items')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => spaceInfo,
+          });
+        }
+        if (url.endsWith('/items')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [],
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        });
+      });
+
+      // Mount and wait for initial load
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const sharedFileId = 'share-target-file-id';
+      const sharedFile: SpaceItemResponse = {
+        id: sharedFileId,
+        spaceId,
+        memberId: 'member-1',
+        contentType: 'file' as const,
+        content: '/files/shared-image.jpg',
+        fileSize: 2048,
+        sharedAt: new Date().toISOString(),
+      };
+
+      // Create delayed API response
+      let uploadResolve: (value: any) => void;
+      const uploadPromise = new Promise((resolve) => {
+        uploadResolve = resolve;
+      });
+
+      mockFetch.mockImplementationOnce(() => uploadPromise);
+
+      // Mock crypto.randomUUID
+      vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(sharedFileId);
+
+      // Simulate uploadPendingShare call with file share
+      (element as any).token = token;
+      const fileData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic bytes
+      const pendingShare = {
+        id: 'pending-share-2',
+        type: 'file' as const,
+        fileName: 'shared-image.jpg',
+        fileType: 'image/jpeg',
+        fileData,
+        timestamp: Date.now(),
+      };
+
+      const uploadSharePromise = (element as any).uploadPendingShare(pendingShare);
+
+      // Wait for pendingItemIds.add to execute
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Verify pendingItemIds contains the shared file
+      const pendingIds = (element as any).pendingItemIds as Set<string>;
+      expect(pendingIds.has(sharedFileId)).toBe(true);
+
+      // Simulate SignalR event arriving BEFORE API response completes
+      if (signalRItemAddedHandler) {
+        const signalRPayload: ItemAddedPayload = {
+          id: sharedFileId,
+          spaceId,
+          memberId: 'member-1',
+          displayName: 'User 1',
+          contentType: 'file',
+          content: '/files/shared-image.jpg',
+          fileSize: 2048,
+          sharedAt: sharedFile.sharedAt,
+        };
+
+        signalRItemAddedHandler(signalRPayload);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        // Verify file is NOT added via SignalR (blocked by pendingItemIds check)
+        const itemsAfterSignalR = (element as any).items as SpaceItemResponse[];
+        expect(itemsAfterSignalR).toHaveLength(0);
+      }
+
+      // Now complete the API response
+      uploadResolve!({
+        ok: true,
+        status: 200,
+        json: async () => sharedFile,
+      });
+
+      await uploadSharePromise;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Verify file was added via API response (no duplicate)
+      const itemsAfterUpload = (element as any).items as SpaceItemResponse[];
+      expect(itemsAfterUpload).toHaveLength(1);
+      expect(itemsAfterUpload[0].id).toBe(sharedFileId);
+
+      // Verify pendingItemIds was cleaned up
+      expect(pendingIds.has(sharedFileId)).toBe(false);
+    });
+
+    it('cleans up pendingItemIds even when share upload fails', async () => {
+      // Mock API responses
+      const spaceInfo = {
+        id: spaceId,
+        name: 'Test Space',
+        createdAt: new Date().toISOString(),
+      };
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/v1/spaces/') && !url.includes('/items')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => spaceInfo,
+          });
+        }
+        if (url.endsWith('/items')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [],
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        });
+      });
+
+      // Mount and wait for initial load
+      document.body.appendChild(element);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const failedShareId = 'failed-share-id';
+
+      // Mock failed upload
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      });
+
+      vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(failedShareId);
+
+      (element as any).token = token;
+      const pendingShare = {
+        id: 'pending-share-3',
+        type: 'text' as const,
+        content: 'Failed share content',
+        timestamp: Date.now(),
+      };
+
+      try {
+        await (element as any).uploadPendingShare(pendingShare);
+      } catch {
+        // Expected to fail
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Verify pendingItemIds was cleaned up even on failure (finally block)
+      const pendingIds = (element as any).pendingItemIds as Set<string>;
+      expect(pendingIds.has(failedShareId)).toBe(false);
+
+      // Verify item was NOT added to items list
+      const items = (element as any).items as SpaceItemResponse[];
+      expect(items).toHaveLength(0);
+
+      // If SignalR event arrives later, it should be added (not blocked)
+      if (signalRItemAddedHandler) {
+        const payload: ItemAddedPayload = {
+          id: failedShareId,
+          spaceId,
+          memberId: 'member-1',
+          displayName: 'User 1',
+          contentType: 'text',
+          content: 'Failed share content',
+          fileSize: 0,
+          sharedAt: new Date().toISOString(),
+        };
+
+        signalRItemAddedHandler(payload);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        // Item should now be added via SignalR (since it's not in pendingItemIds or items)
+        const itemsAfterSignalR = (element as any).items as SpaceItemResponse[];
+        expect(itemsAfterSignalR).toHaveLength(1);
+        expect(itemsAfterSignalR[0].id).toBe(failedShareId);
+      }
+    });
+  });
 });
 
 describe('SpaceView - Delete Confirmation', () => {

@@ -124,6 +124,8 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+- **Share target duplicate item fix (2026-03-19, Issue #73):** Fixed duplicate item bug in share_target flow where shared files appeared twice in the item list (one from local add, one from SignalR broadcast). Root cause: `uploadPendingShare()` in `src/SharedSpaces.Client/src/features/space-view/space-view.ts` added items directly to `this.items` without using the `pendingItemIds` deduplication mechanism that `uploadFiles()` and `handleTextSubmit()` already used. The fix wraps the upload logic with `this.pendingItemIds.add(itemId)` before upload and `this.pendingItemIds.delete(itemId)` in a finally block, ensuring `handleItemAdded()` skips the SignalR broadcast when the item ID is in the pending set. This mirrors the existing race condition fix from commit 3502e56 and maintains consistency across all upload paths (manual file, text submit, and share target).
+
 - **Web Share Target API requirements research (2026-03-19):** Chrome-only platform feature for registering app as share destination in OS share menu. Requires: (1) manifest.json with `share_target` entry specifying POST multipart endpoint, (2) service worker to intercept POST to `/share-receive`, extract form data, and redirect with 303 See Other, (3) new Lit component `share-accept-view` to show shared content + space selector + optional auth integration, (4) sessionStorage to pass share data from SW to client (IndexedDB migration in #28 offline work). Firefox has limited support; Safari has none. Key design decisions open: support unauthenticated shares (affects complexity), GET vs POST method (POST recommended for files), multi-server space routing, inline vs preview display of shared content. Architecture fits as Phase 4-5 polish (not blocking core functionality). Comprehensive decision doc created in `.squad/decisions/inbox/wash-share-target-frontend.md` with 7 open questions for Marek.
 - **Light DOM composition rule (2026-03-18):** Components extending `src/SharedSpaces.Client/src/lib/base-element.ts` cannot rely on `<slot>` because `createRenderRoot()` returns `this` and Lit will overwrite light-DOM children on render. Reusable wrappers like `src/SharedSpaces.Client/src/components/view-card.ts` should accept content through a property such as `.body=${html`...`}` or a template helper instead of child nodes. **Wash fixed this in commit 6e5c13a:** migrated `view-card.ts` and its 3 consumers (admin-view.ts, join-view.ts, space-view.ts) to use property-based body templates. Rule: any BaseElement-based component must use property-driven templates for composition, not slots.
 - Re-checking the Lit option in 2026 changed the risk profile: routing is still the weakest area (deprecated Vaadin Router, `@lit-labs/router` still Labs), but Tailwind, testing, and SignalR are no longer show-stoppers. Lit can render in light DOM for Tailwind, use Vitest + Playwright credibly, and consume the framework-agnostic SignalR JS client without special adapters.
@@ -387,3 +389,13 @@ Applied review feedback from Copilot reviewer and Marek:
 - MB-to-bytes conversion: `Math.round(parseFloat(mb) * 1024 * 1024)` on submit. Input uses `type="number"` with `step="any"` for decimal MB values.
 - The form layout changed from single-row `flex` to `space-y-3` with two rows to accommodate the quota field without overflowing on mobile.
 - `formatBytesAsMb()` helper added for consistent byte→MB display across the view.
+- **Accessibility on decorative icons:** Always add `aria-hidden="true"` to icon containers that are purely decorative (not conveying unique information). Screen readers skip them, reducing noise.
+
+## 2026-03-21 — Share Target Dedup Fix #73
+
+**Status:** Completed  
+**Session:** .squad/log/2026-03-21T13-15-30Z-fix-share-target-dedup.md  
+
+Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds tracking to uploadPendingShare(). Matches existing dedup pattern from uploadFiles() and handleTextSubmit(). Tests added by Zoe (215/215 passing).
+
+**Impact:** Issue #73 resolved, 3 regression tests covering all upload paths.
