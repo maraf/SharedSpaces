@@ -121,7 +121,7 @@ describe('AppShell - Connection State on View Change', () => {
       expect(states[spaceId]).toBeUndefined();
     });
 
-    it('does NOT reset spaceConnectionStates when view stays on space (e.g., switching spaces)', async () => {
+    it('clears spaceConnectionStates for old space when switching spaces (Issue #86)', async () => {
       // First establish 'space' view
       (element as any).currentSpaceId = spaceId;
       (element as any).view = 'space';
@@ -132,23 +132,21 @@ describe('AppShell - Connection State on View Change', () => {
       await element.updateComplete;
 
       // Switch to a different space — selectSpace sets view='space' again (same value),
-      // so Lit won't schedule an update for view, meaning willUpdate won't have 'view' in changed.
-      // We verify this by only changing currentSpaceId.
+      // but currentSpaceId changes, which should trigger cleanup of the old space's state
       (element as any).currentSpaceId = 'other-space-id';
       await element.updateComplete;
 
       // Wait for any space-view render side-effects to settle
       await new Promise((resolve) => setTimeout(resolve, 20));
 
-      // willUpdate should NOT have reset the original spaceId's state
-      // (it only resets when view changes AWAY from 'space')
+      // willUpdate SHOULD have cleared the original spaceId's connection state
+      // because currentSpaceId changed (switching between spaces)
       const states = (element as any).spaceConnectionStates as Record<string, ConnectionState>;
-      // The state might have been updated by a space-view event for the NEW spaceId,
-      // but the key point is: willUpdate didn't forcibly reset our spaceId to 'disconnected'
-      // because view didn't change.
-      // Check that if any state was set for the original spaceId, it was from our manual set, not willUpdate.
-      // Since space-view re-renders with other-space-id, it dispatches for other-space-id, not spaceId.
-      expect(states[spaceId]).toBe('connected');
+      expect(states[spaceId]).toBeUndefined();
+      
+      // The new space should not have inherited the old space's state
+      // (it will get its own state when space-view emits connection-state-change)
+      expect(states['other-space-id']).toBeUndefined();
     });
 
     it('does not throw when there is no currentSpaceId', async () => {

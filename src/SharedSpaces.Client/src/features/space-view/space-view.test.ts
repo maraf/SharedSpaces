@@ -1946,3 +1946,240 @@ describe('SpaceView - Delete Confirmation', () => {
     });
   });
 });
+
+
+
+
+describe('SpaceView - WebSocket Disconnect on Space Switching (Issue #86)', () => {
+  // Regression tests for Issue #86: WebSocket is not disconnected when switching between spaces
+  // The bug manifests as stale connection state in the dot indicator when rapidly switching spaces
+  
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+  
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+  
+  beforeEach(() => {
+    vi.clearAllMocks();
+    
+    // Re-mock SignalR connection after clearAllMocks
+    mockSignalRConnection.start = vi.fn().mockResolvedValue(undefined);
+    mockSignalRConnection.stop = vi.fn().mockResolvedValue(undefined);
+    mockSignalRConnection.on = vi.fn();
+    mockSignalRConnection.state = 'Disconnected';
+    
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === `${serverUrl}:${spaceId}`) return token;
+      return null;
+    });
+    
+    mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [],
+    });
+    globalThis.fetch = mockFetch;
+    
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+  
+  afterEach(() => {
+    if (element?.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+  
+  it('calls stopSignalR when element is removed from DOM', async () => {
+    // Set up a mock SignalR client to verify cleanup
+    const mockClient = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    (element as any).signalRClient = mockClient;
+    (element as any).connectionState = 'connected';
+    
+    document.body.appendChild(element);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    
+    // Remove from DOM - should trigger disconnectedCallback
+    document.body.removeChild(element);
+    
+    // Wait for async stopSignalR to complete
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    
+    // Verify stop was called
+    expect(mockClient.stop).toHaveBeenCalled();
+    
+    // Verify signalRClient is cleared
+    expect((element as any).signalRClient).toBeUndefined();
+    
+    // Verify state is set to disconnected
+    expect((element as any).connectionState).toBe('disconnected');
+  });
+  
+  it('emits connection-state-change event with correct spaceId when state changes', async () => {
+    const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
+    const element1 = document.createElement('space-view') as SpaceView;
+    element1.setAttribute('server-url', serverUrl);
+    element1.setAttribute('space-id', spaceId1);
+    
+    let capturedEvent: CustomEvent | null = null;
+    element1.addEventListener('connection-state-change', (e) => {
+      capturedEvent = e as CustomEvent;
+    });
+    
+    document.body.appendChild(element1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    
+    // Change connection state
+    (element1 as any).connectionState = 'connected';
+    await (element1 as any).updateComplete;
+    
+    // Verify event was emitted with correct spaceId
+    expect(capturedEvent).not.toBeNull();
+    if (capturedEvent) {
+      expect(capturedEvent.detail.spaceId).toBe(spaceId1);
+      expect(capturedEvent.detail.state).toBe('connected');
+    }
+    
+    // Clean up
+    document.body.removeChild(element1);
+  });
+  
+  it('each space-view instance tracks its own connection state independently', () => {
+    const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
+    const spaceId2 = '550e8400-e29b-41d4-a716-446655440002';
+    
+    const element1 = document.createElement('space-view') as SpaceView;
+    element1.setAttribute('server-url', serverUrl);
+    element1.setAttribute('space-id', spaceId1);
+    (element1 as any).connectionState = 'connected';
+    
+    const element2 = document.createElement('space-view') as SpaceView;
+    element2.setAttribute('server-url', serverUrl);
+    element2.setAttribute('space-id', spaceId2);
+    (element2 as any).connectionState = 'disconnected';
+    
+    // Each element should have its own state
+    expect((element1 as any).spaceId).toBe(spaceId1);
+    expect((element1 as any).connectionState).toBe('connected');
+    
+    expect((element2 as any).spaceId).toBe(spaceId2);
+    expect((element2 as any).connectionState).toBe('disconnected');
+    
+    // States should be independent
+    (element1 as any).connectionState = 'disconnected';
+    expect((element1 as any).connectionState).toBe('disconnected');
+    expect((element2 as any).connectionState).toBe('disconnected'); // Still disconnected, not affected
+  });
+  
+  it('startSignalR stops existing connection before starting new one', async () => {
+    const mockClient1 = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    
+    (element as any).serverUrl = serverUrl;
+    (element as any).spaceId = spaceId;
+    (element as any).token = token;
+    (element as any).signalRClient = mockClient1;
+    
+    // Call startSignalR - should stop existing client first
+    await (element as any).startSignalR();
+    
+    // Verify old client was stopped
+    expect(mockClient1.stop).toHaveBeenCalled();
+  });
+  
+  it('stopSignalR clears signalRClient and sets state to disconnected', async () => {
+    const mockClient = {
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    
+    (element as any).signalRClient = mockClient;
+    (element as any).connectionState = 'connected';
+    
+    await (element as any).stopSignalR();
+    
+    expect(mockClient.stop).toHaveBeenCalled();
+    expect((element as any).signalRClient).toBeUndefined();
+    expect((element as any).connectionState).toBe('disconnected');
+  });
+  
+  it('connection state remains independent when multiple space-view elements exist', async () => {
+    const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
+    const spaceId2 = '550e8400-e29b-41d4-a716-446655440002';
+    
+    // Create two space-view elements
+    const element1 = document.createElement('space-view') as SpaceView;
+    element1.setAttribute('server-url', serverUrl);
+    element1.setAttribute('space-id', spaceId1);
+    
+    const element2 = document.createElement('space-view') as SpaceView;
+    element2.setAttribute('server-url', serverUrl);
+    element2.setAttribute('space-id', spaceId2);
+    
+    // Set up mock clients
+    const mockClient1 = { stop: vi.fn().mockResolvedValue(undefined) };
+    const mockClient2 = { stop: vi.fn().mockResolvedValue(undefined) };
+    (element1 as any).signalRClient = mockClient1;
+    (element2 as any).signalRClient = mockClient2;
+    
+    document.body.appendChild(element1);
+    document.body.appendChild(element2);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    
+    // Remove first element
+    document.body.removeChild(element1);
+    
+    // Wait for async cleanup
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    
+    // Only element1's client should be stopped
+    expect(mockClient1.stop).toHaveBeenCalled();
+    expect(mockClient2.stop).not.toHaveBeenCalled();
+    
+    // Clean up
+    document.body.removeChild(element2);
+  });
+  
+  it('re-adding a space-view after removal creates fresh connection state', async () => {
+    const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
+    const element1 = document.createElement('space-view') as SpaceView;
+    element1.setAttribute('server-url', serverUrl);
+    element1.setAttribute('space-id', spaceId1);
+    
+    // Set up mock client
+    const mockClient1 = { stop: vi.fn().mockResolvedValue(undefined) };
+    (element1 as any).signalRClient = mockClient1;
+    (element1 as any).connectionState = 'connected';
+    
+    document.body.appendChild(element1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    
+    // Remove element
+    document.body.removeChild(element1);
+    
+    // Wait for async cleanup
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    
+    expect(mockClient1.stop).toHaveBeenCalled();
+    expect((element1 as any).signalRClient).toBeUndefined();
+    
+    // Re-add the same element
+    document.body.appendChild(element1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    
+    // Connection state should still be disconnected (until startSignalR is called)
+    // This tests that we don't have stale state from before removal
+    expect((element1 as any).signalRClient).toBeUndefined();
+    
+    // Clean up
+    document.body.removeChild(element1);
+  });
+});

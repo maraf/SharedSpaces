@@ -503,3 +503,23 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - Access private methods/state via `(element as any).methodName`
 - Use `vi.spyOn()` to mock `uploadFiles` method
 
+
+## Learnings
+
+### Issue #86: WebSocket Connection State Indicator Bug (2026-03-17)
+**Problem:** Connection state dot in nav pills showed stale "connected" state when switching between spaces, making it look like reconnection was happening when returning to a previously viewed space.
+
+**Root Cause:** 
+- `app-shell.ts` `willUpdate()` only cleared connection state when leaving the 'space' view entirely (view changed from 'space' to 'home'/'join'/'admin')
+- When switching from Space A → Space B → A, the `view` property stayed 'space', so old connection states persisted in `spaceConnectionStates`
+- The actual WebSocket connection WAS properly disconnected (space-view unmounts → disconnectedCallback fires), but the UI state wasn't cleared
+
+**Solution:**
+- Added `currentSpaceId` change detection in `willUpdate()` to clear old space's connection state when switching between spaces
+- Updated test expectations to verify stale state is cleared on space switch
+
+**Key Files:**
+- `/workspaces/SharedSpaces/src/SharedSpaces.Client/src/app-shell.ts` - Connection state tracking
+- `/workspaces/SharedSpaces/src/SharedSpaces.Client/src/features/space-view/space-view.ts` - SignalR connection lifecycle
+
+**Architecture Note:** space-view components are conditionally rendered, so mounting/unmounting triggers full lifecycle (connectedCallback/disconnectedCallback). Connection state must be tracked separately in parent (app-shell).
