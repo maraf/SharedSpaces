@@ -294,3 +294,10 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - eslint.config.js (allow any in tests)
 - Delete confirmation overlay (issue #53): tested via direct method invocation on SpaceView — `handleDeleteRequest`, `cancelDelete`, `confirmDelete`, `getItemPreviewLabel`. Edge cases: empty content, boundary-length text (exactly 40 chars), trailing whitespace trimming on truncation, file items bypass truncation, missing token guard clause, auth vs non-auth API failure handling, sequential delete-confirm-delete flows.
 - When production code renames methods (e.g., `handleDelete` → `confirmDelete`), pre-existing tests that call the old name will fail with "not a function" — always check and fix stale test references when testing a feature that refactored method names.
+
+## Learnings
+
+- `ConnectionState` type now includes `'connecting'` for the initial connection phase; `signalr-client.ts` state getter maps `HubConnectionState.Connecting` → `'connecting'`; `space-view.ts` sets `connectionState = 'connecting'` before calling `start()` in `startSignalR()`.
+- `app-shell.ts` `willUpdate()` removes the departing space's key from `spaceConnectionStates` (delete instead of setting 'disconnected') so it falls to the gray default dot color.
+- `app-shell.ts` `dotColor()` returns `bg-red-400` for 'disconnected' only when `this.view === 'space'` and `this.currentSpaceId === spaceId`; otherwise disconnected falls to gray (`bg-slate-500`). Both 'connecting' and 'reconnecting' map to amber (`bg-amber-400`).
+- When testing `startSignalR()` in space-view, call it directly with properties pre-set (`serverUrl`, `spaceId`, `token`) rather than going through the full `loadData` flow; `resolveToken()` reads from `getTokens()` via a JSON-based localStorage key (`sharedspaces:tokens`), so attribute-only mocking won't populate the token.
