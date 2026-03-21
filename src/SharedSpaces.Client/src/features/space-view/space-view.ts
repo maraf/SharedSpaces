@@ -66,6 +66,7 @@ export class SpaceView extends BaseElement {
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
   private pendingItemIds = new Set<string>();
+  private dragCounter = 0;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -119,6 +120,10 @@ export class SpaceView extends BaseElement {
     globalThis.addEventListener('online', this.handleOnline);
     globalThis.addEventListener('offline', this.handleOffline);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    document.addEventListener('dragenter', this.handleDragEnter);
+    document.addEventListener('dragleave', this.handleDragLeave);
+    document.addEventListener('dragover', this.handleDragOver);
+    document.addEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
     this.loadPendingShares();
     this.refreshOfflineQueueCount();
@@ -130,6 +135,10 @@ export class SpaceView extends BaseElement {
     globalThis.removeEventListener('online', this.handleOnline);
     globalThis.removeEventListener('offline', this.handleOffline);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    document.removeEventListener('dragenter', this.handleDragEnter);
+    document.removeEventListener('dragleave', this.handleDragLeave);
+    document.removeEventListener('dragover', this.handleDragOver);
+    document.removeEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
   }
 
@@ -508,17 +517,36 @@ export class SpaceView extends BaseElement {
     input.value = '';
   };
 
-  private handleDragOver = (e: DragEvent) => {
+  private handleDragEnter = (e: DragEvent) => {
     e.preventDefault();
-    this.dragOver = true;
+    this.dragCounter++;
+    if (this.dragCounter === 1) {
+      this.dragOver = true;
+    }
   };
 
-  private handleDragLeave = () => {
+  private handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+  };
+
+  private handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    this.dragCounter--;
+    if (this.dragCounter === 0) {
+      this.dragOver = false;
+    }
+  };
+
+  private handleDocumentDrop = (e: DragEvent) => {
+    e.preventDefault();
+    this.dragCounter = 0;
     this.dragOver = false;
   };
 
   private handleDrop = async (e: DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter = 0;
     this.dragOver = false;
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
@@ -845,8 +873,6 @@ export class SpaceView extends BaseElement {
       <section class="space-y-4">
         <!-- Compact compose box -->
         <div
-          @dragover=${this.handleDragOver}
-          @dragleave=${this.handleDragLeave}
           @drop=${this.handleDrop}
           class="relative rounded-lg border bg-slate-900 transition ${this
             .dragOver
