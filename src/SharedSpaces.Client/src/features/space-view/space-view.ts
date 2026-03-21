@@ -442,9 +442,26 @@ export class SpaceView extends BaseElement {
   }
 
   private handleTextInput = (e: Event) => {
-    this.textInput = (e.target as HTMLTextAreaElement).value;
+    const textarea = e.target as HTMLTextAreaElement;
+    this.textInput = textarea.value;
     this.uploadError = '';
+    this.autoResizeTextarea(textarea);
   };
+
+  private autoResizeTextarea(textarea: HTMLTextAreaElement) {
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = 'auto';
+    // Set height to scrollHeight to fit content
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+
+  private resetTextareaHeight() {
+    // Query the textarea and reset its height
+    const textarea = this.querySelector('textarea');
+    if (textarea) {
+      textarea.style.height = 'auto';
+    }
+  }
 
   private handleTextSubmit = async () => {
     if (!this.textInput.trim() || !this.serverUrl || !this.spaceId || !this.token)
@@ -458,6 +475,7 @@ export class SpaceView extends BaseElement {
       if (!navigator.onLine) {
         await this.enqueueForOffline('text', { content: this.textInput.trim() });
         this.textInput = '';
+        this.resetTextareaHeight();
         return;
       }
 
@@ -473,6 +491,7 @@ export class SpaceView extends BaseElement {
         );
         this.items = [item, ...this.items];
         this.textInput = '';
+        this.resetTextareaHeight();
       } finally {
         this.pendingItemIds.delete(itemId);
       }
@@ -482,6 +501,7 @@ export class SpaceView extends BaseElement {
         try {
           await this.enqueueForOffline('text', { content: this.textInput.trim() });
           this.textInput = '';
+          this.resetTextareaHeight();
           return;
         } catch {
           // Fall through to normal error handling
@@ -903,14 +923,15 @@ export class SpaceView extends BaseElement {
 
           <!-- Textarea -->
           <textarea
-            rows="3"
+            rows="1"
             placeholder="Share some text…"
             aria-label="Text to share"
             .value=${this.textInput}
             @input=${this.handleTextInput}
             @keydown=${this.handleTextKeydown}
             ?disabled=${this.isUploading}
-            class="w-full resize-y rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
+            class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
+            style="max-height: 200px; overflow-y: auto;"
           ></textarea>
 
           <!-- Action bar -->
