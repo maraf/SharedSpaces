@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getAdminServerUrls,
   addAdminServerUrl,
@@ -18,6 +18,10 @@ describe('admin-url-storage', () => {
       removeItem: (key: string) => store.delete(key),
       clear: () => store.clear(),
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   describe('getAdminServerUrls', () => {

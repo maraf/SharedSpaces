@@ -81,13 +81,14 @@ export class AdminView extends BaseElement {
 
   private normalizeServerUrl(serverUrl: string) {
     const trimmed = serverUrl.trim();
-    if (!trimmed) return 'https://';
+    if (!trimmed || trimmed === 'https://') return '';
     if (trimmed === '/') return '/';
     return trimmed.replace(/\/+$/, '');
   }
 
   private getDefaultServerUrl() {
-    return this.normalizeServerUrl(this.apiBaseUrl) || 'https://';
+    const normalized = this.normalizeServerUrl(this.apiBaseUrl);
+    return normalized || 'https://';
   }
 
   private formatDate(value: string) {
@@ -645,6 +646,7 @@ export class AdminView extends BaseElement {
                                 @click=${(e: Event) => this.handleUrlRemove(e, url)}
                                 class="px-3 py-3 text-slate-400 hover:text-red-400"
                                 title="Remove from history"
+                                aria-label=${`Remove ${url} from history`}
                               >
                                 ✕
                               </button>

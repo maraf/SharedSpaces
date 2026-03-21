@@ -13,8 +13,17 @@ export function getAdminServerUrls(): string[] {
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) return [];
-    // Only keep string values
-    return parsed.filter((item) => typeof item === 'string');
+    // Only keep string values, deduplicate, enforce cap
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const item of parsed) {
+      if (typeof item === 'string' && !seen.has(item)) {
+        seen.add(item);
+        result.push(item);
+        if (result.length >= MAX_HISTORY_ENTRIES) break;
+      }
+    }
+    return result;
   } catch {
     return [];
   }
