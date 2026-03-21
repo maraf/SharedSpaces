@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
+using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
 namespace SharedSpaces.Server.Features.Spaces;
@@ -26,12 +28,14 @@ public static class SpaceEndpoints
         return app;
     }
 
-    private static async Task<IResult> GetSpaces(AppDbContext db)
+    private static async Task<IResult> GetSpaces(AppDbContext db, IOptions<StorageOptions> storageOptions)
     {
+        var serverDefault = storageOptions.Value.MaxSpaceQuotaBytes;
+
         var response = await db.Spaces
             .AsNoTracking()
             .OrderByDescending(space => space.CreatedAt)
-            .Select(space => new SpaceResponse(space.Id, space.Name, space.CreatedAt))
+            .Select(space => new SpaceResponse(space.Id, space.Name, space.CreatedAt, space.MaxUploadSize, space.MaxUploadSize ?? serverDefault))
             .ToListAsync();
 
         return Results.Ok(response);
@@ -39,7 +43,8 @@ public static class SpaceEndpoints
 
     private static async Task<IResult> CreateSpace(
         CreateSpaceRequest request,
-        AppDbContext db)
+        AppDbContext db,
+        IOptions<StorageOptions> storageOptions)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
@@ -51,15 +56,31 @@ public static class SpaceEndpoints
             return Results.BadRequest(new { Error = "Name must not exceed 200 characters" });
         }
 
+        var serverDefault = storageOptions.Value.MaxSpaceQuotaBytes;
+
+        if (request.MaxUploadSize is not null)
+        {
+            if (request.MaxUploadSize <= 0)
+            {
+                return Results.BadRequest(new { Error = "MaxUploadSize must be greater than 0" });
+            }
+
+            if (request.MaxUploadSize > serverDefault)
+            {
+                return Results.BadRequest(new { Error = $"MaxUploadSize must not exceed server limit of {serverDefault} bytes" });
+            }
+        }
+
         var space = new Space
         {
-            Name = request.Name.Trim()
+            Name = request.Name.Trim(),
+            MaxUploadSize = request.MaxUploadSize
         };
 
         db.Spaces.Add(space);
         await db.SaveChangesAsync();
 
-        var response = new SpaceResponse(space.Id, space.Name, space.CreatedAt);
+        var response = new SpaceResponse(space.Id, space.Name, space.CreatedAt, space.MaxUploadSize, space.MaxUploadSize ?? serverDefault);
         return Results.Created($"/v1/spaces/{space.Id}", response);
     }
 
