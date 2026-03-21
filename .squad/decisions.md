@@ -1240,3 +1240,57 @@ Ensuring consistent UI across screen sizes and preventing regressions requires s
 ### Scope
 - Applies to all UI modifications (components, templates, styles, layout)
 - Mobile layout checks include: text overflow, button wrapping, pill bar issues, truncated labels, modal scrolling
+
+## README.md Rewrite (Architecture Doc → User-Facing README)
+
+**Decision Date:** 2026-03-19  
+**Decider:** Mal (Lead)  
+**Status:** ✅ Completed  
+
+### Context
+
+The original README.md was an architecture and implementation plan document. It included:
+- Domain model tables (Space, SpaceInvitation, SpaceMember, SpaceItem)
+- JWT token claims structure
+- Implementation phases (Phase 1-5)
+- Security considerations
+- API endpoint specifications
+- Detailed design decisions table
+
+This content was useful during planning but is not appropriate for a project README that external users, contributors, or self-hosters will read first.
+
+### Decision
+
+Rewrote README.md as a proper user/developer-facing project README with:
+
+1. **Project title and tagline** — "A self-hostable web platform for real-time file and text sharing via QR code and PIN"
+2. **Value proposition** — Clear explanation of what SharedSpaces is, who it's for, and how it works (anonymous collaboration, no accounts, self-hostable)
+3. **Key features** — Bullet list highlighting QR/PIN join, real-time sync, multi-server, JWT auth, self-hosting
+4. **Screenshots** — Included `home--desktop.png` and `space--desktop.png` with relative paths
+5. **Tech stack** — Brief list with correct stack: .NET 10, **Lit HTML + Web Components** (NOT React), SignalR, SQLite, JWT
+6. **Getting Started** — Prerequisites, dev server commands, build commands
+7. **Project structure** — Updated to reflect actual Lit client structure (features/, components/, lib/)
+8. **Architecture summary** — High-level decoupled server/client explanation with key design decisions
+
+### What Was Removed
+
+Moved to implied `/docs` location (not created yet, but belongs there):
+- Domain model entity schemas
+- JWT claims format
+- API endpoint specifications
+- Implementation phases
+- Security considerations
+- Detailed design decision table
+
+### Key Correction
+
+**Client framework:** Updated from "React SPA" to "Lit HTML + Web Components, TypeScript, Vite, Tailwind CSS v4" to reflect the actual implementation.
+
+### Outcome
+
+README.md is now scannable, welcoming, and informative for:
+- Self-hosters evaluating the project
+- Contributors looking to understand the stack
+- Developers wanting to run the dev environment
+
+Deep architecture details are no longer in the README but can be extracted from the codebase or future docs.
