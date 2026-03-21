@@ -711,6 +711,168 @@ public class AdminEndpointTests
         secondResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
+    // ========== Un-revoke (Reactivate) Member Tests ==========
+
+    [Fact]
+    public async Task UnrevokeMember_WithValidSecret_SetsMemberActive()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        var revokeResponse = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        revokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var unrevokeResponse = await UnrevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        unrevokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var listResponse = await ListMembersAsync(client, space.Id, TestWebApplicationFactory.AdminSecret);
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var members = await ReadJsonAsync<MemberResponse[]>(listResponse);
+        members.Should().NotBeNull();
+        members!.Should().ContainSingle(existingMember => existingMember.Id == member.Id && !existingMember.IsRevoked);
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_WithInvalidSecret_Returns401()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        var response = await UnrevokeMemberAsync(client, space.Id, member.Id, "wrong-secret");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_WithMissingSecret_Returns401()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        var response = await UnrevokeMemberAsync(client, space.Id, member.Id, adminSecret: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_NonexistentMember_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Team Space");
+
+        var response = await UnrevokeMemberAsync(client, space.Id, Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Member not found");
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_NonexistentSpace_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await UnrevokeMemberAsync(client, Guid.NewGuid(), Guid.NewGuid(), TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Should().NotBeNull();
+        error!.Error.Should().Contain("Space not found");
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_AlreadyActive_Returns204()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        var response = await UnrevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var memberInDb = await factory.WithDbContextAsync(db =>
+            db.SpaceMembers.SingleAsync(m => m.Id == member.Id));
+        memberInDb.IsRevoked.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_ThenMemberCanAccessSpace()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+        var jwt = GenerateTestJwt(member.Id, space.Id, "Taylor");
+
+        // Verify member can access space initially
+        var initialListResponse = await ListItemsAsync(client, space.Id, jwt);
+        initialListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Revoke member
+        var revokeResponse = await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        revokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // Verify revoked member is rejected
+        var revokedListResponse = await ListItemsAsync(client, space.Id, jwt);
+        revokedListResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        // Un-revoke member
+        var unrevokeResponse = await UnrevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        unrevokeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // Verify un-revoked member can access space again
+        var restoredListResponse = await ListItemsAsync(client, space.Id, jwt);
+        restoredListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task UnrevokeMember_PreservesExistingMemberData()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await CreateSpaceViaAdminAsync(client, "Team Space");
+        var member = await CreateMemberViaTokenExchangeAsync(factory, client, space.Id, "Taylor");
+
+        // Capture original member data
+        var originalMember = await factory.WithDbContextAsync(db =>
+            db.SpaceMembers.AsNoTracking().SingleAsync(m => m.Id == member.Id));
+
+        // Revoke then un-revoke
+        await RevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+        await UnrevokeMemberAsync(client, space.Id, member.Id, TestWebApplicationFactory.AdminSecret);
+
+        // Verify member data is preserved
+        var restoredMember = await factory.WithDbContextAsync(db =>
+            db.SpaceMembers.AsNoTracking().SingleAsync(m => m.Id == member.Id));
+        restoredMember.DisplayName.Should().Be(originalMember.DisplayName);
+        restoredMember.JoinedAt.Should().Be(originalMember.JoinedAt);
+        restoredMember.SpaceId.Should().Be(originalMember.SpaceId);
+        restoredMember.IsRevoked.Should().BeFalse();
+    }
+
     [Fact]
     public async Task RemoveMember_RevokedMemberWithItems_ReturnsNoContentAndDeletesMemberAndItems()
     {
@@ -1098,6 +1260,21 @@ public class AdminEndpointTests
         string? adminSecret)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/members/{memberId}/revoke");
+        if (!string.IsNullOrWhiteSpace(adminSecret))
+        {
+            request.Headers.Add("X-Admin-Secret", adminSecret);
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> UnrevokeMemberAsync(
+        HttpClient client,
+        Guid spaceId,
+        Guid memberId,
+        string? adminSecret)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/members/{memberId}/unrevoke");
         if (!string.IsNullOrWhiteSpace(adminSecret))
         {
             request.Headers.Add("X-Admin-Secret", adminSecret);
