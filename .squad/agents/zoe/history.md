@@ -377,6 +377,37 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Run single test file: `cd src/SharedSpaces.Client && npx vitest run src/lib/format-time.test.ts`
 - Vitest configured in package.json: `"test": "vitest run"`, `"test:watch": "vitest"`
 
+## Learnings (Issue #71 - Visibility Change Reconnect)
+
+**Testing browser lifecycle events in Lit components:**
+- Use `vi.spyOn(document, 'addEventListener')` to verify that `visibilitychange` listener is registered in `connectedCallback`
+- Capture the actual handler function from spy mock calls: `addEventListenerSpy.mock.calls.find(call => call[0] === 'visibilitychange')?.[1]`
+- Invoke the handler directly in tests rather than dispatching real DOM events — more reliable and faster for unit tests
+- Mock `document.visibilityState` with `Object.defineProperty(document, 'visibilityState', { writable: true, configurable: true, value: 'visible' })` for state simulation
+- Test both positive cases (reconnect triggers) and negative cases (no-ops when already connected, connecting, reconnecting, or when page hidden)
+
+**Visibility change reconnect pattern (space-view component):**
+- `handleVisibilityChange` handler checks two conditions: `document.visibilityState === 'visible'` AND `this.connectionState === 'disconnected'`
+- Only disconnected state triggers reconnection — connecting/reconnecting states already have active reconnect logic running
+- Follows same lifecycle pattern as `handleOnline`/`handleOffline` for network status — all registered in `connectedCallback`, cleaned up in `disconnectedCallback`
+- SignalR's automatic reconnect gives up after 4 retries; visibility change handler provides manual reconnect when user returns to app after long absence
+
+**Test suite structure for visibility reconnect (7 tests):**
+1. **Lifecycle hooks:** Verify listener registration on connect, removal on disconnect
+2. **Positive case:** Page visible + disconnected → triggers `startSignalR()`
+3. **Negative cases (4):** Page visible + connected, page hidden + disconnected, page visible + connecting, page visible + reconnecting — all verify `startSignalR()` NOT called
+4. Uses `vi.spyOn(element as any, 'startSignalR')` to track reconnection attempts without triggering full connection flow
+
+**Test file location:**
+- Tests added to existing `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+- New describe block `'visibility change reconnect'` inserted before final closing brace
+- All 43 tests pass (including 7 new visibility tests)
+- Commit message includes issue reference and Co-authored-by trailer
+**File location and test execution:**
+- Client lib tests live co-located: `src/SharedSpaces.Client/src/lib/format-time.test.ts` next to `format-time.ts`
+- Run single test file: `cd src/SharedSpaces.Client && npx vitest run src/lib/format-time.test.ts`
+- Vitest configured in package.json: `"test": "vitest run"`, `"test:watch": "vitest"`
+
 ## Learnings (2026-03-21)
 
 **Share Target Deduplication Tests (Issue #73 Regression Prevention):**

@@ -78,6 +78,13 @@ export class SpaceView extends BaseElement {
     }
   };
   private handleOffline = () => { this.isOnline = false; };
+  private handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible' && this.connectionState === 'disconnected') {
+      this.startSignalR().catch((error) => {
+        console.error('Failed to start SignalR after visibility change', error);
+      });
+    }
+  };
   private handleSwMessage = (event: MessageEvent) => {
     if (event.data?.type === 'pending-share-added') {
       this.loadPendingShares();
@@ -114,6 +121,7 @@ export class SpaceView extends BaseElement {
     super.connectedCallback();
     globalThis.addEventListener('online', this.handleOnline);
     globalThis.addEventListener('offline', this.handleOffline);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
     this.loadPendingShares();
     this.refreshOfflineQueueCount();
@@ -124,6 +132,7 @@ export class SpaceView extends BaseElement {
     this.stopSignalR();
     globalThis.removeEventListener('online', this.handleOnline);
     globalThis.removeEventListener('offline', this.handleOffline);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
   }
 
