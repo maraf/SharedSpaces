@@ -40,11 +40,17 @@ jobs:
       - name: Zip dist
         run: cd dist && zip -r ../sharedspaces-client-${{ steps.version.outputs.value }}.zip .
 
-      - name: Create GitHub Release
-        run: >
-          gh release create "${{ github.ref_name }}"
-          sharedspaces-client-${{ steps.version.outputs.value }}.zip
-          --title "Client ${{ steps.version.outputs.value }}"
-          --generate-notes
+      - name: Upload to release
+        run: |
+          if gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" \
+              sharedspaces-client-${{ steps.version.outputs.value }}.zip \
+              --clobber
+          else
+            gh release create "${{ github.ref_name }}" \
+              sharedspaces-client-${{ steps.version.outputs.value }}.zip \
+              --title "Client ${{ steps.version.outputs.value }}" \
+              --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1248,9 +1248,11 @@ The built artifact (dist/) contains no hardcoded server URL. Same build can run 
 
 # Deploy Base Path from CNAME File
 
+> **⚠️ Superseded** — This original design was replaced by "Deploy from Prebuilt Release Artifact" (below). The deploy workflow no longer performs CNAME detection or rebuilds from source.
+
 **Decision Date:** 2026-03-21
 **Decided By:** Marek Fišera (via Copilot)
-**Status:** Active
+**Status:** Superseded
 
 ## Context
 
