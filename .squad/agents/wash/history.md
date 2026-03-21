@@ -264,3 +264,55 @@ Finalized dead space removal UI implementation:
 - **CI/CD workflows for client (2026-03-21):** Created `client-publish.yml` and `client-deploy.yml` workflows. Updated `vite.config.ts` to prefer `process.env.VITE_APP_VERSION` over `pkg.version` for version injection — package.json stays at `0.0.0`. Publish workflow: triggers on `client-*` tags, builds with `--base ./` (relative paths) and VITE_APP_VERSION from tag, zips dist/, uploads to GH Release (creates release if it doesn't exist, uploads to existing release otherwise). Deploy workflow: manual `workflow_dispatch` with `tag` input, downloads prebuilt zip from GH Release, asserts exactly one zip, unzips, and deploys via `actions/upload-pages-artifact` + `actions/deploy-pages`. No Node.js, no npm, no CNAME detection at deploy time. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`, `src/SharedSpaces.Client/vite.config.ts`.
 
 - **Build-once-deploy-anywhere refactor (2025-07-17, PR #61):** Reworked `client-publish.yml` and `client-deploy.yml` to follow "build once, deploy anywhere." Publish now builds with `--base ./` (relative asset paths), zips, and uploads to GH Release. Deploy downloads the prebuilt zip via `gh release download` instead of rebuilding from source — no Node.js, no npm, no CNAME detection. Relative base paths (`./`) work at any deployment path (custom domain root or `/repo-name/` subpath), eliminating the CNAME-sniffing logic entirely. Key files: `.github/workflows/client-publish.yml`, `.github/workflows/client-deploy.yml`. Decision doc: `.squad/decisions/inbox/wash-deploy-prebuilt.md`.
+
+## Session 2026-03-19 — Issue #54 Item Card Redesign
+
+**Issue:** #54 — Item card redesign with file type icons  
+**Branch:** squad/54-item-card-redesign  
+**Status:** ✅ COMPLETE (commit b593ced)
+
+Redesigned item cards to improve visual hierarchy and usability:
+
+**Key Changes:**
+1. **Bootstrap Icons integration** — Installed `bootstrap-icons` package (v1.11.3)
+2. **File type icon utility** — Created `src/SharedSpaces.Client/src/lib/file-icons.ts` with 15+ file type mappings:
+   - Images (purple): jpg, png, gif, svg, webp, bmp
+   - Videos (pink): mp4, mov, avi, mkv, webm
+   - Audio (teal): mp3, wav, ogg, flac, m4a
+   - PDFs (red): pdf
+   - Documents (blue): doc, docx, odt, rtf
+   - Spreadsheets (green): xls, xlsx, csv, ods
+   - Archives (amber): zip, tar, gz, rar, 7z
+   - Code (cyan): js, ts, py, java, c, cpp, cs, go, etc.
+   - Web (orange): html, css, scss, sass, less
+   - Text (slate): txt, md, log, json, xml, yml
+   - Text items (sky): chat bubble icon
+   - Default: generic file icon (slate)
+
+3. **New 3-column card layout:**
+   - **Left:** File type icon (24×24) with color
+   - **Center:** Name (bold, truncated) + size · timestamp (text items show timestamp only)
+   - **Right:** Primary action (copy/download) + delete button
+   - All in single row using `flex items-center gap-3`
+
+4. **Larger action icons** — Increased from 16×16 to 20×20 for better mobile tap targets
+
+5. **Pending shares icons** — Updated to use same file type icons at 18×18 size
+
+**Technical Patterns:**
+- Icon utility returns `{ svg: TemplateResult, colorClass: string }` for Lit integration
+- Size parameter (default 24) enables reuse across different contexts
+- SVG paths from Bootstrap Icons embedded inline (no complex import config)
+- Color-coded categories using Tailwind color classes
+- Mobile-responsive with proper text truncation via `truncate` class
+
+**Validation:**
+- Lint: ✅ Pass
+- Build: ✅ Pass
+
+**Files Modified:**
+- `src/SharedSpaces.Client/package.json` — Added bootstrap-icons dependency
+- `src/SharedSpaces.Client/src/lib/file-icons.ts` — NEW utility file
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — Redesigned card layout
+
+**Design Impact:** Cards now provide visual file type recognition at a glance, improving scan-ability in mobile context. Icons use semantic colors that map to common file type conventions (blue = docs, green = spreadsheets, red = PDFs, etc.).
