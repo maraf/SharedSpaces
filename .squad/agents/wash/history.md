@@ -405,3 +405,101 @@ Applied review feedback from Copilot reviewer and Marek:
 Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds tracking to uploadPendingShare(). Matches existing dedup pattern from uploadFiles() and handleTextSubmit(). Tests added by Zoe (215/215 passing).
 
 **Impact:** Issue #73 resolved, 3 regression tests covering all upload paths.
+
+### Issue #76: Compact new item form (2026-03-21)
+
+**Task:** Remove space name heading from space view; combine textarea and file drop zone into unified compose box with action buttons inside; show drag-and-drop overlay on textarea when files dragged.
+
+**Changes:**
+- `space-view.ts` — Removed `renderHeader()` method and its call from `render()`. Removed unused `spaceInfo` state property and `getSpaceInfo` import. Redesigned `renderUploadArea()` to create a unified compose box:
+  - Single rounded container with border (replaces separate textarea + drop zone sections)
+  - Textarea at top with borderless style (container provides border)
+  - Action bar at bottom with file upload button (left) and Share button (right)
+  - File upload button uses paperclip icon, "Files" text label hidden on mobile
+  - Share button shortened to "Share" (was "Share Text")
+  - Ctrl/⌘+Enter hint hidden on mobile, shown on desktop
+  - Drag-and-drop overlay (`dragOver` state) covers entire compose box with backdrop blur
+  - Hidden file input triggered via `triggerFileSelect()` method
+
+**Patterns:**
+- **Compact compose UX:** Modern chat-style input area with inline action buttons. Container border changes on focus (`:focus-within`), matching Tailwind focus ring patterns. Drop overlay uses `absolute inset-0 z-10` to cover content, `backdrop-blur-sm` for frosted glass effect.
+- **Mobile-responsive action bar:** Icon-only file button on mobile (`hidden sm:inline` on text label), "Share" instead of "Share Text", hint hidden on mobile. Uses `flex justify-between` for left/right button groups.
+- **Drag-and-drop on container:** Moved drag handlers (`@dragover`, `@dragleave`, `@drop`) from separate drop zone to outer compose container. Drop overlay conditionally rendered when `dragOver` is true.
+
+**Layout details:**
+- Container: `rounded-lg border bg-slate-900` with `:focus-within` ring
+- Textarea: `border-0 bg-transparent` (no border, inherits container background)
+- Action bar: `border-t border-slate-800` to separate from textarea
+- Drop overlay: `border-2 border-dashed border-sky-400 bg-sky-950/80 backdrop-blur-sm`
+
+**Impact:** Issue #76 resolved. Space view is more compact, resembles modern messaging apps. All 251 tests pass. Lint and build succeeded.
+
+## Learnings
+
+- **Compact compose box pattern:** Unified input area with borderless textarea + bordered container + inline action bar. The container handles all focus/hover states via `:focus-within`, so the textarea itself is borderless (`border-0 bg-transparent`). Action bar uses `border-t` to separate from input area. This pattern is common in modern chat/messaging UIs and reduces visual clutter compared to separate input/button sections.
+- **Drag-and-drop overlay on input:** Move drag handlers to the outer container (not a separate zone), then conditionally render an overlay with `absolute inset-0 z-10` when `dragOver` is true. The overlay covers the entire input area (textarea + action bar) and uses `backdrop-blur-sm` for a frosted glass effect. This provides better visual feedback than changing the container border style.
+- **Mobile action button optimization:** Icon-only buttons on mobile (hide text labels with `hidden sm:inline`), shorter button labels ("Share" vs "Share Text"), hide secondary hints on mobile. File upload button uses a paperclip icon from inline SVG (matches existing icon patterns in the codebase).
+- **Component cleanup when removing UI:** When removing a section (like `renderHeader()`), check for unused state properties (`spaceInfo`), unused imports (`SpaceDetailsResponse`, `getSpaceInfo`), and dead code. TypeScript strict mode catches unused vars/imports, but manual review is still needed for side-effectful calls (like `getSpaceInfo()` fetch).
+
+## 2026-03-21T14-09 — Issue #76: Compact New Item Form
+
+**Status:** ✅ COMPLETE  
+**Branch:** squad/76-compact-new-item-form  
+**Commits:** 1 main feature + amended light DOM fix
+
+**Work Summary:**
+- **Compact compose box:** Removed space name heading; unified textarea + file drop zone into single bordered container with integrated action bar
+- **Light DOM bug fix (amended):** Fixed `triggerFileSelect` using `this.querySelector` instead of `this.shadowRoot.querySelector` (light DOM has no shadowRoot)
+- **Drag-and-drop overlay:** Conditionally renders frosted glass overlay (`backdrop-blur-sm`) when files dragged over compose box
+- **Mobile-responsive action bar:** File button icon-only on mobile, "Share" label instead of "Share Text", Ctrl+Enter hint hidden on small viewports
+
+**Validation:**
+- All 251 client tests: ✅ PASS
+- Linting: ✅ PASS
+- Build: ✅ PASS
+- Playwright screenshots: 18 recaptured & passing
+
+**Key Pattern:** Compose box unifies input + actions via `:focus-within` on container (textarea borderless with `border-0 bg-transparent`), action bar separated by `border-t`, overlay uses `absolute inset-0 z-10`.
+
+**Decision Logged:** Compact compose box pattern approved in `.squad/decisions.md` — proposed for style guide documentation and future reusable `<compose-box>` component extraction.
+
+**Coordination:** Coordinator amended light DOM fix into same commit via orchestration.
+
+
+## Learnings
+
+### Drag Event Testing Patterns
+- **Mock DataTransfer for type checking:** Use `Object.defineProperty(event, 'dataTransfer', { value: mockDataTransfer })` to set `types` array. Browser DataTransfer.types is read-only, so we mock the entire dataTransfer object with `types: ['Files']` for file drags or `types: ['text/plain']` for text drags.
+- **Test helper pattern:** Create `createDragEvent(type, includeFiles)` helper that returns DragEvent with properly mocked dataTransfer. This centralizes the mock setup and makes tests more readable.
+- **Counter balance testing:** Test that `dragCounter` stays balanced across nested enter/leave pairs, cannot go negative even with unbalanced events, and that non-file drags don't affect the counter.
+- **File type gating:** Gate drag overlay on `dataTransfer.types.includes('Files')` to avoid showing overlay for text/link drags. Apply the same check in both `handleDragEnter` and `handleDragLeave` so counter stays balanced.
+- **Clamp counter at zero:** Use `if (this.dragCounter > 0) { this.dragCounter--; }` pattern to prevent negative values from browser quirks or unbalanced dragenter/dragleave events.
+
+## 2025-01-19T21-49 — PR #82 Review Feedback: Drag/Drop Fixes
+
+**Status:** ✅ COMPLETE  
+**Files Modified:**
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` (drag handlers)
+- `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts` (new test suite)
+
+**Work Summary:**
+- **File type gating:** Added `dataTransfer.types.includes('Files')` check to `handleDragEnter` and `handleDragLeave` so non-file drags (text/links) don't trigger the "Drop files here" overlay
+- **Counter clamping:** Added `if (this.dragCounter > 0)` guard before decrementing in `handleDragLeave` to prevent negative values from unbalanced dragenter/dragleave events
+- **Comprehensive test suite:** Added 10 new tests in `describe('Drag and Drop', ...)` covering:
+  - Document-level listener registration/cleanup
+  - File drag triggers overlay, non-file drag ignored
+  - Counter cannot go negative
+  - Drop handlers reset state correctly
+  - Nested dragenter/dragleave pairs work correctly
+  - Non-file drags don't affect counter balance
+
+**Validation:**
+- All 262 tests (including 10 new drag/drop tests): ✅ PASS
+- Linting: ✅ PASS
+
+**Key Patterns Used:**
+- Mock DataTransfer with `Object.defineProperty(event, 'dataTransfer', { value: mockDataTransfer })`
+- Test helper `createDragEvent(type, includeFiles)` for DRY test setup
+- Access private methods/state via `(element as any).methodName`
+- Use `vi.spyOn()` to mock `uploadFiles` method
+

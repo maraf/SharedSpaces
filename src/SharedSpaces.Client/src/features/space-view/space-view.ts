@@ -12,7 +12,6 @@ import {
   type ItemDeletedPayload,
 } from '../../lib/signalr-client';
 import {
-  getSpaceInfo,
   getItems,
   shareText,
   shareFile,
@@ -20,7 +19,6 @@ import {
   deleteItem,
   SpaceApiError,
   type SpaceItemResponse,
-  type SpaceDetailsResponse,
 } from './space-api';
 import {
   getPendingShares,
@@ -58,7 +56,6 @@ export class SpaceView extends BaseElement {
   @state() private copiedItemIds = new Set<string>();
   @state() private modalItem: SpaceItemResponse | null = null;
   @state() private connectionState: ConnectionState = 'disconnected';
-  @state() private spaceInfo?: SpaceDetailsResponse;
   @state() private isOnline = navigator.onLine;
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private offlineQueueCount = 0;
@@ -69,6 +66,7 @@ export class SpaceView extends BaseElement {
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
   private pendingItemIds = new Set<string>();
+  private dragCounter = 0;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -122,6 +120,10 @@ export class SpaceView extends BaseElement {
     globalThis.addEventListener('online', this.handleOnline);
     globalThis.addEventListener('offline', this.handleOffline);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    document.addEventListener('dragenter', this.handleDragEnter);
+    document.addEventListener('dragleave', this.handleDragLeave);
+    document.addEventListener('dragover', this.handleDragOver);
+    document.addEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
     this.loadPendingShares();
     this.refreshOfflineQueueCount();
@@ -133,6 +135,10 @@ export class SpaceView extends BaseElement {
     globalThis.removeEventListener('online', this.handleOnline);
     globalThis.removeEventListener('offline', this.handleOffline);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    document.removeEventListener('dragenter', this.handleDragEnter);
+    document.removeEventListener('dragleave', this.handleDragLeave);
+    document.removeEventListener('dragover', this.handleDragOver);
+    document.removeEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
   }
 
@@ -189,11 +195,7 @@ export class SpaceView extends BaseElement {
     this.connectionErrorType = 'none';
 
     try {
-      const [info, itemList] = await Promise.all([
-        getSpaceInfo(this.serverUrl, this.spaceId, this.token),
-        getItems(this.serverUrl, this.spaceId, this.token),
-      ]);
-      this.spaceInfo = info;
+      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
       this.items = itemList;
       
       // Start SignalR connection after successful data load
@@ -515,21 +517,58 @@ export class SpaceView extends BaseElement {
     input.value = '';
   };
 
-  private handleDragOver = (e: DragEvent) => {
+  private handleDragEnter = (e: DragEvent) => {
     e.preventDefault();
-    this.dragOver = true;
+    // Only show overlay for file drags, not text/link drags
+    if (!e.dataTransfer?.types.includes('Files')) {
+      return;
+    }
+    this.dragCounter++;
+    if (this.dragCounter === 1) {
+      this.dragOver = true;
+    }
   };
 
-  private handleDragLeave = () => {
+  private handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+  };
+
+  private handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    // Only track file drags
+    if (!e.dataTransfer?.types.includes('Files')) {
+      return;
+    }
+    // Clamp counter to prevent negative values
+    if (this.dragCounter > 0) {
+      this.dragCounter--;
+    }
+    if (this.dragCounter === 0) {
+      this.dragOver = false;
+    }
+  };
+
+  private handleDocumentDrop = (e: DragEvent) => {
+    e.preventDefault();
+    this.dragCounter = 0;
     this.dragOver = false;
   };
 
   private handleDrop = async (e: DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter = 0;
     this.dragOver = false;
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
     await this.uploadFiles(Array.from(files));
+  };
+
+  private triggerFileSelect = () => {
+    const input = this.querySelector<HTMLInputElement>('#file-input-hidden');
+    if (input) {
+      input.click();
+    }
   };
 
   private async uploadFiles(files: File[]) {
@@ -751,41 +790,11 @@ export class SpaceView extends BaseElement {
 
     return html`
       <div class="space-y-8">
-        ${this.renderHeader()}
         ${this.renderSyncStatus()}
         ${this.renderPendingSharesSection()}
         ${this.renderUploadArea()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
-      </div>
-    `;
-  }
-
-  private renderHeader() {
-    return html`
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
-          >
-            Space
-          </p>
-          <h2 class="mt-1 text-xl font-semibold text-white">
-            ${this.spaceInfo?.name ?? this.spaceId}
-          </h2>
-        </div>
-        <div class="flex items-center gap-2">
-          ${this.offlineQueueCount > 0
-            ? html`
-              <span
-                class="shrink-0 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-300"
-                title="${this.offlineQueueCount} item${this.offlineQueueCount !== 1 ? 's' : ''} queued for upload"
-              >
-                📤 ${this.offlineQueueCount}
-              </span>
-            `
-            : nothing}
-        </div>
       </div>
     `;
   }
@@ -872,9 +881,27 @@ export class SpaceView extends BaseElement {
 
   private renderUploadArea() {
     return html`
-      <section class="space-y-4">
-        <!-- Text input -->
-        <div class="space-y-2">
+      <section class="space-y-3">
+        <!-- Compact compose box -->
+        <div
+          @drop=${this.handleDrop}
+          class="relative rounded-lg border bg-slate-900 transition ${this
+            .dragOver
+            ? 'border-sky-400 ring-2 ring-sky-400/20'
+            : 'border-slate-700 focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-400/20'}"
+        >
+          <!-- Drag-and-drop overlay -->
+          ${this.dragOver
+            ? html`
+              <div
+                class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-sky-400 bg-sky-950/80 backdrop-blur-sm"
+              >
+                <p class="text-sm font-medium text-sky-300">Drop files here</p>
+              </div>
+            `
+            : nothing}
+
+          <!-- Textarea -->
           <textarea
             rows="3"
             placeholder="Share some text…"
@@ -883,44 +910,59 @@ export class SpaceView extends BaseElement {
             @input=${this.handleTextInput}
             @keydown=${this.handleTextKeydown}
             ?disabled=${this.isUploading}
-            class="w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20 disabled:opacity-50"
+            class="w-full resize-y rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
-          <div class="flex items-center gap-3">
-            <button
-              @click=${this.handleTextSubmit}
-              ?disabled=${this.isUploading || !this.textInput.trim()}
-              class="rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ${this.isUploading ? 'Sending…' : 'Share Text'}
-            </button>
-            <span class="text-xs text-slate-500">Ctrl/⌘+Enter to send</span>
-          </div>
-        </div>
 
-        <!-- File upload / drag-and-drop -->
-        <div
-          @dragover=${this.handleDragOver}
-          @dragleave=${this.handleDragLeave}
-          @drop=${this.handleDrop}
-          class="relative rounded-lg border-2 border-dashed p-6 text-center transition ${this
-            .dragOver
-            ? 'border-sky-400 bg-sky-950/30'
-            : 'border-slate-700 hover:border-slate-600'}"
-        >
-          <input
-            type="file"
-            multiple
-            @change=${this.handleFileSelect}
-            ?disabled=${this.isUploading}
-            class="absolute inset-0 cursor-pointer opacity-0"
-            aria-label="Upload files"
-          />
-          <p class="text-sm text-slate-400">
-            ${this.dragOver
-              ? html`<span class="text-sky-300">Drop files here</span>`
-              : html`Drag & drop files here or
-                  <span class="font-medium text-sky-400">browse</span>`}
-          </p>
+          <!-- Action bar -->
+          <div
+            class="flex items-center justify-between gap-2 border-t border-slate-800 px-3 py-2"
+          >
+            <div class="flex items-center gap-2">
+              <!-- File upload button -->
+              <button
+                @click=${this.triggerFileSelect}
+                ?disabled=${this.isUploading}
+                class="flex items-center gap-1.5 rounded px-2 py-1.5 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Upload files"
+                aria-label="Upload files"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                </svg>
+                <span class="hidden sm:inline">Files</span>
+              </button>
+              <input
+                type="file"
+                multiple
+                @change=${this.handleFileSelect}
+                ?disabled=${this.isUploading}
+                class="hidden"
+                aria-label="Upload files input"
+                id="file-input-hidden"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="hidden text-xs text-slate-500 sm:inline">Ctrl/⌘+Enter</span>
+              <button
+                @click=${this.handleTextSubmit}
+                ?disabled=${this.isUploading || !this.textInput.trim()}
+                class="rounded-full bg-sky-400 px-4 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ${this.isUploading ? 'Sending…' : 'Share'}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Upload error -->
@@ -934,8 +976,6 @@ export class SpaceView extends BaseElement {
             </p>`
           : nothing}
       </section>
-
-      <hr class="border-slate-800/60" />
     `;
   }
 
@@ -1140,9 +1180,7 @@ export class SpaceView extends BaseElement {
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
-          <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">
-            ${this.modalItem.content}
-          </p>
+          <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">${this.modalItem.content}</p>
         </div>
       </div>
     `;

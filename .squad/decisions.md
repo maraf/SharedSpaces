@@ -1785,3 +1785,121 @@ All 215 tests pass, including the 3 new share_target dedup tests:
   - Scenario 6: Share Target Deduplication (Issue #73) (3 tests)
 ```
 
+# Compact Compose Box Pattern for Input Areas
+
+**Decided By:** Wash (Frontend Dev)  
+**Date:** 2026-03-21  
+**Context:** Issue #76 — Compact new item form  
+**Status:** Proposed (for Mal review)
+
+## Decision
+
+Adopt a unified "compose box" pattern for input areas with action buttons:
+
+1. **Single container** — One rounded, bordered container wraps the entire compose area
+2. **Borderless textarea** — The textarea has `border-0 bg-transparent`; the container provides the border
+3. **Action bar** — A bottom row separated by `border-t`, containing left-aligned and right-aligned button groups
+4. **Focus styling** — Use `:focus-within` on the container to highlight the entire box when any child is focused
+5. **Drag-and-drop overlay** — Conditionally render an `absolute inset-0 z-10` overlay on the container when files are dragged over, with `backdrop-blur-sm` for frosted glass effect
+
+## Rationale
+
+- **Visual simplicity** — Reduces border clutter compared to separate textarea + button sections
+- **Modern UX** — Matches chat/messaging app conventions (Slack, Discord, WhatsApp, Telegram)
+- **Mobile-friendly** — Buttons inside the container reduce vertical space, action bar scales naturally with flexbox
+- **Accessible focus** — The entire compose box highlights on focus, making it clear where input is active
+
+## Implementation Details
+
+```html
+<div class="rounded-lg border focus-within:ring-2 focus-within:ring-sky-400/20">
+  <!-- Overlay when dragging files -->
+  ${dragOver ? html`<div class="absolute inset-0 z-10 backdrop-blur-sm">...</div>` : nothing}
+  
+  <!-- Textarea -->
+  <textarea class="border-0 bg-transparent ..."></textarea>
+  
+  <!-- Action bar -->
+  <div class="border-t flex justify-between">
+    <button>File Upload</button>
+    <button>Share</button>
+  </div>
+</div>
+```
+
+## Consequences
+
+- **Positive:** Cleaner UI, more compact space usage, modern chat-like feel
+- **Negative:** Container focus styling requires `:focus-within` (not supported in IE11, but we don't target IE)
+- **Future:** This pattern can be extracted into a reusable `<compose-box>` component if needed elsewhere
+
+## Alternatives Considered
+
+1. **Separate textarea + button row + drop zone** — Rejected: too much vertical space, visually cluttered
+2. **Floating action buttons** — Rejected: not mobile-friendly, obscures content on small screens
+
+---
+
+**Note to Mal:** This is a UI pattern decision. If approved, we can document it in a frontend style guide. If we need a reusable component, I can create `<compose-box>` later.
+
+
+---
+
+### Drag/Drop File Type Gating & Counter Clamping
+
+**Decision Date:** 2026-03-21  
+**Decided By:** Wash (Frontend Dev)  
+**PR:** #82  
+**Status:** ✅ Implemented
+
+#### Context
+
+PR #82 review feedback identified two issues in the space-view drag/drop overlay behavior:
+1. The overlay appeared for ANY drag operation (including text selections and links), not just files
+2. The `dragCounter` could go negative due to unbalanced browser `dragenter`/`dragleave` events, causing the overlay to get stuck
+
+#### Decision
+
+1. **File type gating:** Check `e.dataTransfer?.types.includes('Files')` in both `handleDragEnter` and `handleDragLeave` before updating counter/overlay state. This ensures only file drags trigger the "Drop files here" overlay.
+
+2. **Counter clamping:** Guard the decrement with `if (this.dragCounter > 0)` to prevent negative values from browser quirks or nested element events.
+
+#### Rationale
+
+- **Better UX:** Users dragging text or links within the page won't see a confusing file drop overlay
+- **Robustness:** Prevents counter drift from unbalanced events (common with nested elements)
+- **Symmetry:** Applying the Files check to both enter and leave keeps the counter balanced
+
+#### Implementation
+
+- Modified `src/SharedSpaces.Client/src/features/space-view/space-view.ts`:
+  - `handleDragEnter()` now checks `dataTransfer.types.includes('Files')`
+  - `handleDragLeave()` now checks `dataTransfer.types.includes('Files')` and guards decrement
+- Added 10 comprehensive tests to `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`
+
+#### Testing
+
+- File drags trigger overlay, non-file drags ignored
+- Counter cannot go negative
+- Nested enter/leave pairs work correctly
+- Drop handlers reset state properly
+- Non-file drags don't affect counter balance
+- All 262 tests passing
+
+#### Pattern for Future Drag/Drop
+
+When implementing drag/drop with overlay:
+1. Always gate on specific dataTransfer types (Files, text/uri-list, etc.)
+2. Use a counter for nested element tracking
+3. Clamp counter at 0 to handle browser quirks
+4. Test with both file and non-file drag events
+5. Mock DataTransfer.types via `Object.defineProperty` in tests
+
+#### Impact
+
+- Drag/drop overlay only appears for actual file drags
+- Robust to browser event ordering issues
+- All existing tests continue to pass
+
+---
+
