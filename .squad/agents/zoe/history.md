@@ -318,3 +318,7 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Truthy/type-only assertions are a false sense of security — if every extension returned the same icon/color, those tests would still pass. Always assert specific expected values for at least one representative per category.
 - Cross-category distinctness tests ("image color ≠ code color") catch regressions where category mappings accidentally collapse to the same value, complementing per-extension assertions.
 - When source and tests evolve in parallel branches, colorClass string assertions are more stable than SVG content assertions since color mappings change less frequently than icon markup.
+
+- Both InvitationEndpoints.CreateInvitation and TokenEndpoints.ExchangePinForToken build serverUrl from httpRequest.Scheme and httpRequest.Host; forwarded header tests must send X-Forwarded-Proto and X-Forwarded-Host via HttpRequestMessage.Headers.Add() since HttpClient extension methods don't support custom headers.
+- ForwardedHeadersTests.cs covers 8 integration tests for issue #69: 4 for invitation URL generation and 4 for token server_url JWT claim, each testing X-Forwarded-Proto alone, X-Forwarded-Host alone, both together, and no-forwarded-headers default.
+- Current ForwardedHeadersOptions in Program.cs only enables XForwardedFor | XForwardedProto; XForwardedHost support requires adding ForwardedHeaders.XForwardedHost to the flags — tests for X-Forwarded-Host will fail until that's done.
