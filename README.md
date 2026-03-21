@@ -61,7 +61,7 @@ Anonymous by design: users pick a display name when joining a space. No email, n
    dotnet restore
    dotnet run
    ```
-   The API will be available at `https://localhost:5001` (or the port displayed in terminal).
+   The API will be available at `https://localhost:7218` (or `http://localhost:5165`). Check the terminal output for the exact URL.
 
 3. **Run the client (in a separate terminal):**
    ```bash
@@ -71,8 +71,10 @@ Anonymous by design: users pick a display name when joining a space. No email, n
    ```
    The client will be available at `http://localhost:5173`.
 
-4. **Configure the client API endpoint:**
-   - Set `VITE_API_BASE_URL` in your environment or `.env` file to point to the server (e.g., `https://localhost:5001`)
+4. **Connect the client to your server:**
+   - Open the client in your browser at `http://localhost:5173`.
+   - Use the client UI to add/connect to your server by entering its URL (e.g., `https://localhost:7218`).
+   - No environment variables are required for API routing; the server URL is chosen at runtime in the client.
 
 ### Building for production
 
@@ -101,14 +103,14 @@ SharedSpaces/
 │   │   ├── Infrastructure/           # EF Core, file storage, SignalR hub
 │   │   └── Program.cs
 │   └── SharedSpaces.Client/          # Lit HTML + Web Components SPA
+│       ├── e2e/                      # Playwright tests
 │       └── src/
 │           ├── features/             # join, space-view, admin
 │           ├── components/           # Reusable UI components
 │           ├── lib/                  # SignalR client, API client, utilities
 │           └── index.ts
 ├── tests/
-│   ├── SharedSpaces.Server.Tests/
-│   └── SharedSpaces.Client/e2e/      # Playwright tests
+│   └── SharedSpaces.Server.Tests/
 ├── docs/
 │   └── screenshots/                  # UI screenshots
 └── SharedSpaces.sln
@@ -124,5 +126,5 @@ The server and client are **fully decoupled**. The server is a pure API with no 
 - **Space item IDs are client-generated** — the client creates GUIDs and uses PUT/upsert semantics
 - **Multi-server by default** — JWT claims include `server_url` so the client knows where to send requests
 
-For detailed architecture, domain model, and API documentation, see the implementation notes in `/docs` (or explore the codebase — the code is the spec).
+For detailed architecture, domain model, and API behavior, explore the codebase — the code is the spec, and inline comments call out key design decisions.
 
