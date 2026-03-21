@@ -262,3 +262,31 @@ All 6 architecture decisions listed above require user input before implementati
 - Web Share Target spec: https://web.dev/web-share-target/
 - PWA install criteria: https://web.dev/install-criteria/
 - Shared service worker concern: Phase 5 #28 owns offline; Share Target adds fetch handler
+
+### README Rewrite: From Architecture Doc to User-Facing README (2026-03-19)
+
+**Status:** ✅ Complete
+
+**Task:** Rewrote README.md from an architecture/implementation plan into a proper user/developer-facing project README.
+
+**Key Changes:**
+1. **Replaced architecture doc with user guide** — Removed domain model tables, JWT claims structure, implementation phases, and security considerations
+2. **Added project value prop** — Clear tagline, 2-3 paragraph description explaining what SharedSpaces is and who it's for
+3. **Added screenshots** — Included `home--desktop.png` and `space--desktop.png` with relative paths from repo root
+4. **Updated tech stack** — Corrected client from "React SPA" to "Lit HTML + Web Components, TypeScript, Vite, Tailwind CSS v4" (reflects actual implementation)
+5. **Added Getting Started section** — Prerequisites, dev server setup, build commands for both server and client
+6. **Kept project structure** — Updated to reflect Lit client (features/, components/, lib/) instead of React hooks
+7. **Preserved architecture summary** — Kept decoupled server/client architecture explanation at the end
+8. **No LICENSE section** — No LICENSE file exists in repo
+
+**Writing Decisions:**
+- Kept it scannable: short paragraphs, bullet lists, clear headings
+- "Anonymous by design" value prop emphasized — no accounts, no tracking
+- Self-hosting as primary use case (SQLite, local filesystem, zero cloud dependencies)
+- Multi-server support called out as differentiator
+- Moved deep architecture details to implied `/docs` location
+
+**Verified Against Reality:**
+- Client uses Lit HTML + Web Components (NOT React) — confirmed from `.squad/agents/mal/history.md` decision log
+- Screenshots exist in `docs/screenshots/`
+- Tech stack matches actual implementation (.NET 10, SQLite, SignalR, JWT)

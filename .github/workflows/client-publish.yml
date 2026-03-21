@@ -33,7 +33,7 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: npm run build
+        run: npm run build -- --base ./
         env:
           VITE_APP_VERSION: ${{ steps.version.outputs.value }}
 

@@ -18,53 +18,20 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build & Deploy
+    name: Deploy
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    defaults:
-      run:
-        working-directory: src/SharedSpaces.Client
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
-          fetch-depth: 0
-
-      - name: Extract version from tag
-        id: version
-        run: echo "value=${TAG#client-}" >> "$GITHUB_OUTPUT"
-        env:
-          TAG: ${{ inputs.tag }}
-
-      - name: Determine base path
-        id: basepath
+      - name: Download release artifact
         run: |
-          git fetch origin gh-pages --depth=1 2>/dev/null || true
-          if git show origin/gh-pages:CNAME > /dev/null 2>&1; then
-            echo "value=/" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=/${REPO_NAME}/" >> "$GITHUB_OUTPUT"
-          fi
-        working-directory: .
+          mkdir dist
+          gh release download "${{ inputs.tag }}" --pattern '*.zip' --dir .
+          unzip *.zip -d dist
         env:
-          REPO_NAME: ${{ github.event.repository.name }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: src/SharedSpaces.Client/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build -- --base ${{ steps.basepath.outputs.value }}
-        env:
-          VITE_APP_VERSION: ${{ steps.version.outputs.value }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -72,7 +39,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: src/SharedSpaces.Client/dist
+          path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment
