@@ -117,11 +117,23 @@ export class AppShell extends BaseElement {
   }
 
   override willUpdate(changed: Map<string, unknown>) {
+    // Clear connection state when leaving a space (switching to different view or different space)
     if (changed.has('view')) {
       const oldView = changed.get('view') as string | undefined;
       if (oldView === 'space' && this.view !== 'space' && this.currentSpaceId) {
+        // Leaving space view entirely
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [this.currentSpaceId]: _, ...rest } = this.spaceConnectionStates;
+        this.spaceConnectionStates = rest;
+      }
+    }
+
+    // Clear connection state when switching between spaces
+    if (changed.has('currentSpaceId')) {
+      const oldSpaceId = changed.get('currentSpaceId') as string | undefined;
+      if (oldSpaceId && oldSpaceId !== this.currentSpaceId) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [oldSpaceId]: _, ...rest } = this.spaceConnectionStates;
         this.spaceConnectionStates = rest;
       }
     }
