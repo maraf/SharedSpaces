@@ -217,6 +217,8 @@ export class SpaceView extends BaseElement {
 
     const token = this.token; // Capture for closure
 
+    this.connectionState = 'connecting';
+
     this.signalRClient = new SignalRClient({
       serverUrl: this.serverUrl,
       spaceId: this.spaceId,

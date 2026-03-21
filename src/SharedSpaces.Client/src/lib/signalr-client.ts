@@ -4,7 +4,7 @@ import {
   HubConnectionState,
 } from '@microsoft/signalr';
 
-export type ConnectionState = 'connected' | 'disconnected' | 'reconnecting';
+export type ConnectionState = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
 
 export interface SignalRClientConfig {
   serverUrl: string;
@@ -108,6 +108,8 @@ export class SignalRClient {
     switch (this.connection.state) {
       case HubConnectionState.Connected:
         return 'connected';
+      case HubConnectionState.Connecting:
+        return 'connecting';
       case HubConnectionState.Reconnecting:
         return 'reconnecting';
       default:

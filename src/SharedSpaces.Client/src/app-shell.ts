@@ -91,6 +91,17 @@ export class AppShell extends BaseElement {
     this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
   }
 
+  override willUpdate(changed: Map<string, unknown>) {
+    if (changed.has('view')) {
+      const oldView = changed.get('view') as string | undefined;
+      if (oldView === 'space' && this.view !== 'space' && this.currentSpaceId) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [this.currentSpaceId]: _, ...rest } = this.spaceConnectionStates;
+        this.spaceConnectionStates = rest;
+      }
+    }
+  }
+
   private handleSwMessage = (event: MessageEvent) => {
     if (event.data?.type === 'pending-share-added') {
       this.refreshPendingShareCount();
@@ -205,10 +216,14 @@ export class AppShell extends BaseElement {
     switch (state) {
       case 'connected':
         return 'bg-emerald-400';
+      case 'connecting':
       case 'reconnecting':
         return 'bg-amber-400';
       case 'disconnected':
-        return 'bg-red-400';
+        // Red only for the actively-viewed space with a real problem
+        return this.view === 'space' && this.currentSpaceId === spaceId
+          ? 'bg-red-400'
+          : 'bg-slate-500';
       default:
         return 'bg-slate-500';
     }
