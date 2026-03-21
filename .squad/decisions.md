@@ -2102,3 +2102,71 @@ Implemented auto-grow textarea with the following specifications:
 2. **Unlimited growth** — Rejected: Would break mobile layouts, consume excessive screen
 3. **Manual resize only** — Rejected: Worse UX than auto-grow, inconsistent sizing
 
+
+---
+
+## Decision: Floating Scrollbar Styling
+
+**Date:** 2026-03-21  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented  
+**PR:** #91  
+**Issue:** #85
+
+### Context
+
+User requested custom scrollbar styling with specific requirement: scrollbar should be **floating/overlay** so that when content becomes scrollable, the layout doesn't recompute (no reflow/shift).
+
+### Decision
+
+Implemented global custom scrollbar styling in `src/SharedSpaces.Client/src/index.css` with:
+
+1. **Transparent track** — `background: transparent` on `::-webkit-scrollbar-track`
+2. **Thin 8px width** — Subtle, modern appearance
+3. **Semi-transparent thumb** — rgba-based slate colors matching dark theme
+4. **Cross-browser support** — Webkit pseudo-elements + Firefox scrollbar properties
+5. **Global application** — Affects all scrollable containers (modals, textareas)
+
+### Key Implementation Detail
+
+The **transparent scrollbar track** is the critical technique for floating/overlay behavior:
+
+```css
+::-webkit-scrollbar-track {
+  background: transparent; /* No layout space = floating overlay */
+}
+```
+
+This ensures the scrollbar appears **on top of content** rather than pushing content left when it appears.
+
+### Alternatives Considered
+
+1. **`overflow: overlay`** — Deprecated, limited browser support
+2. **`scrollbar-gutter: stable`** — Would reserve space (opposite of goal)
+3. **Per-component styling** — Chose global approach for consistency
+
+### Rationale
+
+- Transparent track is simplest cross-browser solution for overlay behavior
+- Global styling ensures all future scrollable areas automatically benefit
+- Opacity-based colors work with any background, maintain subtle appearance
+- No JavaScript or component-level changes needed
+
+### Impact
+
+- ✅ No layout reflow when scrollbars appear
+- ✅ Consistent scrollbar appearance across app
+- ✅ Works on all scrollable areas (modals at 80vh/60vh, textareas, lists)
+- ✅ Cross-browser compatible (Chrome, Edge, Safari, Firefox)
+
+### Files Modified
+
+- `src/SharedSpaces.Client/src/index.css` — Added scrollbar styling CSS
+
+### Affected Components
+
+All scrollable containers automatically styled:
+- space-view.ts (full text modal: max-h-[80vh])
+- admin-view.ts (members/invitations modal: max-h-[60vh])
+- space-view.ts (textarea with conditional overflow)
+- Future scrollable areas
