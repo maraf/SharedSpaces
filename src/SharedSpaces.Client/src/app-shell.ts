@@ -57,6 +57,9 @@ export class AppShell extends BaseElement {
   @state() private pendingShareCount = 0;
   @state() private pendingShares: PendingShareItem[] = [];
 
+  private headerElement?: HTMLElement;
+  private headerResizeObserver?: ResizeObserver;
+
   private handleOnline = () => { this.isOnline = true; };
   private handleOffline = () => { this.isOnline = false; };
 
@@ -82,6 +85,19 @@ export class AppShell extends BaseElement {
     this.addEventListener('pending-shares-changed', this.handlePendingSharesChanged);
   }
 
+  override firstUpdated() {
+    this.headerElement = this.renderRoot.querySelector('header') as HTMLElement;
+    if (this.headerElement) {
+      this.headerResizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const height = entry.target.getBoundingClientRect().height;
+          document.documentElement.style.setProperty('--header-height', `${height}px`);
+        }
+      });
+      this.headerResizeObserver.observe(this.headerElement);
+    }
+  }
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     globalThis.removeEventListener('online', this.handleOnline);
@@ -89,6 +105,7 @@ export class AppShell extends BaseElement {
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
+    this.headerResizeObserver?.disconnect();
   }
 
   private handleSwMessage = (event: MessageEvent) => {
@@ -224,14 +241,14 @@ export class AppShell extends BaseElement {
   override render() {
     return html`
       <div
-        class="min-h-svh bg-slate-950 px-4 py-6 text-slate-50 sm:px-6 lg:px-8"
+        class="min-h-svh bg-slate-950 px-4 pb-6 text-slate-50 sm:px-6 lg:px-8"
       >
         <div
-          class="mx-auto flex min-h-[calc(100svh-3rem)] w-full max-w-5xl flex-col gap-6"
+          class="mx-auto flex min-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col gap-6"
         >
           ${!this.isOnline ? this.renderOfflineBanner() : nothing}
 
-          <header class="flex flex-col gap-4">
+          <header class="sticky top-0 z-20 bg-slate-950 pt-6 pb-2 flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <button
                 type="button"
