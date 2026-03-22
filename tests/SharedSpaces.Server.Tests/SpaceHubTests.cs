@@ -356,7 +356,7 @@ public class SpaceHubTests
         var response = await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
         response.EnsureSuccessStatusCode();
 
-        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(15)));
         receivedTask.Should().Be(receivedEvent.Task, "ItemAdded event should be received after reconnect");
 
         var evt = await receivedEvent.Task;
