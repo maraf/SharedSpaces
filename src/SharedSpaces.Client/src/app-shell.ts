@@ -305,6 +305,7 @@ export class AppShell extends BaseElement {
                 SharedSpaces
               </button>
               <div class="flex items-center gap-3">
+                <span class="text-xs text-slate-500">v${__APP_VERSION__}</span>
                 <button
                   @click=${() => { this.view = 'admin'; }}
                   class="sm:hidden ${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
@@ -313,7 +314,6 @@ export class AppShell extends BaseElement {
                 >
                   ${unsafeHTML(databaseGearSvg)}
                 </button>
-                <span class="text-xs text-slate-500">v${__APP_VERSION__}</span>
               </div>
             </div>
 
@@ -515,9 +515,11 @@ export class AppShell extends BaseElement {
                     this.sheetOpen = false;
                   }}
                 >
-                  <span
-                    class="inline-block h-2.5 w-2.5 shrink-0 rounded-full ${this.dotColor(entry.spaceId)}"
-                  ></span>
+                  <span class="inline-flex w-5 shrink-0 items-center justify-center">
+                    <span
+                      class="inline-block h-2.5 w-2.5 rounded-full ${this.dotColor(entry.spaceId)}"
+                    ></span>
+                  </span>
                   <span
                     class="text-sm ${isActive
                       ? 'text-sky-300 font-medium'
@@ -542,10 +544,12 @@ export class AppShell extends BaseElement {
                 this.sheetOpen = false;
               }}
             >
-              <span
-                class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-sky-500/50 text-sky-400 text-xs"
-                >+</span
-              >
+              <span class="inline-flex w-5 shrink-0 items-center justify-center">
+                <span
+                  class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-sky-500/50 text-sky-400 text-xs"
+                  >+</span
+                >
+              </span>
               <span class="text-sm text-sky-400 font-medium"
                 >Join new space</span
               >
