@@ -2446,3 +2446,103 @@ Used a correlated subquery (`db.SpaceItems.Count(item => item.MemberId == member
 
 - `MemberResponse` record gains an `int ItemCount` parameter (positional record — any code constructing this record must be updated).
 - All 108 existing tests pass without modification.
+
+---
+
+# Decision: Un-revoke Member Endpoint
+
+**Author:** Kaylee (Backend Dev)
+**Date:** 2026-03-21
+**Issue:** #92 — Un-revoke space member
+
+## Context
+
+The admin panel needs to restore access for accidentally revoked members. We needed a mechanism to un-revoke a member and immediately restore their JWT validity.
+
+## Decision
+
+Added `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` as the endpoint to re-activate revoked members. The endpoint mirrors the revoke pattern exactly: admin-only, idempotent (204 for already-active members), no schema changes.
+
+## Rationale
+
+- **Route name "unrevoke":** Clear and direct, mirrors how the API names other member actions (revoke, remove).
+- **Mirrors revoke pattern exactly:** Same admin auth, same validation chain (space → member → conditional save), same 204 response. This keeps the API consistent and predictable.
+- **Idempotent:** Un-revoking an already-active member is a no-op (204, no error), matching how revoking an already-revoked member is also a no-op.
+- **No schema change:** `SpaceMember.IsRevoked` is a boolean that already supports toggling back to `false`.
+- **JWT restoration:** Existing tokens of reinstated members become valid immediately via the existing per-request `IsRevoked` check.
+
+## Impact
+
+- Admin panel can now restore revoked members
+- Client code calls `POST .../unrevoke` to un-revoke a member
+- JWT validity continues to work via per-request `IsRevoked` check
+- Reinstated members' existing tokens become valid again immediately without needing to refresh
+
+---
+
+# Decision: Un-revoke Member UI Pattern
+
+**Author:** Wash (Frontend Dev)
+**Date:** 2026-03-21
+**Issue:** #92
+
+## Context
+
+Revoked members in the admin panel need a way to be restored. The UI must clearly indicate that restoration is different from deletion and maintain consistency with existing member action patterns.
+
+## Decision
+
+Revoked members now show two action buttons side-by-side: **Restore** (emerald/green) and **Remove** (slate/red). The Restore button calls `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` to re-activate the member. Both buttons mutually disable during pending operations.
+
+## Rationale
+
+- Mirrors the existing revoke flow exactly (same pending state pattern, error handling, session validation)
+- "Restore" wording chosen over "Un-revoke" — friendlier and clearer to admins
+- Emerald color signals a positive/constructive action, contrasting with the destructive red/rose tones
+- Buttons are wrapped in a flex container with `gap-2` for clean side-by-side layout on mobile and desktop
+- Maintains consistency with how "Revoke" and "Remove" buttons appear for active members
+
+## Impact
+
+- Revoked member rows now display restoration UI
+- Endpoint: `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke`
+- Same auth pattern (`X-Admin-Secret` header), same error handling as existing member actions
+- Frontend is ready to consume the backend endpoint
+
+---
+
+# Decision: Un-revoke Endpoint Test Contract
+
+**Author:** Zoe (Tester)
+**Date:** 2026-03-21
+**Issue:** #92
+
+## Context
+
+Tests must validate that the un-revoke endpoint meets contract expectations: proper authorization, idempotency, error responses, JWT restoration, and data preservation.
+
+## Decision
+
+Un-revoke tests expect the endpoint at `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` with these behaviors:
+
+- **204 NoContent** on success (member is reinstated, IsRevoked = false)
+- **204 NoContent** when un-revoking an already-active member (idempotent, mirrors revoke's behavior for already-revoked)
+- **401 Unauthorized** when admin secret is missing or invalid
+- **404 Not Found** with `{ "Error": "Member not found" }` for non-existent member
+- **404 Not Found** with `{ "Error": "Space not found" }` for non-existent space
+- **JWT Restoration:** Existing tokens of un-revoked members become valid immediately
+- **Data Preservation:** Member metadata (created date, items, membership) remains unchanged
+
+## Rationale
+
+- Mirrors the existing revoke endpoint contract exactly, reducing cognitive load
+- Idempotent behavior (204 for already-active) is consistent with how revoke handles already-revoked members
+- Error responses follow the existing error format and status codes
+- JWT restoration is critical for user experience — no need to re-authenticate
+- Data preservation ensures no side effects beyond IsRevoked toggle
+
+## Impact
+
+- 8 integration tests written and passing
+- Kaylee's endpoint implementation must match these expectations
+- Tests validate the full un-revoke workflow from authorization through data preservation

@@ -26,6 +26,9 @@ public static class SpaceEndpoints
         group.MapPost("/{spaceId:guid}/members/{memberId:guid}/revoke", RevokeMember)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
+        group.MapPost("/{spaceId:guid}/members/{memberId:guid}/unrevoke", ReinstateMember)
+            .AddEndpointFilter<AdminAuthenticationFilter>();
+
         group.MapDelete("/{spaceId:guid}/members/{memberId:guid}", DeleteMember)
             .AddEndpointFilter<AdminAuthenticationFilter>();
 
@@ -145,6 +148,38 @@ public static class SpaceEndpoints
         if (!member.IsRevoked)
         {
             member.IsRevoked = true;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ReinstateMember(
+        Guid spaceId,
+        Guid memberId,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var spaceExists = await db.Spaces
+            .AsNoTracking()
+            .AnyAsync(space => space.Id == spaceId, cancellationToken);
+
+        if (!spaceExists)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
+        var member = await db.SpaceMembers
+            .SingleOrDefaultAsync(existingMember => existingMember.SpaceId == spaceId && existingMember.Id == memberId, cancellationToken);
+
+        if (member is null)
+        {
+            return Results.NotFound(new { Error = "Member not found" });
+        }
+
+        if (member.IsRevoked)
+        {
+            member.IsRevoked = false;
             await db.SaveChangesAsync(cancellationToken);
         }
 

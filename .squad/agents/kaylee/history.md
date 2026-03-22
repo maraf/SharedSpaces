@@ -247,3 +247,43 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - **Learnings:** DELETE operations require revocation check (409 if not revoked), file cleanup before DB removal, SignalR notification after DB commit
 - **File:** `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs` (added imports for IFileStorage and ISpaceHubNotifier)
 - **Build:** Verified with `dotnet build --no-restore` — successful compilation
+
+### Issue #92: Un-revoke (Reinstate) Space Member
+- **Endpoint:** `POST /v1/spaces/{spaceId:guid}/members/{memberId:guid}/reinstate`
+- **Admin-only:** Uses `AdminAuthenticationFilter`, matching the revoke endpoint
+- **Behavior:** Sets `IsRevoked = false` on the member; idempotent (no-op if already active)
+- **Validation:** Returns 404 if space or member not found; returns 204 No Content on success
+- **Pattern:** Exact mirror of `RevokeMember` handler — same space-exists check, member lookup, conditional save
+- **No schema changes needed:** `SpaceMember.IsRevoked` is a simple boolean toggle
+- **File:** `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`
+- **Tests:** All 108 existing tests pass after change
+
+## Team Update (2026-03-21 — Issue #92 Un-revoke Member — Complete)
+
+**Status:** ✅ Done
+**Commit:** 8bc868d (Kaylee), 2d44723 (Wash), 8590338 (Zoe), adb78df (Coordinator)
+
+**Kaylee's Work:**
+- Implemented `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` endpoint
+- Mirrors revoke pattern: admin-only, idempotent (204 for already-active), no schema changes
+- JWT restoration: existing tokens become valid immediately via per-request IsRevoked check
+- All 116 tests pass
+
+**Wash's Work:**
+- Added `unrevokeMember()` API function to admin-api.ts
+- Added UI "Restore" button (emerald) for revoked members in admin-view.ts
+- Restore + Remove buttons appear side-by-side with mutual disabling during pending operations
+- Button label "Restore" chosen for clarity; emerald color signals constructive action
+
+**Zoe's Work:**
+- Wrote 8 integration tests for un-revoke endpoint covering: happy path, auth, 404s, idempotency, JWT restoration, data preservation
+- Tests expect: 204 NoContent on success and for already-active (idempotent), 401 for missing/invalid auth, 404 for missing space/member
+- All tests pass; no regressions
+
+**Coordinator Work:**
+- Fixed endpoint naming mismatch: `/reinstate` → `/unrevoke` to align server with client tests and UI
+
+**Cross-Team Learning:**
+- Endpoint contract for un-revoke mirrors revoke exactly (status codes, error responses, idempotency)
+- JWT restoration is automatic — no token refresh needed after un-revoke
+- UI pattern extends existing member action patterns (pending state, mutual button disabling, color coding)

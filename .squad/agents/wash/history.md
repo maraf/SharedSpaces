@@ -622,3 +622,48 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - Append secondary stats (e.g., item count) to existing metadata lines using a middle dot separator (`·`)
 - Use singular/plural ternary for counts: `${n} ${n === 1 ? 'item' : 'items'}`
 - Keeps layout stable — no extra rows or elements needed for simple numeric annotations
+
+## Learnings — Issue #92 (Un-revoke Member)
+
+- **Un-revoke API pattern**: Mirrors revoke exactly — `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` with `X-Admin-Secret` header. The endpoint convention is `/{action}` suffix on the member resource.
+- **Pending state pattern**: Each member action gets its own `pendingMember{Action}` record in `SpaceCardState`. The `getPendingState()` helper adds/removes keys from a `Record<string, boolean>` immutably.
+- **Revoked member UI**: When `isRevoked` is true, the member row shows strikethrough name + "Revoked" badge + action buttons. Now shows both "Restore" (emerald) and "Remove" (slate/red) side by side.
+- **Button mutual disabling**: When one action is pending on a revoked member, both Restore and Remove buttons are disabled to prevent conflicting operations.
+- **Key files**: `admin-api.ts` (API functions), `admin-view.ts` (1160+ line Lit component with modal-based member management).
+- **Pre-existing test errors**: `space-view.test.ts` has ~25 pre-existing TS errors unrelated to admin code — don't let those block you.
+
+## Team Update (2026-03-21 — Issue #92 Un-revoke Member — Complete)
+
+**Status:** ✅ Done
+**Commit:** 8bc868d (Kaylee), 2d44723 (Wash), 8590338 (Zoe), adb78df (Coordinator)
+
+**Kaylee's Work:**
+- Implemented `POST /v1/spaces/{spaceId}/members/{memberId}/unrevoke` endpoint
+- Mirrors revoke pattern: admin-only, idempotent (204 for already-active), no schema changes
+- JWT restoration: existing tokens become valid immediately via per-request IsRevoked check
+- All 116 tests pass
+
+**Wash's Work:**
+- Added `unrevokeMember()` API function to admin-api.ts
+- Added UI "Restore" button (emerald) for revoked members in admin-view.ts
+- Restore + Remove buttons appear side-by-side with mutual disabling during pending operations
+- Button label "Restore" chosen for clarity; emerald color signals constructive action
+
+**Zoe's Work:**
+- Wrote 8 integration tests for un-revoke endpoint covering: happy path, auth, 404s, idempotency, JWT restoration, data preservation
+- Tests expect: 204 NoContent on success and for already-active (idempotent), 401 for missing/invalid auth, 404 for missing space/member
+- All tests pass; no regressions
+
+**Coordinator Work:**
+- Fixed endpoint naming mismatch: `/reinstate` → `/unrevoke` to align server with client tests and UI
+
+**Cross-Team Learning:**
+- Endpoint contract for un-revoke mirrors revoke exactly (status codes, error responses, idempotency)
+- JWT restoration is automatic — no token refresh needed after un-revoke
+- UI pattern extends existing member action patterns (pending state, mutual button disabling, color coding)
+
+## Learnings — Mobile Members Modal Layout Fix
+
+- **Mobile stacking pattern for member rows**: The admin members modal uses `flex-col sm:flex-row` on the outer row div to stack member info above action buttons on mobile (<640px) and display them side-by-side on desktop. Buttons use `self-end sm:self-auto` to right-align on mobile while keeping natural flex alignment on desktop.
+- **Tailwind `sm:` breakpoint (640px)** is the right threshold for this modal — at 390px mobile viewport, the modal content area is ~340px, far below `sm:`, so stacking always kicks in. Desktop modals are well above 640px, so horizontal layout is preserved.
+- **Both member types handled**: Active members (single Revoke button) and revoked members (Restore + Remove button group) both use `self-end` for mobile right-alignment.

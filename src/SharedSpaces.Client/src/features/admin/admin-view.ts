@@ -17,6 +17,7 @@ import {
   listSpaces,
   removeMember,
   revokeMember,
+  unrevokeMember,
   type InvitationListResponse,
   type InvitationResponse,
   type MemberResponse,
@@ -36,6 +37,7 @@ type SpaceCardState = {
   membersError: string;
   pendingInvitationDeletions: Record<string, boolean>;
   pendingMemberRevocations: Record<string, boolean>;
+  pendingMemberUnrevocations: Record<string, boolean>;
   pendingMemberRemovals: Record<string, boolean>;
 };
 
@@ -117,6 +119,7 @@ export class AdminView extends BaseElement {
       membersError: '',
       pendingInvitationDeletions: {},
       pendingMemberRevocations: {},
+      pendingMemberUnrevocations: {},
       pendingMemberRemovals: {},
     };
   }
@@ -484,6 +487,63 @@ export class AdminView extends BaseElement {
           error instanceof Error ? error.message : 'Failed to revoke member',
         pendingMemberRevocations: this.getPendingState(
           latestState.pendingMemberRevocations,
+          memberId,
+          false,
+        ),
+      });
+    }
+  };
+
+  private handleUnrevokeMember = async (spaceId: string, memberId: string) => {
+    if (!this.adminSecret || !this.adminServerUrl) return;
+
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const currentState = this.getSpaceCardState(spaceId);
+
+    this.updateSpaceCardState(spaceId, {
+      membersError: '',
+      pendingMemberUnrevocations: this.getPendingState(
+        currentState.pendingMemberUnrevocations,
+        memberId,
+        true,
+      ),
+    });
+
+    try {
+      await unrevokeMember(serverUrl, adminSecret, spaceId, memberId);
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        members: latestState.members.map((member) =>
+          member.id === memberId ? { ...member, isRevoked: false } : member,
+        ),
+        pendingMemberUnrevocations: this.getPendingState(
+          latestState.pendingMemberUnrevocations,
+          memberId,
+          false,
+        ),
+      });
+    } catch (error) {
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
+        return;
+      }
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      const latestState = this.getSpaceCardState(spaceId);
+      this.updateSpaceCardState(spaceId, {
+        membersError:
+          error instanceof Error ? error.message : 'Failed to restore member',
+        pendingMemberUnrevocations: this.getPendingState(
+          latestState.pendingMemberUnrevocations,
           memberId,
           false,
         ),
@@ -966,9 +1026,10 @@ export class AdminView extends BaseElement {
       <div class="divide-y divide-slate-800">
         ${state.members.map((member) => {
           const isRevokePending = !!state.pendingMemberRevocations[member.id];
+          const isUnrevokePending = !!state.pendingMemberUnrevocations[member.id];
           const isRemovePending = !!state.pendingMemberRemovals[member.id];
           return html`
-            <div class="flex items-center justify-between gap-3 py-3">
+            <div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <p
@@ -995,21 +1056,31 @@ export class AdminView extends BaseElement {
 
               ${member.isRevoked
                 ? html`
-                    <button
-                      type="button"
-                      @click=${() => this.handleRemoveMember(spaceId, member.id)}
-                      ?disabled=${isRemovePending}
-                      class="shrink-0 rounded-full border border-slate-700 bg-slate-800/40 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:border-red-700 hover:bg-red-950/40 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      ${isRemovePending ? 'Removing…' : 'Remove'}
-                    </button>
+                    <div class="flex shrink-0 gap-2 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        @click=${() => this.handleUnrevokeMember(spaceId, member.id)}
+                        ?disabled=${isUnrevokePending || isRemovePending}
+                        class="shrink-0 rounded-full border border-emerald-800 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-200 transition hover:border-emerald-700 hover:bg-emerald-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        ${isUnrevokePending ? 'Restoring…' : 'Restore'}
+                      </button>
+                      <button
+                        type="button"
+                        @click=${() => this.handleRemoveMember(spaceId, member.id)}
+                        ?disabled=${isRemovePending || isUnrevokePending}
+                        class="shrink-0 rounded-full border border-slate-700 bg-slate-800/40 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:border-red-700 hover:bg-red-950/40 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        ${isRemovePending ? 'Removing…' : 'Remove'}
+                      </button>
+                    </div>
                   `
                 : html`
                     <button
                       type="button"
                       @click=${() => this.handleRevokeMember(spaceId, member.id)}
                       ?disabled=${isRevokePending}
-                      class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                      class="shrink-0 self-end rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
                     >
                       ${isRevokePending ? 'Revoking…' : 'Revoke'}
                     </button>
