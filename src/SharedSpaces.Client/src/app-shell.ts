@@ -5,6 +5,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { jwtDecode } from 'jwt-decode';
 
 import databaseGearSvg from 'bootstrap-icons/icons/database-gear.svg?raw';
+import inboxFillSvg from 'bootstrap-icons/icons/inbox-fill.svg?raw';
 
 import './features/admin/admin-view';
 import './features/join/join-view';
@@ -328,7 +329,7 @@ export class AppShell extends BaseElement {
                       : 'border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60'}"
                     title="Items shared from other apps"
                   >
-                    📥 ${this.pendingShareCount}
+                    <span class="inline-flex w-4 h-4 shrink-0">${unsafeHTML(inboxFillSvg.replace(/width="16"/, 'width="16"').replace(/height="16"/, 'height="16"'))}</span> ${this.pendingShareCount}
                   </button>
                 `
                 : nothing}
@@ -434,7 +435,7 @@ export class AppShell extends BaseElement {
                     this.view = 'pending-shares';
                   }}
                 >
-                  📥 ${this.pendingShareCount}
+                  <span class="inline-flex w-3.5 h-3.5 shrink-0">${unsafeHTML(inboxFillSvg.replace(/width="16"/, 'width="14"').replace(/height="16"/, 'height="14"'))}</span> ${this.pendingShareCount}
                 </button>
               `
               : nothing}
@@ -527,7 +528,7 @@ export class AppShell extends BaseElement {
                       this.sheetOpen = false;
                     }}
                   >
-                    <span class="inline-flex w-5 shrink-0 items-center justify-center text-sm">📥</span>
+                    <span class="inline-flex w-5 shrink-0 items-center justify-center">${unsafeHTML(inboxFillSvg.replace(/width="16"/, 'width="16"').replace(/height="16"/, 'height="16"'))}</span>
                     <span class="text-sm text-amber-300 font-medium"
                       >Pending shares</span
                     >
