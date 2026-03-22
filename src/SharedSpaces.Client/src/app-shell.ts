@@ -422,6 +422,22 @@ export class AppShell extends BaseElement {
                   </span>
                 `}
           </div>
+          <div class="flex items-center gap-2 shrink-0">
+            ${this.pendingShareCount > 0
+              ? html`
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-950/60 px-2 py-0.5 text-xs text-amber-300"
+                  title="Pending shares"
+                  @click=${(e: Event) => {
+                    e.stopPropagation();
+                    this.view = 'pending-shares';
+                  }}
+                >
+                  📥 ${this.pendingShareCount}
+                </button>
+              `
+              : nothing}
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"
@@ -435,6 +451,7 @@ export class AppShell extends BaseElement {
               d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"
             />
           </svg>
+          </div>
         </div>
       </div>
     `;
@@ -481,6 +498,26 @@ export class AppShell extends BaseElement {
 
           <!-- Scrollable space list -->
           <div class="overflow-y-auto px-2">
+            <!-- Join new space -->
+            <button
+              class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-800/60 active:bg-slate-800 transition text-left"
+              @click=${() => {
+                this.view = 'join';
+                this.sheetOpen = false;
+              }}
+            >
+              <span class="inline-flex w-5 shrink-0 items-center justify-center">
+                <span
+                  class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-sky-500/50 text-sky-400 text-xs"
+                  >+</span
+                >
+              </span>
+              <span class="text-sm text-sky-400 font-medium"
+                >Join new space</span
+              >
+            </button>
+
+            <!-- Pending shares entry -->
             ${this.pendingShareCount > 0
               ? html`
                   <button
@@ -490,7 +527,7 @@ export class AppShell extends BaseElement {
                       this.sheetOpen = false;
                     }}
                   >
-                    <span class="text-base">📥</span>
+                    <span class="inline-flex w-5 shrink-0 items-center justify-center text-sm">📥</span>
                     <span class="text-sm text-amber-300 font-medium"
                       >Pending shares</span
                     >
@@ -501,6 +538,12 @@ export class AppShell extends BaseElement {
                   </button>
                 `
               : nothing}
+
+            <!-- Separator -->
+            ${this.spaces.length > 0
+              ? html`<div class="mx-3 my-1 border-t border-slate-800"></div>`
+              : nothing}
+
             ${this.spaces.map((entry) => {
               const isActive =
                 this.view === 'space' &&
@@ -534,26 +577,6 @@ export class AppShell extends BaseElement {
                 </button>
               `;
             })}
-
-            <!-- Separator + Join button -->
-            <div class="mx-3 my-1 border-t border-slate-800"></div>
-            <button
-              class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-800/60 active:bg-slate-800 transition text-left"
-              @click=${() => {
-                this.view = 'join';
-                this.sheetOpen = false;
-              }}
-            >
-              <span class="inline-flex w-5 shrink-0 items-center justify-center">
-                <span
-                  class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-sky-500/50 text-sky-400 text-xs"
-                  >+</span
-                >
-              </span>
-              <span class="text-sm text-sky-400 font-medium"
-                >Join new space</span
-              >
-            </button>
           </div>
         </div>
       </div>
