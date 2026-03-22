@@ -667,3 +667,11 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 - **Mobile stacking pattern for member rows**: The admin members modal uses `flex-col sm:flex-row` on the outer row div to stack member info above action buttons on mobile (<640px) and display them side-by-side on desktop. Buttons use `self-end sm:self-auto` to right-align on mobile while keeping natural flex alignment on desktop.
 - **Tailwind `sm:` breakpoint (640px)** is the right threshold for this modal — at 390px mobile viewport, the modal content area is ~340px, far below `sm:`, so stacking always kicks in. Desktop modals are well above 640px, so horizontal layout is preserved.
 - **Both member types handled**: Active members (single Revoke button) and revoked members (Restore + Remove button group) both use `self-end` for mobile right-alignment.
+
+## Learnings — Alphabetical Space Sorting (#96)
+
+- **Sorting pattern**: Both `app-shell.ts` and `admin-view.ts` now sort spaces alphabetically (case-insensitive) using `localeCompare` with `{ sensitivity: 'base' }`. This ensures locale-aware ordering and treats upper/lowercase as equal.
+- **app-shell.ts**: Sort applied when building `this.spaces` from local storage JWT entries (line ~213). Single assignment point, so all spaces are always sorted.
+- **admin-view.ts**: Sort applied inside `setSpaces()` (the centralized setter). All paths — initial load, space creation — flow through this method, so sort order is always maintained. Uses `[...spaces].sort()` to avoid mutating the input array.
+- **Dynamic spaces**: Both approaches automatically sort newly added spaces (e.g., SignalR joins in pill bar, admin creates in dashboard) because they go through the sorted setter paths.
+- **Playwright screenshot tests** require a running backend API server for seeding; they can't run in a codespace without the server up.
