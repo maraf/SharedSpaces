@@ -2596,3 +2596,62 @@ Use Tailwind responsive classes to switch the member row from horizontal to vert
 - `admin-view.ts`: Changed Tailwind classes on member row div and button containers
 - No new CSS or custom breakpoints needed
 - Desktop layout unchanged
+
+---
+
+# Decision: Pill Bar Mobile Layout Research
+
+**Author:** Wash (Frontend Dev)
+**Date:** 2026-03-22
+**Issue:** #99
+
+## Context
+
+On mobile (390×844), the space pill bar in `app-shell.ts` uses `flex-wrap` with a `flex-1` spacer to push the admin button right. With 5+ spaces, this causes awkward wrapping — pills wrap to a second row, the spacer collapses, and the admin button ends up squeezed or orphaned on its own line.
+
+## Research
+
+Tested 4 variants with Playwright screenshots at both mobile (390×844) and desktop (1280×800):
+
+| Variant | Approach | Result |
+|---|---|---|
+| **A — Horizontal Scroll** | `overflow-x-auto flex-nowrap`, admin pinned outside scroll | ✅ Clean single-line, well-understood mobile UX |
+| **B — Two-Row** | `flex-col sm:flex-row`, admin on own row on mobile | ✅ All pills visible, admin clearly separated |
+| **C — Admin in Title** | Move admin gear to title bar row | ✅ Full-width pill nav, clean separation |
+| **D — Compact Pills** | Smaller padding/font on mobile (`text-[10px] px-2 py-1`) | ⚠️ Delays wrapping but doesn't eliminate it |
+
+## Recommendation
+
+**Variant A (horizontal scroll) or Variant C (admin in title)** — or a combination of both.
+
+- Variant A is the most established mobile pattern (tabs, filter bars, chip rows all scroll horizontally)
+- Variant C is the simplest structural improvement (admin belongs with app chrome, not space navigation)
+- Variant D could complement either as a minor polish
+
+## Impact
+
+- Screenshots posted to issue #99 for team review
+- Branch `squad/99-pill-wrapping-research` has all variant screenshots in `docs/screenshots/variants/`
+- No code changes merged — awaiting Marek's preference before implementation
+
+---
+
+# Decision: Use 15s+ Timeouts for SignalR Event Waits in Tests
+
+**Author:** Zoe (Tester)
+**Date:** 2026-03-20
+**Context:** PR #98 CI failure — `DisconnectAndReconnect_AutoRejoinsSpaceGroup` flaky due to 5s timeout
+
+## Decision
+
+SignalR hub integration tests that use `Task.WhenAny` with `Task.Delay` to wait for broadcast events should use **at least 15 seconds** as the timeout. GitHub Actions runners are significantly slower than local machines, and SignalR reconnect + event delivery can exceed 5s under load.
+
+## Rationale
+
+- The test was green locally and on main but failed intermittently in CI
+- `Task.Delay(5s)` completed before the SignalR event arrived on slow runners
+- 15s gives ample headroom without meaningfully slowing the suite (the event typically arrives in <2s)
+
+## Scope
+
+Applies to all `Task.WhenAny(..., Task.Delay(...))` patterns in `SpaceHubTests.cs` where we **expect** the event to win the race. Negative tests (expecting timeout) can keep shorter delays.
