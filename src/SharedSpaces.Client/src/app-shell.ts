@@ -60,6 +60,7 @@ export class AppShell extends BaseElement {
   @state() private isOnline = navigator.onLine;
   @state() private pendingShareCount = 0;
   @state() private pendingShares: PendingShareItem[] = [];
+  @state() private sheetOpen = false;
 
   private headerElement?: HTMLElement;
   private headerResizeObserver?: ResizeObserver;
@@ -125,6 +126,15 @@ export class AppShell extends BaseElement {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [this.currentSpaceId]: _, ...rest } = this.spaceConnectionStates;
         this.spaceConnectionStates = rest;
+      }
+    }
+
+    // Lock body scroll when mobile sheet is open
+    if (changed.has('sheetOpen')) {
+      if (this.sheetOpen && window.matchMedia('(max-width: 639px)').matches) {
+        document.body.classList.add('overflow-hidden');
+      } else {
+        document.body.classList.remove('overflow-hidden');
       }
     }
 
@@ -278,7 +288,7 @@ export class AppShell extends BaseElement {
   override render() {
     return html`
       <div
-        class="min-h-svh bg-slate-950 px-4 pb-6 text-slate-50 sm:px-6 lg:px-8"
+        class="min-h-svh bg-slate-950 px-4 pb-20 sm:pb-6 text-slate-50 sm:px-6 lg:px-8"
       >
         <div
           class="mx-auto flex min-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col gap-6"
@@ -294,10 +304,21 @@ export class AppShell extends BaseElement {
               >
                 SharedSpaces
               </button>
-              <span class="text-xs text-slate-500">v${__APP_VERSION__}</span>
+              <div class="flex items-center gap-3">
+                <button
+                  @click=${() => { this.view = 'admin'; }}
+                  class="sm:hidden ${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
+                  title="Admin panel"
+                  aria-label="Admin panel"
+                >
+                  ${unsafeHTML(databaseGearSvg)}
+                </button>
+                <span class="text-xs text-slate-500">v${__APP_VERSION__}</span>
+              </div>
             </div>
 
-            <nav class="flex items-center gap-2 flex-wrap">
+            <!-- Desktop pill nav — hidden on mobile -->
+            <nav class="hidden sm:flex items-center gap-2 flex-wrap">
               ${this.pendingShareCount > 0
                 ? html`
                   <button
@@ -347,6 +368,10 @@ export class AppShell extends BaseElement {
             ${this.renderContent()}
           </main>
         </div>
+
+        ${this.renderMobileBottomBar()}
+        ${this.renderMobileBackdrop()}
+        ${this.renderMobileSheet()}
       </div>
     `;
   }
@@ -358,6 +383,175 @@ export class AppShell extends BaseElement {
         role="alert"
       >
         📡 You're offline — uploads will be queued and sent when you reconnect
+      </div>
+    `;
+  }
+
+  // --- Mobile Bottom Bar + Sheet ---
+
+  private renderMobileBottomBar() {
+    const activeSpace = this.spaces.find(
+      (s) => s.spaceId === this.currentSpaceId,
+    );
+    return html`
+      <div
+        class="fixed bottom-0 left-0 right-0 z-30 sm:hidden border-t border-slate-800 bg-slate-900 cursor-pointer select-none"
+        style="padding-bottom: max(0.75rem, env(safe-area-inset-bottom))"
+        @click=${() => {
+          this.sheetOpen = true;
+        }}
+      >
+        <div
+          class="mx-auto max-w-5xl flex items-center justify-between px-4 pt-3"
+        >
+          <div class="flex items-center gap-2.5 min-w-0">
+            ${activeSpace
+              ? html`
+                  <span
+                    class="inline-block h-2.5 w-2.5 shrink-0 rounded-full ${this.dotColor(activeSpace.spaceId)}"
+                  ></span>
+                  <span class="text-sm font-medium text-slate-200 truncate">
+                    ${activeSpace.spaceName}
+                  </span>
+                `
+              : html`
+                  <span class="text-sm text-slate-400">
+                    ${this.spaces.length > 0
+                      ? 'Select a space'
+                      : 'Join a space'}
+                  </span>
+                `}
+          </div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            fill="currentColor"
+            viewBox="0 0 16 16"
+            class="shrink-0 text-slate-500"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"
+            />
+          </svg>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderMobileBackdrop() {
+    return html`
+      <div
+        class="fixed inset-0 z-40 sm:hidden bg-black/50 transition-opacity duration-300 ${this.sheetOpen
+          ? 'opacity-100'
+          : 'opacity-0 pointer-events-none'}"
+        @click=${() => {
+          this.sheetOpen = false;
+        }}
+      ></div>
+    `;
+  }
+
+  private renderMobileSheet() {
+    return html`
+      <div
+        class="fixed bottom-0 left-0 right-0 z-50 sm:hidden bottom-sheet ${this.sheetOpen
+          ? 'bottom-sheet-open'
+          : ''}"
+        aria-hidden=${!this.sheetOpen}
+      >
+        <div
+          class="bg-slate-900 rounded-t-2xl border-t border-slate-700 flex flex-col"
+          style="max-height: 70svh; padding-bottom: max(1rem, env(safe-area-inset-bottom))"
+        >
+          <!-- Drag handle -->
+          <div class="flex justify-center pt-3 pb-1">
+            <div class="h-1 w-10 rounded-full bg-slate-600"></div>
+          </div>
+
+          <!-- Title -->
+          <div class="px-4 py-2">
+            <h2
+              class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+            >
+              Spaces
+            </h2>
+          </div>
+
+          <!-- Scrollable space list -->
+          <div class="overflow-y-auto px-2">
+            ${this.pendingShareCount > 0
+              ? html`
+                  <button
+                    class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-800/60 active:bg-slate-800 transition text-left"
+                    @click=${() => {
+                      this.view = 'pending-shares';
+                      this.sheetOpen = false;
+                    }}
+                  >
+                    <span class="text-base">📥</span>
+                    <span class="text-sm text-amber-300 font-medium"
+                      >Pending shares</span
+                    >
+                    <span
+                      class="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300"
+                      >${this.pendingShareCount}</span
+                    >
+                  </button>
+                `
+              : nothing}
+            ${this.spaces.map((entry) => {
+              const isActive =
+                this.view === 'space' &&
+                this.currentSpaceId === entry.spaceId;
+              return html`
+                <button
+                  class="w-full flex items-center gap-3 px-3 py-3 rounded-lg transition text-left ${isActive
+                    ? 'bg-sky-950/40'
+                    : 'hover:bg-slate-800/60 active:bg-slate-800'}"
+                  @click=${() => {
+                    this.selectSpace(entry);
+                    this.sheetOpen = false;
+                  }}
+                >
+                  <span
+                    class="inline-block h-2.5 w-2.5 shrink-0 rounded-full ${this.dotColor(entry.spaceId)}"
+                  ></span>
+                  <span
+                    class="text-sm ${isActive
+                      ? 'text-sky-300 font-medium'
+                      : 'text-slate-200'}"
+                    >${entry.spaceName}</span
+                  >
+                  ${isActive
+                    ? html`<span class="ml-auto text-xs text-sky-400/70"
+                        >Active</span
+                      >`
+                    : nothing}
+                </button>
+              `;
+            })}
+
+            <!-- Separator + Join button -->
+            <div class="mx-3 my-1 border-t border-slate-800"></div>
+            <button
+              class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-800/60 active:bg-slate-800 transition text-left"
+              @click=${() => {
+                this.view = 'join';
+                this.sheetOpen = false;
+              }}
+            >
+              <span
+                class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-sky-500/50 text-sky-400 text-xs"
+                >+</span
+              >
+              <span class="text-sm text-sky-400 font-medium"
+                >Join new space</span
+              >
+            </button>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -401,7 +595,7 @@ export class AppShell extends BaseElement {
     return html`
       <div class="flex w-full flex-col items-center justify-center gap-4 text-center">
         <p class="text-slate-400">
-          Select a space above to get started.
+          Select a space to get started.
         </p>
       </div>
     `;
