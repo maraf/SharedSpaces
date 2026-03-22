@@ -688,3 +688,27 @@ When implementing the auto-grow feature:
 - Endpoint contract for un-revoke mirrors revoke exactly (status codes, error responses, idempotency)
 - JWT restoration is automatic — no token refresh needed after un-revoke
 - UI pattern extends existing member action patterns (pending state, mutual button disabling, color coding)
+- Sorting implementation for Issue #96 uses `localeCompare` with `{ sensitivity: 'base' }` for case-insensitive alphabetical ordering in both `app-shell.ts` (`loadSpacesFromStorage`) and `admin-view.ts` (`setSpaces`).
+- `BaseElement` overrides `createRenderRoot()` to return `this`, so all components render to the light DOM (no shadow root) in both tests and real browsers. Component render-order tests should verify the backing `spaces` array property rather than querying rendered DOM elements.
+- Admin-view test files require mocking `./admin-api` (all API functions) and `../../lib/admin-url-storage` (URL storage functions) for the component to instantiate cleanly.
+- App-shell sorting test file (`app-shell-sorting.test.ts`) uses dynamic `mockJwtDecode` per-token to simulate multiple spaces with different names, unlike the static mock in the original `app-shell.test.ts`.
+
+## Team Update (2026-03-22 — Issue #96 Alphabetical Space Sorting — Complete)
+
+**Status:** ✅ Done
+**Branch:** squad/96-sort-spaces-alphabetically
+
+**Zoe's Work:**
+- Wrote 23 vitest tests for alphabetical space sorting
+- Coverage: sort order (A→Z, case-insensitive), edge cases (mixed case, special chars, accents), dynamic additions
+- Tests split across app-shell.spec.ts (12 tests) and admin-view.spec.ts (11 tests)
+- All 335 tests pass; no regressions detected
+
+**Wash's Work:**
+- Implemented sorting in pill bar (`app-shell.ts`) and admin panel (`admin-view.ts`)
+- Used `localeCompare(name, undefined, { sensitivity: 'base' })` for locale-aware sorting
+- Applied at data-setter level so dynamically added spaces remain in order
+
+**Key Decision:**
+- Sort logic placed at data level (not template) to ensure consistency through dynamic updates
+- `localeCompare` provides correct handling of accented characters and locale-specific sorting

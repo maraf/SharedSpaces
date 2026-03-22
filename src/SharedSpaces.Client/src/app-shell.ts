@@ -210,7 +210,9 @@ export class AppShell extends BaseElement {
         // Skip invalid tokens
       }
     }
-    this.spaces = entries;
+    this.spaces = entries.sort((a, b) =>
+      a.spaceName.localeCompare(b.spaceName, undefined, { sensitivity: 'base' }),
+    );
   }
 
   private handleViewChange = (event: CustomEvent<AppViewChangeDetail>) => {
