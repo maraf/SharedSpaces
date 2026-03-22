@@ -233,7 +233,7 @@ describe('AppShell — Alphabetical Space Sorting (Issue #96)', () => {
     expect(names.filter((n) => n === 'Team')).toHaveLength(2);
   });
 
-  it('sorts numeric-prefix names naturally', async () => {
+  it('sorts numeric-prefix names lexicographically', async () => {
     setupTokenMocks([
       { id: 'id-2', name: '20-office' },
       { id: 'id-1', name: '1-lobby' },
@@ -244,7 +244,7 @@ describe('AppShell — Alphabetical Space Sorting (Issue #96)', () => {
     await element.updateComplete;
 
     const names = getSpaceNames();
-    // Numeric strings sort before Alpha in locale comparison
+    // Numeric-prefix strings sort lexicographically (e.g. "1-lobby" < "20-office" < "Alpha")
     expect(names.indexOf('Alpha')).toBeGreaterThan(0);
     expect(names).toHaveLength(3);
   });
