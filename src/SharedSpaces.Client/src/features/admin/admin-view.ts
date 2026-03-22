@@ -125,7 +125,9 @@ export class AdminView extends BaseElement {
   }
 
   private setSpaces(spaces: SpaceResponse[]) {
-    this.spaces = spaces;
+    this.spaces = [...spaces].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+    );
     this.spaceCardState = Object.fromEntries(
       spaces.map((space) => [
         space.id,
