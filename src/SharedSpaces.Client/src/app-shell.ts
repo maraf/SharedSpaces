@@ -421,19 +421,19 @@ export class AppShell extends BaseElement {
     );
     return html`
       <div
-        class="fixed bottom-0 left-0 right-0 z-30 sm:hidden border-t border-slate-800 bg-slate-900 select-none"
+        class="fixed bottom-0 left-0 right-0 z-30 sm:hidden border-t border-slate-800 bg-slate-900 select-none cursor-pointer"
         style="padding-bottom: max(0.75rem, env(safe-area-inset-bottom))"
         data-testid="bottom-bar"
+        role="button"
+        tabindex="0"
+        @click=${() => { this.sheetOpen = !this.sheetOpen; }}
+        @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.sheetOpen = !this.sheetOpen; } }}
+        aria-label=${this.sheetOpen ? 'Close spaces sheet' : 'Open spaces sheet'}
       >
         <div
           class="mx-auto max-w-5xl flex items-center justify-between px-4 pt-3"
         >
-          <button
-            type="button"
-            class="flex items-center gap-2.5 min-w-0 cursor-pointer bg-transparent border-none p-0"
-            @click=${() => { this.sheetOpen = !this.sheetOpen; }}
-            aria-label=${this.sheetOpen ? 'Close spaces sheet' : 'Open spaces sheet'}
-          >
+          <div class="flex items-center gap-2.5 min-w-0">
             ${activeSpace
               ? html`
                   <span
@@ -450,7 +450,7 @@ export class AppShell extends BaseElement {
                       : 'Join a space'}
                   </span>
                 `}
-          </button>
+          </div>
           <div class="flex items-center gap-2 shrink-0">
             ${this.pendingShareCount > 0
               ? html`
@@ -459,32 +459,26 @@ export class AppShell extends BaseElement {
                   class="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-950/60 px-2 py-0.5 text-xs text-amber-300"
                   title="Pending shares"
                   data-testid="pending-shares-bar"
-                  @click=${() => { this.view = 'pending-shares'; }}
+                  @click=${(e: Event) => { e.stopPropagation(); this.view = 'pending-shares'; }}
                 >
                   <span class="inline-flex w-3.5 h-3.5 shrink-0">${unsafeHTML(inboxFillSvg14)}</span> ${this.pendingShareCount}
                 </button>
               `
               : nothing}
-            <button
-              type="button"
-              class="cursor-pointer bg-transparent border-none p-0"
-              @click=${() => { this.sheetOpen = !this.sheetOpen; }}
-              aria-label=${this.sheetOpen ? 'Close spaces sheet' : 'Open spaces sheet'}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              fill="currentColor"
+              viewBox="0 0 16 16"
+              class="shrink-0 text-slate-500 transition-transform ${this.sheetOpen ? 'rotate-180' : ''}"
+              aria-hidden="true"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                fill="currentColor"
-                viewBox="0 0 16 16"
-                class="shrink-0 text-slate-500 transition-transform ${this.sheetOpen ? 'rotate-180' : ''}"
-              >
-                <path
-                  fill-rule="evenodd"
-                  d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"
-                />
-              </svg>
-            </button>
+              <path
+                fill-rule="evenodd"
+                d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"
+              />
+            </svg>
           </div>
         </div>
       </div>
