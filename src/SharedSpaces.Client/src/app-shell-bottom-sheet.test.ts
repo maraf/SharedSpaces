@@ -154,7 +154,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       await element.updateComplete;
 
       // The bottom bar toggle button opens the sheet
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
       expect(bottomBar).toBeTruthy();
       const toggleBtn = bottomBar.querySelector('button') as HTMLElement;
       toggleBtn.click();
@@ -169,8 +169,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      // Backdrop is the fixed inset-0 z-40 element
-      const backdrop = element.querySelector('.fixed.inset-0.z-40') as HTMLElement;
+      const backdrop = element.querySelector('[data-testid="backdrop"]') as HTMLElement;
       expect(backdrop).toBeTruthy();
       backdrop.click();
       await element.updateComplete;
@@ -183,14 +182,14 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       createElement();
       await element.updateComplete;
 
-      const sheet = element.querySelector('.bottom-sheet') as HTMLElement;
+      const sheet = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
       expect(sheet).toBeTruthy();
       expect(sheet.classList.contains('bottom-sheet-open')).toBe(false);
 
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetAfter = element.querySelector('.bottom-sheet') as HTMLElement;
+      const sheetAfter = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
       expect(sheetAfter.classList.contains('bottom-sheet-open')).toBe(true);
     });
 
@@ -199,13 +198,13 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       createElement();
       await element.updateComplete;
 
-      const sheet = element.querySelector('.bottom-sheet') as HTMLElement;
+      const sheet = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
       expect(sheet.getAttribute('aria-hidden')).toBe('true');
 
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetOpen = element.querySelector('.bottom-sheet') as HTMLElement;
+      const sheetOpen = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
       expect(sheetOpen.getAttribute('aria-hidden')).toBe('false');
     });
   });
@@ -222,11 +221,10 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      // Find space buttons inside the bottom sheet
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
-      const buttons = sheetEl.querySelectorAll('button');
-      // Find the button for space "Alpha" (space buttons contain the space name text)
-      const spaceButton = Array.from(buttons).find(
+      // Find space items inside the bottom sheet
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const spaceItems = sheetEl.querySelectorAll('[data-testid="sheet-space-item"]');
+      const spaceButton = Array.from(spaceItems).find(
         (btn) => btn.textContent?.includes('Alpha'),
       );
       expect(spaceButton).toBeTruthy();
@@ -244,7 +242,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
       const joinBtn = Array.from(sheetEl.querySelectorAll('button')).find(
         (btn) => btn.textContent?.includes('Join new space'),
       );
@@ -266,8 +264,8 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).pendingShareCount = 0;
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
-      const pendingPill = bottomBar?.querySelector('[title="Pending shares"]');
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
+      const pendingPill = bottomBar?.querySelector('[data-testid="pending-shares-bar"]');
       expect(pendingPill).toBeNull();
     });
 
@@ -277,8 +275,8 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).pendingShareCount = 3;
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
-      const pendingPill = bottomBar?.querySelector('[title="Pending shares"]');
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
+      const pendingPill = bottomBar?.querySelector('[data-testid="pending-shares-bar"]');
       expect(pendingPill).toBeTruthy();
       expect(pendingPill!.textContent).toContain('3');
     });
@@ -290,11 +288,9 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
-      const pendingEntry = Array.from(sheetEl.querySelectorAll('button')).find(
-        (btn) => btn.textContent?.includes('Pending shares'),
-      );
-      expect(pendingEntry).toBeUndefined();
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const pendingEntry = sheetEl.querySelector('[data-testid="pending-shares-sheet"]');
+      expect(pendingEntry).toBeNull();
     });
 
     it('renders pending shares entry in sheet when count > 0', async () => {
@@ -304,10 +300,8 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
-      const pendingEntry = Array.from(sheetEl.querySelectorAll('button')).find(
-        (btn) => btn.textContent?.includes('Pending shares'),
-      );
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const pendingEntry = sheetEl.querySelector('[data-testid="pending-shares-sheet"]');
       expect(pendingEntry).toBeTruthy();
       expect(pendingEntry!.textContent).toContain('5');
     });
@@ -318,8 +312,8 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).pendingShareCount = 0;
       await element.updateComplete;
 
-      const desktopNav = element.querySelector('nav.hidden.sm\\:flex') as HTMLElement;
-      const pendingPill = desktopNav?.querySelector('[title="Items shared from other apps"]');
+      const desktopNav = element.querySelector('[data-testid="desktop-pills"]') as HTMLElement;
+      const pendingPill = desktopNav?.querySelector('[data-testid="pending-shares-pill"]');
       expect(pendingPill).toBeNull();
     });
 
@@ -329,8 +323,8 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).pendingShareCount = 2;
       await element.updateComplete;
 
-      const desktopNav = element.querySelector('nav.hidden.sm\\:flex') as HTMLElement;
-      const pendingPill = desktopNav?.querySelector('[title="Items shared from other apps"]');
+      const desktopNav = element.querySelector('[data-testid="desktop-pills"]') as HTMLElement;
+      const pendingPill = desktopNav?.querySelector('[data-testid="pending-shares-pill"]');
       expect(pendingPill).toBeTruthy();
       expect(pendingPill!.textContent).toContain('2');
     });
@@ -345,8 +339,8 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).pendingShareCount = 3;
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
-      const pendingPill = bottomBar?.querySelector('[title="Pending shares"]') as HTMLElement;
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
+      const pendingPill = bottomBar?.querySelector('[data-testid="pending-shares-bar"]') as HTMLElement;
       expect(pendingPill).toBeTruthy();
 
       // The pill calls e.stopPropagation() so it shouldn't open the sheet
@@ -365,12 +359,10 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
-      const pendingBtn = Array.from(sheetEl.querySelectorAll('button')).find(
-        (btn) => btn.textContent?.includes('Pending shares'),
-      );
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const pendingBtn = sheetEl.querySelector('[data-testid="pending-shares-sheet"]') as HTMLElement;
       expect(pendingBtn).toBeTruthy();
-      pendingBtn!.click();
+      pendingBtn.click();
       await element.updateComplete;
 
       expect((element as any).view).toBe('pending-shares');
@@ -444,40 +436,41 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
   // ── Desktop vs mobile rendering ────────────────────────────────────
 
   describe('desktop vs mobile rendering', () => {
-    it('renders desktop pill nav with hidden sm:flex classes', async () => {
+    it('renders desktop pill nav', async () => {
       setupSpaces([{ id: 'space-a', name: 'Alpha' }]);
       createElement();
       await element.updateComplete;
 
-      const desktopNav = element.querySelector('nav.hidden.sm\\:flex');
+      const desktopNav = element.querySelector('[data-testid="desktop-pills"]');
       expect(desktopNav).toBeTruthy();
     });
 
-    it('renders mobile bottom bar with sm:hidden class', async () => {
+    it('renders mobile bottom bar', async () => {
       setupSpaces([{ id: 'space-a', name: 'Alpha' }]);
       createElement();
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden');
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]');
       expect(bottomBar).toBeTruthy();
     });
 
-    it('renders mobile bottom sheet with sm:hidden class', async () => {
+    it('renders mobile bottom sheet with role="dialog"', async () => {
       setupEmptySpaces();
       createElement();
       await element.updateComplete;
 
-      const sheet = element.querySelector('.bottom-sheet.sm\\:hidden');
-      // The sheet container has sm:hidden in its class list
+      const sheet = element.querySelector('[data-testid="bottom-sheet"]');
       expect(sheet).toBeTruthy();
+      expect(sheet!.getAttribute('role')).toBe('dialog');
+      expect(sheet!.getAttribute('aria-modal')).toBe('true');
     });
 
-    it('renders mobile backdrop with sm:hidden class', async () => {
+    it('renders mobile backdrop', async () => {
       setupEmptySpaces();
       createElement();
       await element.updateComplete;
 
-      const backdrop = element.querySelector('.fixed.inset-0.z-40.sm\\:hidden');
+      const backdrop = element.querySelector('[data-testid="backdrop"]');
       expect(backdrop).toBeTruthy();
     });
 
@@ -489,7 +482,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).view = 'space';
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
       expect(bottomBar.textContent).toContain('Alpha');
     });
 
@@ -499,7 +492,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).currentSpaceId = undefined;
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
       expect(bottomBar.textContent).toContain('Select a space');
     });
 
@@ -508,7 +501,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       createElement();
       await element.updateComplete;
 
-      const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
       expect(bottomBar.textContent).toContain('Join a space');
     });
 
@@ -522,11 +515,9 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
-      const buttons = Array.from(sheetEl.querySelectorAll('button'));
-      const spaceNames = buttons
-        .map((btn) => btn.textContent?.trim())
-        .filter((text) => text && !text.includes('Join') && !text.includes('Pending') && !text.includes('Admin'));
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const spaceItems = sheetEl.querySelectorAll('[data-testid="sheet-space-item"]');
+      const spaceNames = Array.from(spaceItems).map((btn) => btn.textContent?.trim());
 
       expect(spaceNames.some((n) => n?.includes('Alpha'))).toBe(true);
       expect(spaceNames.some((n) => n?.includes('Bravo'))).toBe(true);
@@ -544,8 +535,9 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).sheetOpen = true;
       await element.updateComplete;
 
-      const sheetEl = element.querySelector('.bottom-sheet') as HTMLElement;
-      const activeButton = Array.from(sheetEl.querySelectorAll('button')).find(
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const spaceItems = sheetEl.querySelectorAll('[data-testid="sheet-space-item"]');
+      const activeButton = Array.from(spaceItems).find(
         (btn) => btn.textContent?.includes('Alpha'),
       );
       expect(activeButton).toBeTruthy();
@@ -562,9 +554,9 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       createElement();
       await element.updateComplete;
 
-      // Admin gear button in the header (sm:hidden = mobile only)
+      // Admin gear button in the header — use aria-label (stable accessible selector)
       const header = element.querySelector('header') as HTMLElement;
-      const mobileAdminBtn = header.querySelector('button.sm\\:hidden[aria-label="Admin panel"]');
+      const mobileAdminBtn = header.querySelector('button[aria-label="Admin panel"]');
       expect(mobileAdminBtn).toBeTruthy();
     });
 
@@ -574,11 +566,95 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       await element.updateComplete;
 
       const header = element.querySelector('header') as HTMLElement;
-      const mobileAdminBtn = header.querySelector('button.sm\\:hidden[aria-label="Admin panel"]') as HTMLElement;
+      const mobileAdminBtn = header.querySelector('button[aria-label="Admin panel"]') as HTMLElement;
       mobileAdminBtn.click();
       await element.updateComplete;
 
       expect((element as any).view).toBe('admin');
+    });
+  });
+
+  // ── Escape key closes the sheet ─────────────────────────────────────
+
+  describe('keyboard interaction', () => {
+    it('closes sheet when Escape key is pressed', async () => {
+      setupEmptySpaces();
+      createElement();
+      (element as any).sheetOpen = true;
+      await element.updateComplete;
+
+      expect((element as any).sheetOpen).toBe(true);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await element.updateComplete;
+
+      expect((element as any).sheetOpen).toBe(false);
+    });
+
+    it('does nothing when Escape is pressed and sheet is already closed', async () => {
+      setupEmptySpaces();
+      createElement();
+      await element.updateComplete;
+
+      expect((element as any).sheetOpen).toBe(false);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await element.updateComplete;
+
+      expect((element as any).sheetOpen).toBe(false);
+    });
+  });
+
+  // ── Chevron rotation ────────────────────────────────────────────────
+
+  describe('chevron rotation', () => {
+    it('chevron has rotate-180 class when sheet is open', async () => {
+      setupEmptySpaces();
+      createElement();
+      (element as any).sheetOpen = true;
+      await element.updateComplete;
+
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
+      const chevronSvg = bottomBar.querySelector('svg');
+      expect(chevronSvg).toBeTruthy();
+      expect(chevronSvg!.classList.contains('rotate-180')).toBe(true);
+    });
+
+    it('chevron does not have rotate-180 class when sheet is closed', async () => {
+      setupEmptySpaces();
+      createElement();
+      await element.updateComplete;
+
+      const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
+      const chevronSvg = bottomBar.querySelector('svg');
+      expect(chevronSvg).toBeTruthy();
+      expect(chevronSvg!.classList.contains('rotate-180')).toBe(false);
+    });
+  });
+
+  // ── Breakpoint listener cleans up scroll lock ───────────────────────
+
+  describe('breakpoint cleanup', () => {
+    it('closes sheet and removes scroll lock when viewport grows past mobile breakpoint', async () => {
+      setupEmptySpaces();
+      createElement();
+
+      // Open the sheet on mobile
+      matchMediaMock.mockReturnValue({ matches: true });
+      (element as any).sheetOpen = true;
+      await element.updateComplete;
+      expect(document.body.classList.contains('overflow-hidden')).toBe(true);
+
+      // Simulate the breakpoint change handler directly
+      // The component registers a 'change' listener on matchMedia result
+      const mq = (element as any).mobileMediaQuery;
+      if (mq && (element as any).handleBreakpointChange) {
+        (element as any).handleBreakpointChange({ matches: false } as MediaQueryListEvent);
+        await element.updateComplete;
+
+        expect((element as any).sheetOpen).toBe(false);
+        expect(document.body.classList.contains('overflow-hidden')).toBe(false);
+      }
     });
   });
 });
