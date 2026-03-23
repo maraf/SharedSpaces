@@ -999,7 +999,7 @@ export class AdminView extends BaseElement {
             </button>
           </div>
 
-          <div class="max-h-[60vh] overflow-y-auto px-5 py-4">
+          <div class="max-h-[75vh] overflow-y-auto px-5 py-4">
             ${content}
           </div>
         </div>
@@ -1182,7 +1182,7 @@ export class AdminView extends BaseElement {
 
   private renderGeneratedInvitation(invitation: InvitationResponse) {
     return html`
-      <div class="space-y-3">
+      <div class="space-y-3 pb-4">
         <div class="space-y-2">
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
             Invitation String
