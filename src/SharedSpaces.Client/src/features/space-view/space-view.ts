@@ -856,44 +856,51 @@ export class SpaceView extends BaseElement {
           </div>
         </div>
 
-        <ul class="space-y-1.5">
-          ${this.pendingShares.map(
-            (share) => {
-              const icon = share.type === 'file' 
-                ? getFileTypeIcon(share.fileName ?? 'file', 18)
-                : getTextItemIcon(18);
-              return html`
-                <li
-                  class="flex items-center gap-3 rounded border border-slate-700/50 bg-slate-900/40 px-3 py-2"
+        <ul class="space-y-2">
+          ${this.pendingShares.map((share) => {
+            const icon = share.type === 'file' 
+              ? getFileTypeIcon(share.fileName ?? 'file')
+              : getTextItemIcon();
+            
+            const content = html`
+              <!-- Left: Icon -->
+              <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+                ${icon.svg}
+              </div>
+              <!-- Center: Content -->
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-slate-200">
+                  ${share.type === 'file'
+                    ? share.fileName ?? 'File'
+                    : (share.content ?? '').substring(0, 100)}
+                </p>
+                <p class="text-xs text-slate-500">
+                  Pending upload
+                </p>
+              </div>
+              <!-- Right: Actions -->
+              <div class="flex shrink-0 items-center gap-1">
+                <button
+                  @click=${() => this.uploadPendingShare(share)}
+                  ?disabled=${this.isUploading}
+                  class="rounded px-3 py-1.5 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
+                  title="Upload this item"
                 >
-                  <span class="shrink-0 ${icon.colorClass}" aria-hidden="true">
-                    ${icon.svg}
-                  </span>
-                  <span class="min-w-0 flex-1 truncate text-xs text-slate-300">
-                    ${share.type === 'file'
-                      ? share.fileName ?? 'File'
-                      : (share.content ?? '').substring(0, 100)}
-                  </span>
-                  <button
-                    @click=${() => this.uploadPendingShare(share)}
-                    ?disabled=${this.isUploading}
-                    class="shrink-0 rounded px-2 py-1 text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
-                    title="Upload this item"
-                  >
-                    Upload
-                  </button>
-                  <button
-                    @click=${() => this.dismissPendingShare(share)}
-                    class="shrink-0 rounded p-1 text-slate-500 hover:text-red-400"
-                    title="Dismiss"
-                    aria-label="Dismiss shared item"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                  </button>
-                </li>
-              `;
-            },
-          )}
+                  Upload
+                </button>
+                <button
+                  @click=${() => this.dismissPendingShare(share)}
+                  class="rounded p-2 text-slate-500 transition hover:text-red-400"
+                  title="Dismiss"
+                  aria-label="Dismiss shared item"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </div>
+            `;
+
+            return this.renderUnifiedItemCard(content);
+          })}
         </ul>
       </section>
     `;
@@ -1025,20 +1032,30 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderItemCard(item: SpaceItemResponse) {
-    const isFile = item.contentType === 'file';
-    const showOverlay = this.deleteConfirmItemId === item.id;
-
+  /**
+   * Renders a unified item card layout used for both shared items and pending shares.
+   * Prevents layout drift between different item display contexts.
+   */
+  private renderUnifiedItemCard(content: unknown, overlay?: unknown) {
     return html`
       <li
         class="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
       >
         <div class="flex items-center gap-3">
-          ${isFile ? this.renderFileContent(item) : this.renderTextContent(item)}
+          ${content}
         </div>
-        ${showOverlay ? this.renderDeleteConfirmOverlay(item) : nothing}
+        ${overlay ? overlay : nothing}
       </li>
     `;
+  }
+
+  private renderItemCard(item: SpaceItemResponse) {
+    const isFile = item.contentType === 'file';
+    const showOverlay = this.deleteConfirmItemId === item.id;
+    const content = isFile ? this.renderFileContent(item) : this.renderTextContent(item);
+    const overlay = showOverlay ? this.renderDeleteConfirmOverlay(item) : undefined;
+
+    return this.renderUnifiedItemCard(content, overlay);
   }
 
   private renderCopyButton(item: SpaceItemResponse) {
