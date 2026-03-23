@@ -1,4 +1,4 @@
-import { html, nothing } from 'lit';
+import { html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
@@ -1036,7 +1036,10 @@ export class SpaceView extends BaseElement {
    * Renders a unified item card layout used for both shared items and pending shares.
    * Prevents layout drift between different item display contexts.
    */
-  private renderUnifiedItemCard(content: unknown, overlay?: unknown) {
+  private renderUnifiedItemCard(
+    content: TemplateResult | typeof nothing,
+    overlay?: TemplateResult | typeof nothing,
+  ) {
     return html`
       <li
         class="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
@@ -1044,7 +1047,7 @@ export class SpaceView extends BaseElement {
         <div class="flex items-center gap-3">
           ${content}
         </div>
-        ${overlay ? overlay : nothing}
+        ${overlay ?? nothing}
       </li>
     `;
   }
