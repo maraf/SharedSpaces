@@ -696,3 +696,52 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 **Key Decision:**
 - Use `localeCompare` with `sensitivity: 'base'` for locale-aware, case-insensitive sorting
 - Sort at data-setter level (not template) to maintain order through dynamic updates
+
+
+## Learnings
+
+### Issue #100: Item Card Layout Unification (2026-03-20)
+
+**Status:** ✅ Done  
+**Branch:** squad/100-item-card-layout  
+**Commit:** 810fd33
+
+**Problem:**  
+Pending shares from share_target API rendered with outdated card styling:
+- Old: `border-slate-700/50 bg-slate-900/40 px-3 py-2` with 18px icons
+- New: `border-slate-800 bg-slate-900/60 px-4 py-3` with 24px icons
+
+**Solution:**  
+Created `renderUnifiedItemCard(content, overlay?)` method extracted from existing `renderItemCard()` to ensure both regular items and pending shares use identical card layout. The unified function owns:
+- Card container: `<li>` with border, background, padding, and overflow styles
+- Flex layout for content
+- Optional overlay (used for delete confirmation)
+
+**Pattern Established:**  
+When two UI contexts render similar cards, extract the card shell into a shared rendering function. Pass the content as a template parameter rather than duplicating the entire card structure.
+
+**Key Files:**
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — unified card renderer at line 1038
+
+**Why This Matters:**  
+Prevents layout drift when one card context is updated but not the other. Single source of truth for card styling reduces future maintenance burden.
+- **Creative UX variants for mobile pill bar — Round 2 (Issue #99):** Researched and prototyped 4 interactive mobile UX patterns as alternatives to the wrapping pill bar, going beyond CSS-only fixes from Round 1. Key findings: (1) **Dropdown selector** — cleanest scalability, familiar mobile pattern, but loses at-a-glance visibility; uses custom dropdown with `aria-haspopup="listbox"`, outside-click-to-close handler, and CSS animation. (2) **Overflow menu ("⋯ +N")** — best hybrid approach showing 2 visible pills + badge popover for the rest, like Chrome tab overflow; tight on 390px screens — needs responsive fine-tuning. (3) **Bottom sheet** — most native mobile feel (iOS share sheet pattern) with slide-up animation, dimmed backdrop, drag handle; best touch targets but complex implementation and inappropriate on desktop. (4) **Collapsible accordion** — simplest implementation (toggle div), pushes content down instead of overlaying, but takes vertical space when expanded. Implementation notes: Vite HMR reliably picks up app-shell.ts changes for rapid variant prototyping. For absolute-positioned popovers inside flex containers, avoid `overflow-hidden` on parent — it clips the popover. Outside-click-to-close pattern requires `setTimeout(() => document.addEventListener(...), 0)` to avoid the triggering click immediately closing the menu. All variants need responsive breakpoints — these patterns should only activate on mobile while desktop keeps the original pill layout.
+
+## Learnings — Final Polish Tweaks (Issue #99, Bottom Sheet v3)
+
+- **Swapping element order in flex rows:** To swap adjacent elements in a `flex items-center` row, simply reorder them in the template. Swapped the version badge and admin gear button in the mobile header title row so version appears first (left) and admin gear sits at the far right.
+- **Fixed-width icon columns for alignment:** When a list has rows with different icon sizes (e.g., 2.5-size status dots vs 5-size `+` circle), wrap each icon in a fixed-width `inline-flex w-5 shrink-0 items-center justify-center` container. This ensures all text labels start at the same horizontal position regardless of icon size.
+- **xvfb-run for headed Playwright in CI/codespace:** The Playwright config uses `headless: false` — in headless Linux environments, use `xvfb-run --auto-servernum` to provide a virtual X display. Without it, Chromium crashes with "Missing X server" immediately.
+- **Share target integration pattern (bottom bar + sheet):** To add conditional pills to the mobile bottom bar, wrap the pill + chevron in a `flex items-center gap-2 shrink-0` container and use `e.stopPropagation()` on the pill click to prevent the parent bar's sheet-open handler from firing. For the bottom sheet, place action items (Join, Pending shares) above the space list with a conditional separator. The `📥` emoji icon fits inside the same `w-5` column used for dots and `+` icons. Setting `pendingShareCount` via `page.evaluate` on the `app-shell` element triggers Lit reactive re-render for screenshot capture.
+
+## Learnings — Emoji Icons in Headless Chromium
+
+- **Emoji icons don't render in headless Chromium** — they appear as empty boxes (□) in Playwright screenshots. Always use SVG imports (bootstrap-icons via `?raw`) instead of emoji for icons that need to render in automated screenshots.
+- **Pattern:** Import SVG with `import iconSvg from 'bootstrap-icons/icons/icon-name.svg?raw'`, then render with `unsafeHTML(iconSvg)` wrapped in a sized `<span>`. The `?raw` type declaration already exists in `vite-env.d.ts`.
+- **Sizing:** Use Tailwind classes on wrapper span (e.g., `w-4 h-4` for pills, `w-5` for sheet icon columns) and adjust SVG width/height attributes via `.replace()` when needed.
+
+## Team Update (2026-03-23)
+
+**Issue #100 completed.** Wash extracted `renderUnifiedItemCard()` in space-view.ts to unify item card rendering across regular items list and pending shares section. Pattern established for future unified UI layouts.
+
+**Related:** Zoe writing tests for unified layout (in progress).

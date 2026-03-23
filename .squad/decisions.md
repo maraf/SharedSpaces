@@ -2596,3 +2596,60 @@ Use Tailwind responsive classes to switch the member row from horizontal to vert
 - `admin-view.ts`: Changed Tailwind classes on member row div and button containers
 - No new CSS or custom breakpoints needed
 - Desktop layout unchanged
+
+### Item Card Layout Unification Pattern
+
+# Item Card Layout Unification Pattern
+
+**Date:** 2026-03-20  
+**Author:** Wash (Frontend Dev)  
+**Issue:** #100 — Item card in share_target file has former layout  
+**Status:** Implemented ✅
+
+## Decision
+
+Extract shared UI card layouts into reusable rendering functions when the same card structure appears in multiple contexts.
+
+## Context
+
+The space-view feature renders item cards in two contexts:
+1. **Regular items list** — Items already in the space
+2. **Pending shares section** — Items shared from external apps via share_target API (stored in IndexedDB)
+
+Over time, these two contexts drifted:
+- Pending shares used old styling: `border-slate-700/50 bg-slate-900/40 px-3 py-2`, 18px icons
+- Regular items used new styling: `border-slate-800 bg-slate-900/60 px-4 py-3`, 24px icons
+
+The layout inconsistency was a UX regression and violated DRY principles.
+
+## Implementation
+
+Created `renderUnifiedItemCard(content, overlay?)` method that:
+- Owns the card shell (`<li>` wrapper with border, background, padding)
+- Accepts content template as parameter (icon + text + actions)
+- Optionally accepts overlay template (e.g., delete confirmation)
+
+Both `renderItemCard()` and `renderPendingSharesSection()` now call this unified function.
+
+**File:** `src/SharedSpaces.Client/src/features/space-view/space-view.ts` (line 1038)
+
+## Benefits
+
+1. **Single source of truth** — Card styling lives in one place
+2. **Prevents regression** — Future style changes only need to update one function
+3. **Consistent UX** — All cards look identical across contexts
+4. **Maintainable** — Easier to test and reason about
+
+## Pattern for Future Work
+
+When you notice duplicate card/list-item layouts:
+1. Extract the outer container into a `renderUnified*` method
+2. Pass content as a template parameter
+3. Use semantic parameter names (e.g., `content`, `actions`, `overlay`)
+4. Document the unification purpose in a JSDoc comment
+
+This pattern applies to any repeated UI structure: modals, pills, badges, etc.
+
+## Related
+
+- Commit: 810fd33
