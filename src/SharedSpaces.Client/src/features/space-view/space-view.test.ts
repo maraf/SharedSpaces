@@ -2183,3 +2183,310 @@ describe('SpaceView - WebSocket Disconnect on Space Switching (Issue #86)', () =
     document.body.removeChild(element1);
   });
 });
+
+describe('SpaceView - Unified Item Card Layout', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  function makeItem(overrides: Partial<SpaceItemResponse> = {}): SpaceItemResponse {
+    return {
+      id: 'item-1',
+      spaceId,
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'Hello world',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === `${serverUrl}:${spaceId}`) return token;
+      return null;
+    });
+
+    mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    globalThis.fetch = mockFetch;
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+    document.body.appendChild(element);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  describe('renderUnifiedItemCard', () => {
+    it('applies the unified card CSS classes', async () => {
+      // Set up an item
+      const item = makeItem({ content: 'Test item' });
+      (element as any).items = [item];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // Query the rendered card - use individual class checks
+      const cards = element.querySelectorAll('li');
+      const card = Array.from(cards).find(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800')
+      );
+      expect(card).toBeTruthy();
+      expect(card?.classList.contains('px-4')).toBe(true);
+      expect(card?.classList.contains('py-3')).toBe(true);
+      expect(card?.classList.contains('relative')).toBe(true);
+      expect(card?.classList.contains('overflow-hidden')).toBe(true);
+    });
+
+    it('renders regular text items with unified card layout', async () => {
+      const item = makeItem({ contentType: 'text', content: 'My test note' });
+      (element as any).items = [item];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const cards = element.querySelectorAll('li');
+      const card = Array.from(cards).find(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800') &&
+        c.textContent?.includes('My test note')
+      );
+      expect(card).toBeTruthy();
+      expect(card?.classList.contains('px-4')).toBe(true);
+      expect(card?.classList.contains('py-3')).toBe(true);
+    });
+
+    it('renders file items with unified card layout', async () => {
+      const item = makeItem({ 
+        contentType: 'file', 
+        content: 'test.pdf',
+        fileSize: 12345,
+        fileName: 'test.pdf'
+      });
+      (element as any).items = [item];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const cards = element.querySelectorAll('li');
+      const card = Array.from(cards).find(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800') &&
+        c.textContent?.includes('test.pdf')
+      );
+      expect(card).toBeTruthy();
+      expect(card?.classList.contains('px-4')).toBe(true);
+      expect(card?.classList.contains('py-3')).toBe(true);
+    });
+  });
+
+  describe('renderPendingSharesSection', () => {
+    it('does not render when there are no pending shares', async () => {
+      (element as any).pendingShares = [];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const sections = element.querySelectorAll('section');
+      const section = Array.from(sections).find(s => s.classList.contains('border-amber-500/30'));
+      expect(section).toBeFalsy();
+    });
+
+    it('renders pending text share with unified card layout', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-1',
+          type: 'text',
+          content: 'Shared text from another app',
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // Verify the pending shares section exists
+      const sections = element.querySelectorAll('section');
+      const section = Array.from(sections).find(s => 
+        s.textContent?.includes('Shared text from another app')
+      );
+      expect(section).toBeTruthy();
+
+      // Verify the unified card layout is used
+      const cards = section?.querySelectorAll('li');
+      const card = Array.from(cards || []).find(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800')
+      );
+      expect(card).toBeTruthy();
+      expect(card?.classList.contains('px-4')).toBe(true);
+      expect(card?.classList.contains('py-3')).toBe(true);
+
+      // Verify content is rendered
+      expect(section?.textContent).toContain('Shared text from another app');
+    });
+
+    it('renders pending file share with unified card layout', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-2',
+          type: 'file',
+          fileName: 'shared-doc.pdf',
+          blob: new Blob(['test']),
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const sections = element.querySelectorAll('section');
+      const section = Array.from(sections).find(s => 
+        s.textContent?.includes('shared-doc.pdf')
+      );
+      expect(section).toBeTruthy();
+
+      // Verify the unified card layout is used
+      const cards = section?.querySelectorAll('li');
+      const card = Array.from(cards || []).find(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800')
+      );
+      expect(card).toBeTruthy();
+      expect(card?.classList.contains('px-4')).toBe(true);
+      expect(card?.classList.contains('py-3')).toBe(true);
+
+      // Verify file name is rendered
+      expect(section?.textContent).toContain('shared-doc.pdf');
+    });
+
+    it('renders Upload and Dismiss buttons for each pending share', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-1',
+          type: 'text',
+          content: 'Test share',
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const sections = element.querySelectorAll('section');
+      const section = Array.from(sections).find(s => 
+        s.textContent?.includes('Test share')
+      );
+      const buttons = section?.querySelectorAll('button');
+      
+      // Should have Upload All, Upload (per item), and Dismiss (per item)
+      expect(buttons?.length).toBeGreaterThanOrEqual(3);
+
+      // Find the Upload button (per item)
+      const uploadButton = Array.from(buttons || []).find(b => 
+        b.textContent?.trim() === 'Upload' && b.title === 'Upload this item'
+      );
+      expect(uploadButton).toBeTruthy();
+
+      // Find the Dismiss button
+      const dismissButton = Array.from(buttons || []).find(b => 
+        b.getAttribute('aria-label') === 'Dismiss shared item'
+      );
+      expect(dismissButton).toBeTruthy();
+    });
+
+    it('renders multiple pending shares each with unified card layout', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-1',
+          type: 'text',
+          content: 'First share',
+        },
+        {
+          id: 'pending-2',
+          type: 'file',
+          fileName: 'document.pdf',
+          blob: new Blob(['test']),
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const sections = element.querySelectorAll('section');
+      const section = Array.from(sections).find(s => 
+        s.textContent?.includes('First share')
+      );
+      
+      const allLis = section?.querySelectorAll('li');
+      const cards = Array.from(allLis || []).filter(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800')
+      );
+      
+      // Should have 2 cards
+      expect(cards.length).toBe(2);
+
+      // Each card should have the unified layout classes
+      cards.forEach(card => {
+        expect(card.classList.contains('px-4')).toBe(true);
+        expect(card.classList.contains('py-3')).toBe(true);
+        expect(card.classList.contains('relative')).toBe(true);
+        expect(card.classList.contains('overflow-hidden')).toBe(true);
+      });
+    });
+
+    it('pending share cards and regular item cards have the same wrapper classes', async () => {
+      // Set up both regular items and pending shares
+      const item = makeItem({ content: 'Regular item' });
+      (element as any).items = [item];
+      (element as any).pendingShares = [
+        {
+          id: 'pending-1',
+          type: 'text',
+          content: 'Pending share',
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // Get all cards
+      const allLis = element.querySelectorAll('li');
+      const allCards = Array.from(allLis).filter(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-slate-800')
+      );
+      expect(allCards.length).toBeGreaterThanOrEqual(2);
+
+      // Verify all cards have the same base classes
+      const expectedClasses = ['relative', 'overflow-hidden', 'rounded-lg', 'border', 'px-4', 'py-3'];
+      allCards.forEach(card => {
+        expectedClasses.forEach(cls => {
+          expect(card.classList.contains(cls)).toBe(true);
+        });
+      });
+    });
+  });
+});
