@@ -136,8 +136,10 @@ async function injectTokens(page: Page, tokens: Record<string, string>) {
 }
 
 async function navigateToAdminSignedIn(page: Page) {
-  // Click the Admin pill in the nav bar
-  await page.click('button[title="Admin panel"]');
+  // Two admin buttons exist (mobile sm:hidden + desktop nav); click the visible one
+  const adminBtns = page.locator('button[title="Admin panel"]');
+  const mobileBtn = adminBtns.first();
+  await (await mobileBtn.isVisible() ? mobileBtn : adminBtns.nth(1)).click();
   await page.waitForSelector('admin-view');
 
   await page.fill('#admin-server-url', SERVER_URL);
@@ -311,12 +313,19 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(500);
 
       // Fill in the client app URL and generate the invitation
-      await page.fill('input[type="url"]', CLIENT_URL);
-      await page.locator('button', { hasText: /Generate/i }).click();
+      const dialog = page.locator('[role="dialog"]');
+      await dialog.locator('input[type="url"]').fill(CLIENT_URL);
+      await dialog.locator('button', { hasText: /Generate/i }).click();
 
       // Wait for the invitation string and QR code to appear
-      await page.waitForSelector('input[readonly][value*="|"]', { timeout: 10_000 });
-      await page.waitForSelector('img[alt*="QR" i], qr-code', { timeout: 10_000 });
+      await page.waitForFunction(
+        () => {
+          const input = document.querySelector('input[readonly]') as HTMLInputElement | null;
+          return input?.value?.includes('|');
+        },
+        { timeout: 10_000 },
+      );
+      await page.waitForSelector('img[alt*="QR" i]', { timeout: 10_000 });
       await page.waitForTimeout(500);
 
       await capture(page, 'admin-invite', vp);
