@@ -7,6 +7,9 @@ import { jwtDecode } from 'jwt-decode';
 import databaseGearSvg from 'bootstrap-icons/icons/database-gear.svg?raw';
 import inboxFillSvg from 'bootstrap-icons/icons/inbox-fill.svg?raw';
 
+// Precomputed SVG variant to avoid per-render string replacements
+const inboxFillSvg14 = inboxFillSvg.replace(/width="16"/, 'width="14"').replace(/height="16"/, 'height="14"');
+
 import './features/admin/admin-view';
 import './features/join/join-view';
 import './features/space-view/space-view';
@@ -65,9 +68,23 @@ export class AppShell extends BaseElement {
 
   private headerElement?: HTMLElement;
   private headerResizeObserver?: ResizeObserver;
+  private mobileMediaQuery?: MediaQueryList;
 
   private handleOnline = () => { this.isOnline = true; };
   private handleOffline = () => { this.isOnline = false; };
+
+  private handleBreakpointChange = (e: MediaQueryListEvent) => {
+    if (!e.matches && this.sheetOpen) {
+      this.sheetOpen = false;
+      document.body.classList.remove('overflow-hidden');
+    }
+  };
+
+  private handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && this.sheetOpen) {
+      this.sheetOpen = false;
+    }
+  };
 
   override connectedCallback() {
     super.connectedCallback();
@@ -89,6 +106,10 @@ export class AppShell extends BaseElement {
     this.refreshPendingShareCount();
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.addEventListener('pending-shares-changed', this.handlePendingSharesChanged);
+
+    this.mobileMediaQuery = window.matchMedia?.('(max-width: 639px)');
+    this.mobileMediaQuery?.addEventListener?.('change', this.handleBreakpointChange);
+    document.addEventListener('keydown', this.handleKeyDown);
   }
 
   override firstUpdated() {
@@ -116,6 +137,9 @@ export class AppShell extends BaseElement {
     this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
     this.headerResizeObserver?.disconnect();
     document.documentElement.style.removeProperty('--header-height');
+    this.mobileMediaQuery?.removeEventListener?.('change', this.handleBreakpointChange);
+    document.removeEventListener('keydown', this.handleKeyDown);
+    document.body.classList.remove('overflow-hidden');
   }
 
   override willUpdate(changed: Map<string, unknown>) {
@@ -319,7 +343,7 @@ export class AppShell extends BaseElement {
             </div>
 
             <!-- Desktop pill nav — hidden on mobile -->
-            <nav class="hidden sm:flex items-center gap-2 flex-wrap">
+            <nav class="hidden sm:flex items-center gap-2 flex-wrap" data-testid="desktop-pills">
               ${this.pendingShareCount > 0
                 ? html`
                   <button
@@ -328,8 +352,9 @@ export class AppShell extends BaseElement {
                       ? 'border-amber-500 bg-amber-950/60 text-amber-300'
                       : 'border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60'}"
                     title="Items shared from other apps"
+                    data-testid="pending-shares-pill"
                   >
-                    <span class="inline-flex w-4 h-4 shrink-0">${unsafeHTML(inboxFillSvg.replace(/width="16"/, 'width="16"').replace(/height="16"/, 'height="16"'))}</span> ${this.pendingShareCount}
+                    <span class="inline-flex w-4 h-4 shrink-0">${unsafeHTML(inboxFillSvg)}</span> ${this.pendingShareCount}
                   </button>
                 `
                 : nothing}
@@ -396,16 +421,19 @@ export class AppShell extends BaseElement {
     );
     return html`
       <div
-        class="fixed bottom-0 left-0 right-0 z-30 sm:hidden border-t border-slate-800 bg-slate-900 cursor-pointer select-none"
+        class="fixed bottom-0 left-0 right-0 z-30 sm:hidden border-t border-slate-800 bg-slate-900 select-none"
         style="padding-bottom: max(0.75rem, env(safe-area-inset-bottom))"
-        @click=${() => {
-          this.sheetOpen = true;
-        }}
+        data-testid="bottom-bar"
       >
         <div
           class="mx-auto max-w-5xl flex items-center justify-between px-4 pt-3"
         >
-          <div class="flex items-center gap-2.5 min-w-0">
+          <button
+            type="button"
+            class="flex items-center gap-2.5 min-w-0 cursor-pointer bg-transparent border-none p-0"
+            @click=${() => { this.sheetOpen = !this.sheetOpen; }}
+            aria-label=${this.sheetOpen ? 'Close spaces sheet' : 'Open spaces sheet'}
+          >
             ${activeSpace
               ? html`
                   <span
@@ -422,7 +450,7 @@ export class AppShell extends BaseElement {
                       : 'Join a space'}
                   </span>
                 `}
-          </div>
+          </button>
           <div class="flex items-center gap-2 shrink-0">
             ${this.pendingShareCount > 0
               ? html`
@@ -430,28 +458,33 @@ export class AppShell extends BaseElement {
                   type="button"
                   class="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-950/60 px-2 py-0.5 text-xs text-amber-300"
                   title="Pending shares"
-                  @click=${(e: Event) => {
-                    e.stopPropagation();
-                    this.view = 'pending-shares';
-                  }}
+                  data-testid="pending-shares-bar"
+                  @click=${() => { this.view = 'pending-shares'; }}
                 >
-                  <span class="inline-flex w-3.5 h-3.5 shrink-0">${unsafeHTML(inboxFillSvg.replace(/width="16"/, 'width="14"').replace(/height="16"/, 'height="14"'))}</span> ${this.pendingShareCount}
+                  <span class="inline-flex w-3.5 h-3.5 shrink-0">${unsafeHTML(inboxFillSvg14)}</span> ${this.pendingShareCount}
                 </button>
               `
               : nothing}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            fill="currentColor"
-            viewBox="0 0 16 16"
-            class="shrink-0 text-slate-500"
-          >
-            <path
-              fill-rule="evenodd"
-              d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"
-            />
-          </svg>
+            <button
+              type="button"
+              class="cursor-pointer bg-transparent border-none p-0"
+              @click=${() => { this.sheetOpen = !this.sheetOpen; }}
+              aria-label=${this.sheetOpen ? 'Close spaces sheet' : 'Open spaces sheet'}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                fill="currentColor"
+                viewBox="0 0 16 16"
+                class="shrink-0 text-slate-500 transition-transform ${this.sheetOpen ? 'rotate-180' : ''}"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"
+                />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -464,6 +497,7 @@ export class AppShell extends BaseElement {
         class="fixed inset-0 z-40 sm:hidden bg-black/50 transition-opacity duration-300 ${this.sheetOpen
           ? 'opacity-100'
           : 'opacity-0 pointer-events-none'}"
+        data-testid="backdrop"
         @click=${() => {
           this.sheetOpen = false;
         }}
@@ -477,7 +511,11 @@ export class AppShell extends BaseElement {
         class="fixed bottom-0 left-0 right-0 z-50 sm:hidden bottom-sheet ${this.sheetOpen
           ? 'bottom-sheet-open'
           : ''}"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sheet-title"
         aria-hidden=${!this.sheetOpen}
+        data-testid="bottom-sheet"
       >
         <div
           class="bg-slate-900 rounded-t-2xl border-t border-slate-700 flex flex-col"
@@ -491,6 +529,7 @@ export class AppShell extends BaseElement {
           <!-- Title -->
           <div class="px-4 py-2">
             <h2
+              id="sheet-title"
               class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
             >
               Spaces
@@ -523,12 +562,13 @@ export class AppShell extends BaseElement {
               ? html`
                   <button
                     class="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-800/60 active:bg-slate-800 transition text-left"
+                    data-testid="pending-shares-sheet"
                     @click=${() => {
                       this.view = 'pending-shares';
                       this.sheetOpen = false;
                     }}
                   >
-                    <span class="inline-flex w-5 shrink-0 items-center justify-center">${unsafeHTML(inboxFillSvg.replace(/width="16"/, 'width="16"').replace(/height="16"/, 'height="16"'))}</span>
+                    <span class="inline-flex w-5 shrink-0 items-center justify-center">${unsafeHTML(inboxFillSvg)}</span>
                     <span class="text-sm text-amber-300 font-medium"
                       >Pending shares</span
                     >
@@ -554,6 +594,7 @@ export class AppShell extends BaseElement {
                   class="w-full flex items-center gap-3 px-3 py-3 rounded-lg transition text-left ${isActive
                     ? 'bg-sky-950/40'
                     : 'hover:bg-slate-800/60 active:bg-slate-800'}"
+                  data-testid="sheet-space-item"
                   @click=${() => {
                     this.selectSpace(entry);
                     this.sheetOpen = false;

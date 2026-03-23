@@ -153,10 +153,11 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       createElement();
       await element.updateComplete;
 
-      // The bottom bar has a click handler that sets sheetOpen = true
+      // The bottom bar toggle button opens the sheet
       const bottomBar = element.querySelector('.fixed.bottom-0.z-30.sm\\:hidden') as HTMLElement;
       expect(bottomBar).toBeTruthy();
-      bottomBar.click();
+      const toggleBtn = bottomBar.querySelector('button') as HTMLElement;
+      toggleBtn.click();
       await element.updateComplete;
 
       expect((element as any).sheetOpen).toBe(true);
