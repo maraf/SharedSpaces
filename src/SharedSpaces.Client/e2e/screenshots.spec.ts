@@ -296,5 +296,30 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(500);
       await capture(page, 'space-delete-confirm', vp);
     });
+
+    test(`admin view - invitation modal - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await navigateToAdminSignedIn(page);
+
+      // Click the invite button on the first space card to open the modal
+      const inviteButton = page.locator('button', { hasText: /Invite/ }).first();
+      await inviteButton.click();
+      await page.waitForSelector('[role="dialog"]');
+      await page.waitForTimeout(500);
+
+      // Fill in the client app URL and generate the invitation
+      await page.fill('input[placeholder*="URL" i], input[id*="url" i]', CLIENT_URL);
+      await page.locator('button', { hasText: /Generate/i }).click();
+
+      // Wait for the invitation string and QR code to appear
+      await page.waitForSelector('input[readonly][value*="|"]', { timeout: 10_000 });
+      await page.waitForSelector('img[alt*="QR" i], qr-code', { timeout: 10_000 });
+      await page.waitForTimeout(500);
+
+      await capture(page, 'admin-invite', vp);
+    });
   }
 });
