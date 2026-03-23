@@ -756,3 +756,17 @@ Prevents layout drift when one card context is updated but not the other. Single
 **Issue #100 completed.** Wash extracted `renderUnifiedItemCard()` in space-view.ts to unify item card rendering across regular items list and pending shares section. Pattern established for future unified UI layouts.
 
 **Related:** Zoe writing tests for unified layout (in progress).
+
+## Learnings — Invitation Modal Mobile Layout Fix (Issue #95)
+
+- **Mobile-responsive flex container pattern:** Use `flex-col sm:flex-row` on parent container to stack vertically on mobile (< 640px) and horizontally on desktop. Established pattern from member modal fix.
+- **Full-width mobile buttons:** Add `w-full sm:w-auto` to buttons so they span full width on mobile but stay auto-sized on desktop. Improves touch targets and prevents awkward side-by-side squishing.
+- **Responsive images with max-width:** Replace hardcoded inline styles (`style="width: 200px; height: 200px;"`) with Tailwind classes `w-[200px] max-w-full h-auto` so images scale down gracefully on narrow screens while maintaining aspect ratio.
+- **Consistency is key:** The admin view now uses the same responsive pattern throughout — member modal, invitation modal, and pending shares all follow `flex-col sm:flex-row` + `w-full sm:w-auto` conventions.
+
+**Key Files:**
+- `src/SharedSpaces.Client/src/features/admin/admin-view.ts` — renderInviteModalContent (line ~1145) + renderGeneratedInvitation (line ~1190)
+
+**Branch/Commit:**
+- Branch: `squad/95-invitation-mobile-wrap`
+- Commit: c4cbaf0
