@@ -760,3 +760,31 @@ When implementing the auto-grow feature:
 - `[data-testid="sheet-space-item"]` selects individual space entries without needing to filter out Join/Pending/Admin buttons
 - Escape key handling is a document-level `keydown` listener, testable via `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`
 - Breakpoint cleanup (`handleBreakpointChange`) can be tested by calling the handler directly with a synthetic event
+
+## Team Update (2026-03-25 — Issue #95 — Invitation Modal Screenshot Test)
+
+**Status:** ✅ Done
+**Branch:** squad/95-invitation-mobile-wrap
+**Commit:** 1c34dd1
+
+**What changed:**
+- Added Playwright screenshot test for admin invitation modal in `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
+- New test captures `admin-invite-desktop.png` and `admin-invite-mobile.png` (1280×800 and 390×844 viewports)
+- Test flow: navigate to admin view → click Invite button on space card → fill client URL → click Generate → wait for invitation string + QR code → capture screenshot
+
+**Test selectors:**
+- Invite button: `page.locator('button', { hasText: /Invite/ }).first()`
+- Modal detection: `[role="dialog"]`
+- URL input: `input[placeholder*="URL" i], input[id*="url" i]`
+- Generate button: `page.locator('button', { hasText: /Generate/i })`
+- Invitation string: `input[readonly][value*="|"]` (waits for pipe-delimited format)
+- QR code: `img[alt*="QR" i], qr-code` (supports both img and custom element)
+
+## Learnings
+
+- Screenshot tests follow consistent pattern: navigate → interact → waitForSelector → waitForTimeout (stabilization) → capture
+- `navigateToAdminSignedIn` helper reused from existing tests — signs into admin panel and waits for "Members (N)" text to appear
+- Use flexible selectors for input fields with case-insensitive matching: `input[placeholder*="URL" i]`
+- QR code elements may be either `<img>` with alt text or custom `<qr-code>` web components — selector covers both
+- Invitation string has pipe-delimited format (`server|spaceId|pin`) — use `[value*="|"]` to wait for generated value
+- Screenshot tests do NOT run in CI environment — they require running backend server
