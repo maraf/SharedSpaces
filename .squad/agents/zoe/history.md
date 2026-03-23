@@ -712,3 +712,23 @@ When implementing the auto-grow feature:
 **Key Decision:**
 - Sort logic placed at data level (not template) to ensure consistency through dynamic updates
 - `localeCompare` provides correct handling of accented characters and locale-specific sorting
+
+## Team Updates (2026-03-20)
+
+**Zoe completed bottom sheet mobile navigation tests (Issue #99):**
+- **File:** `src/SharedSpaces.Client/src/app-shell-bottom-sheet.test.ts`
+- **Coverage:** 30 Vitest tests across 7 describe blocks:
+  - Sheet toggle (5 tests): initial state, open via bottom bar click, close via backdrop, CSS class toggling, aria-hidden
+  - Sheet close on selection (2 tests): space click closes sheet + navigates, join click closes sheet
+  - Pending shares visibility (6 tests): conditional rendering in bottom bar, sheet, and desktop nav based on pendingShareCount
+  - Pending shares navigation (2 tests): bottom bar pill sets view without opening sheet (stopPropagation), sheet entry navigates + closes
+  - Body scroll lock (4 tests): overflow-hidden added on mobile open, removed on close, skipped on desktop, cleanup on viewport change
+  - Desktop vs mobile rendering (9 tests): structural assertions on CSS responsive classes, bottom bar content states, sheet space listing + active marking
+  - Admin gear on mobile (2 tests): header placement with sm:hidden, navigation on click
+- **Key Pattern:** `getToken` mock must return tokens for space-view's `resolveToken()` to prevent downstream navigation side-effects during selectSpace tests
+- **Verification:** All 365 client tests pass ✅ (30 new + 335 existing)
+- **Branch:** `squad/99-pill-wrapping-research`, commit 2fa712b
+
+## Team Update (2026-03-23)
+
+**Issue #100:** Wash unified item card rendering (renderUnifiedItemCard). Zoe now writing tests for unified layout.
