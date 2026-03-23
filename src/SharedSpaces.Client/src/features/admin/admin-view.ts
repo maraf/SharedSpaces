@@ -1142,7 +1142,7 @@ export class AdminView extends BaseElement {
           <label class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
             Client App URL
           </label>
-          <div class="flex gap-3">
+          <div class="flex flex-col sm:flex-row gap-3">
             <input
               type="url"
               .value=${state.clientAppUrl}
@@ -1158,7 +1158,7 @@ export class AdminView extends BaseElement {
               type="button"
               @click=${() => this.handleGenerateInvitation(spaceId)}
               ?disabled=${state.isGeneratingInvitation}
-              class="shrink-0 rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+              class="w-full sm:w-auto shrink-0 rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
               ${state.isGeneratingInvitation ? 'Generating…' : 'Generate'}
             </button>
@@ -1187,7 +1187,7 @@ export class AdminView extends BaseElement {
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
             Invitation String
           </p>
-          <div class="flex gap-2">
+          <div class="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               readonly
@@ -1197,7 +1197,7 @@ export class AdminView extends BaseElement {
             <button
               type="button"
               @click=${() => this.handleCopyInvitation(invitation.invitationString)}
-              class="rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
+              class="w-full sm:w-auto rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
               title="Copy to clipboard"
             >
               📋 Copy
@@ -1214,8 +1214,7 @@ export class AdminView extends BaseElement {
                 <img
                   src="data:image/png;base64,${invitation.qrCodeBase64}"
                   alt="QR Code"
-                  class="rounded border border-emerald-800 bg-white p-2"
-                  style="width: 200px; height: 200px;"
+                  class="w-[200px] max-w-full h-auto rounded border border-emerald-800 bg-white p-2"
                 />
               </div>
             `
