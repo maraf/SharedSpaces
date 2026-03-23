@@ -696,3 +696,32 @@ Fixed duplicate item bug in Web Share Target flow by adding pendingItemIds track
 **Key Decision:**
 - Use `localeCompare` with `sensitivity: 'base'` for locale-aware, case-insensitive sorting
 - Sort at data-setter level (not template) to maintain order through dynamic updates
+
+
+## Learnings
+
+### Issue #100: Item Card Layout Unification (2026-03-20)
+
+**Status:** ✅ Done  
+**Branch:** squad/100-item-card-layout  
+**Commit:** 810fd33
+
+**Problem:**  
+Pending shares from share_target API rendered with outdated card styling:
+- Old: `border-slate-700/50 bg-slate-900/40 px-3 py-2` with 18px icons
+- New: `border-slate-800 bg-slate-900/60 px-4 py-3` with 24px icons
+
+**Solution:**  
+Created `renderUnifiedItemCard(content, overlay?)` method extracted from existing `renderItemCard()` to ensure both regular items and pending shares use identical card layout. The unified function owns:
+- Card container: `<li>` with border, background, padding, and overflow styles
+- Flex layout for content
+- Optional overlay (used for delete confirmation)
+
+**Pattern Established:**  
+When two UI contexts render similar cards, extract the card shell into a shared rendering function. Pass the content as a template parameter rather than duplicating the entire card structure.
+
+**Key Files:**
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — unified card renderer at line 1038
+
+**Why This Matters:**  
+Prevents layout drift when one card context is updated but not the other. Single source of truth for card styling reduces future maintenance burden.
