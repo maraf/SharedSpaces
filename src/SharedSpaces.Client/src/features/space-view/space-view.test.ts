@@ -2336,11 +2336,12 @@ describe('SpaceView - Unified Item Card Layout', () => {
       const card = Array.from(cards || []).find(c => 
         c.classList.contains('rounded-lg') && 
         c.classList.contains('border') && 
-        c.classList.contains('border-slate-800')
+        c.classList.contains('border-amber-500/40')
       );
       expect(card).toBeTruthy();
       expect(card?.classList.contains('px-4')).toBe(true);
       expect(card?.classList.contains('py-3')).toBe(true);
+      expect(card?.classList.contains('bg-amber-950/20')).toBe(true);
 
       // Verify content is rendered
       expect(section?.textContent).toContain('Shared text from another app');
@@ -2365,16 +2366,17 @@ describe('SpaceView - Unified Item Card Layout', () => {
       );
       expect(section).toBeTruthy();
 
-      // Verify the unified card layout is used
+      // Verify the unified card layout is used with amber variant
       const cards = section?.querySelectorAll('li');
       const card = Array.from(cards || []).find(c => 
         c.classList.contains('rounded-lg') && 
         c.classList.contains('border') && 
-        c.classList.contains('border-slate-800')
+        c.classList.contains('border-amber-500/40')
       );
       expect(card).toBeTruthy();
       expect(card?.classList.contains('px-4')).toBe(true);
       expect(card?.classList.contains('py-3')).toBe(true);
+      expect(card?.classList.contains('bg-amber-950/20')).toBe(true);
 
       // Verify file name is rendered
       expect(section?.textContent).toContain('shared-doc.pdf');
@@ -2441,7 +2443,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
       const cards = Array.from(allLis || []).filter(c => 
         c.classList.contains('rounded-lg') && 
         c.classList.contains('border') && 
-        c.classList.contains('border-slate-800')
+        c.classList.contains('border-amber-500/40')
       );
       
       // Should have 2 cards
@@ -2456,7 +2458,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
       });
     });
 
-    it('pending share cards and regular item cards have the same wrapper classes', async () => {
+    it('pending share cards and regular item cards share the same base layout classes', async () => {
       // Set up both regular items and pending shares
       const item = makeItem({ content: 'Regular item' });
       (element as any).items = [item];
@@ -2471,18 +2473,26 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      // Get all cards
+      // Get regular item cards (border-slate-800)
       const allLis = element.querySelectorAll('li');
-      const allCards = Array.from(allLis).filter(c => 
+      const regularCards = Array.from(allLis).filter(c => 
         c.classList.contains('rounded-lg') && 
         c.classList.contains('border') && 
         c.classList.contains('border-slate-800')
       );
-      expect(allCards.length).toBeGreaterThanOrEqual(2);
+      expect(regularCards.length).toBeGreaterThanOrEqual(1);
 
-      // Verify all cards have the same base classes
+      // Get pending share cards (border-amber-500/40)
+      const pendingCards = Array.from(allLis).filter(c => 
+        c.classList.contains('rounded-lg') && 
+        c.classList.contains('border') && 
+        c.classList.contains('border-amber-500/40')
+      );
+      expect(pendingCards.length).toBeGreaterThanOrEqual(1);
+
+      // Verify all cards share the same base layout classes
       const expectedClasses = ['relative', 'overflow-hidden', 'rounded-lg', 'border', 'px-4', 'py-3'];
-      allCards.forEach(card => {
+      [...regularCards, ...pendingCards].forEach(card => {
         expectedClasses.forEach(cls => {
           expect(card.classList.contains(cls)).toBe(true);
         });

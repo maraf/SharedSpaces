@@ -837,7 +837,7 @@ export class SpaceView extends BaseElement {
 
     return html`
       <section
-        class="rounded-lg border border-amber-500/30 bg-amber-950/20 p-4 space-y-3"
+        class="space-y-3"
       >
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm font-medium text-amber-300">
@@ -879,7 +879,7 @@ export class SpaceView extends BaseElement {
                 </p>
               </div>
               <!-- Right: Actions -->
-              <div class="flex shrink-0 items-center gap-1">
+              <div class="-mr-2 flex shrink-0 items-center gap-1">
                 <button
                   @click=${() => this.uploadPendingShare(share)}
                   ?disabled=${this.isUploading}
@@ -899,7 +899,7 @@ export class SpaceView extends BaseElement {
               </div>
             `;
 
-            return this.renderUnifiedItemCard(content);
+            return this.renderUnifiedItemCard(content, undefined, 'border-amber-500/40', 'bg-amber-950/20');
           })}
         </ul>
       </section>
@@ -1039,10 +1039,12 @@ export class SpaceView extends BaseElement {
   private renderUnifiedItemCard(
     content: TemplateResult | typeof nothing,
     overlay?: TemplateResult | typeof nothing,
+    borderClass = 'border-slate-800',
+    bgClass = 'bg-slate-900/60',
   ) {
     return html`
       <li
-        class="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3"
+        class="relative overflow-hidden rounded-lg border ${borderClass} ${bgClass} px-4 py-3"
       >
         <div class="flex items-center gap-3">
           ${content}
@@ -1124,7 +1126,7 @@ export class SpaceView extends BaseElement {
         </p>
       </div>
       <!-- Right: Actions -->
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderCopyButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
@@ -1151,7 +1153,7 @@ export class SpaceView extends BaseElement {
         </p>
       </div>
       <!-- Right: Actions -->
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderDownloadButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
