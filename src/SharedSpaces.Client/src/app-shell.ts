@@ -540,12 +540,7 @@ export class AppShell extends BaseElement {
                 this.sheetOpen = false;
               }}
             >
-              <span class="inline-flex w-5 shrink-0 items-center justify-center">
-                <span
-                  class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-sky-500/50 text-sky-400 text-xs"
-                  >+</span
-                >
-              </span>
+              <span class="inline-flex w-5 shrink-0 items-center justify-center text-sky-400 text-sm">+</span>
               <span class="text-sm text-sky-400 font-medium"
                 >Join new space</span
               >
