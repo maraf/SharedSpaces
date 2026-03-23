@@ -879,7 +879,7 @@ export class SpaceView extends BaseElement {
                 </p>
               </div>
               <!-- Right: Actions -->
-              <div class="flex shrink-0 items-center gap-1">
+              <div class="-mr-2 flex shrink-0 items-center gap-1">
                 <button
                   @click=${() => this.uploadPendingShare(share)}
                   ?disabled=${this.isUploading}
@@ -1124,7 +1124,7 @@ export class SpaceView extends BaseElement {
         </p>
       </div>
       <!-- Right: Actions -->
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderCopyButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
@@ -1151,7 +1151,7 @@ export class SpaceView extends BaseElement {
         </p>
       </div>
       <!-- Right: Actions -->
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderDownloadButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
