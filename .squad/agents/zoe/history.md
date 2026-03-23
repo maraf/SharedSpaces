@@ -732,3 +732,31 @@ When implementing the auto-grow feature:
 ## Team Update (2026-03-23)
 
 **Issue #100:** Wash unified item card rendering (renderUnifiedItemCard). Zoe now writing tests for unified layout.
+## Team Update (2026-03-23 — Issue #99 / PR #101 — data-testid Migration)
+
+**Status:** ✅ Done
+**Branch:** squad/99-pill-wrapping-research
+**Commit:** 16370c4
+
+**What changed:**
+- Migrated all 26 bottom sheet tests from fragile Tailwind class selectors to stable `data-testid` queries
+- Replaced selectors like `.fixed.bottom-0.z-30.sm\\:hidden`, `.bottom-sheet`, `.fixed.inset-0.z-40`, `nav.hidden.sm\\:flex` with `[data-testid="bottom-bar"]`, `[data-testid="bottom-sheet"]`, `[data-testid="backdrop"]`, `[data-testid="desktop-pills"]`
+- Replaced `[title="Pending shares"]` with `[data-testid="pending-shares-bar"]` / `[data-testid="pending-shares-sheet"]` / `[data-testid="pending-shares-pill"]`
+- Admin gear button selector changed from `button.sm\\:hidden[aria-label="Admin panel"]` to `button[aria-label="Admin panel"]` (aria-label is stable)
+
+**New tests added (5):**
+- Escape key closes the sheet
+- Escape key no-op when sheet already closed
+- Chevron gets `rotate-180` when sheet is open
+- Chevron has no rotation when sheet is closed
+- Breakpoint change handler closes sheet and removes scroll lock
+
+**Test count:** 370 total (365 → 370), all passing
+
+## Learnings
+
+- Prefer `data-testid` selectors over Tailwind class selectors in tests — classes change on refactors, test IDs are stable contracts
+- Use `aria-label` as fallback selector when no data-testid exists — accessible attributes are also stable
+- `[data-testid="sheet-space-item"]` selects individual space entries without needing to filter out Join/Pending/Admin buttons
+- Escape key handling is a document-level `keydown` listener, testable via `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`
+- Breakpoint cleanup (`handleBreakpointChange`) can be tested by calling the handler directly with a synthetic event
