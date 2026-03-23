@@ -311,7 +311,7 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(500);
 
       // Fill in the client app URL and generate the invitation
-      await page.fill('input[placeholder*="URL" i], input[id*="url" i]', CLIENT_URL);
+      await page.fill('input[type="url"]', CLIENT_URL);
       await page.locator('button', { hasText: /Generate/i }).click();
 
       // Wait for the invitation string and QR code to appear
