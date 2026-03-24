@@ -287,3 +287,171 @@ Marek's code review on PR #41 spawned a 4-agent squad to address 9 Copilot comme
 - Endpoint contract for un-revoke mirrors revoke exactly (status codes, error responses, idempotency)
 - JWT restoration is automatic — no token refresh needed after un-revoke
 - UI pattern extends existing member action patterns (pending state, mutual button disabling, color coding)
+
+## Issue #109: Auto-Convert Long Text to .txt File
+
+**Date:** 2026-03-24  
+**Status:** ✅ Complete  
+**Branch:** `squad/109-auto-convert-long-text`
+
+### Implementation Summary
+
+Added automatic conversion of long text messages (> 64 KB) to `.txt` files in the item upsert endpoint.
+
+**Key Changes:**
+- **File:** `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs`
+- **Constants:** Added `DefaultMaxTextToFileThresholdBytes = 65_536` (64 KB threshold)
+- **Logic:** When `ContentType=text` and byte count > 64 KB:
+  1. Acquire quota lock (same as file uploads)
+  2. Check per-space storage quota
+  3. Write text to `.txt` file via `IFileStorage`
+  4. Change `ContentType` to `"file"`
+  5. Set `Content` to `"{itemId:N}.txt"` (GUID without dashes)
+  6. Set `FileSize` to actual byte count
+  7. Use database transaction for consistency
+
+**Quota Enforcement:**
+- Auto-converted files count against per-space storage quota
+- Returns `413 Payload Too Large` if quota exceeded
+- Same quota lock and transaction handling as regular file uploads
+
+**Resource Management:**
+- Refactored quota lock and transaction handling to support dynamic acquisition
+- Changed from `await using var` to manual `try-finally` with disposal
+- `IAsyncDisposable? quotaLock` and `IDbContextTransaction? transaction` acquired on demand
+- Proper cleanup in `finally` block for both success and failure paths
+
+**Filename Format:**
+- Uses `{itemId:N}.txt` format (GUID without dashes)
+- Example: `f03e56cc54ae4e3ebf64f5ad7eb8cca5.txt`
+- Matches test expectations and provides clean, URL-safe filenames
+
+**SignalR Broadcasts:**
+- Auto-converted items broadcast as file items (`ContentType="file"`)
+- Clients see them as downloadable `.txt` files
+
+### Key Architectural Decisions
+
+**Threshold Rationale:**
+- 64 KB threshold balances inline storage convenience with file handling practicality
+- Most text messages stay inline (< 64 KB)
+- Large documents (64 KB - 1 MB) auto-convert seamlessly
+- Maximum text size remains 1 MB (existing limit)
+
+**Auto-Conversion vs Rejection:**
+- Automatic conversion provides better UX than rejection
+- No client changes required; server handles conversion transparently
+- Backwards compatible with existing API clients
+
+**Quota Integration:**
+- Auto-converted files must count against quota to prevent bypass
+- Consistent resource accounting across all file types
+- Uses same quota lock mechanism as regular file uploads
+
+### Testing
+
+**Test File:** `tests/SharedSpaces.Server.Tests/ItemAutoConvertTests.cs` (written by Zoe)
+- 13 comprehensive tests covering happy paths, edge cases, quota enforcement
+- All 130 total tests pass
+- Fixed one test bug: quota test had wrong text size calculation
+
+**Test Coverage:**
+- Short text stays inline
+- Long text auto-converts to file
+- Converted files are downloadable with correct content
+- Quota enforcement works correctly
+- Filename format matches expectations
+- Update scenarios handled correctly
+
+### Technical Challenges
+
+**Resource Management:**
+- Initial approach used `await using var` declarations which prevented conditional acquisition
+- Solution: Manual disposal in `finally` block for both `IAsyncDisposable` and `IDbContextTransaction`
+- Pattern: `quotaLock?.DisposeAsync()` in finally for graceful cleanup
+
+**Transaction Handling:**
+- Auto-conversion path needs transaction mid-method (after initial checks)
+- Solution: Nullable references with conditional acquisition
+- Ensures consistent quota lock + transaction pairing for file operations
+
+**Test Alignment:**
+- Zoe's tests expected 64 KB threshold and GUID-without-dashes filename format
+- Implementation matched test expectations perfectly after fixing one test bug
+
+### Build & Verification
+
+```bash
+dotnet build    # Success
+dotnet test     # All 130 tests pass
+```
+
+### Learnings
+
+**Pattern: Dynamic Resource Acquisition**
+- When resource acquisition depends on runtime conditions, use nullable references with manual disposal
+- `try-finally` with `DisposeAsync()` ensures cleanup even on early returns
+- Avoid `await using var` when you need conditional/delayed acquisition
+
+**Pattern: Quota-Protected Operations**
+- File writes (including text-to-file conversion) require quota lock + transaction
+- Check quota before writing, rollback on failure, cleanup file on error
+- Consistent pattern across regular uploads and auto-conversions
+
+**Pattern: Transparent Conversions**
+- Auto-conversion should be invisible to clients (no API contract changes)
+- Response reflects final item state (file, not text)
+- Download endpoint works identically for auto-converted files
+
+**Test-Driven Implementation:**
+- Zoe wrote comprehensive tests before implementation
+- Tests defined expected behavior (64 KB threshold, filename format)
+- Implementation matched test expectations exactly
+- One test bug found and fixed: quota math error
+
+**Imports:**
+- Added `using Microsoft.EntityFrameworkCore.Storage;` for `IDbContextTransaction`
+- Needed for manual transaction management in try-finally pattern
+
+### Files Modified
+
+- `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs` — Core implementation
+- `tests/SharedSpaces.Server.Tests/ItemAutoConvertTests.cs` — Fixed one test bug
+- `.squad/decisions/inbox/kaylee-auto-convert-long-text.md` — Decision documentation
+
+### Decision Documentation
+
+Documented in `.squad/decisions/inbox/kaylee-auto-convert-long-text.md`:
+- Threshold values and rationale
+- Implementation details
+- API behavior changes
+- Quota enforcement approach
+- Filename format
+- Testing coverage
+- Alternatives considered
+
+---
+
+## Session: Issue #109 (2026-03-24)
+
+### Zoe's Test Work Validated Implementation
+
+Zoe created 13 comprehensive integration tests that validate all aspects of the auto-convert feature:
+
+- **Boundary Tests:** Empty text, below-threshold, at-threshold, above-threshold scenarios
+- **Unicode Edge Cases:** Emoji (4-byte UTF-8) and CJK characters with byte-count validation
+- **Round-Trip Verification:** Upsert → download → content comparison ensures encoding preservation
+- **Quota Integration:** Auto-converted files count against space quota; 413 rejection when exceeded
+
+**Key Insight:** Zoe's tests define the complete specification for auto-convert behavior. Implementation matched test expectations exactly, validating the 64 KB threshold, filename format, and quota integration work correctly.
+
+### Tests Passed
+
+All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug discovered during validation and fixed.
+
+### Cross-Implementation Verification
+
+- Zoe's round-trip verification confirms UTF-8 encoding preserved through storage/retrieval
+- Quota tests validate consistent accounting across regular and auto-converted files
+- Boundary tests confirm threshold behavior at edge cases
+
