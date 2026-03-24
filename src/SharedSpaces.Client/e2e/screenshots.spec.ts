@@ -242,7 +242,7 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space-dead-auth', vp);
     });
 
-    test(`space view - dead space (network) - ${vp.name}`, async ({ page }) => {
+    test(`space view - server unreachable - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       // Build a decodable JWT pointing to a non-existent server
       const deadServer = 'http://localhost:19999';
@@ -256,7 +256,102 @@ test.describe('Screenshot Capture', () => {
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
       await page.waitForTimeout(3000);
-      await capture(page, 'space-dead-network', vp);
+      await capture(page, 'space-server-unreachable', vp);
+    });
+
+    test(`space view - offline - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Set offline before navigating to space
+      await page.context().setOffline(true);
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(2000);
+      await capture(page, 'space-offline', vp);
+      // Restore online state for subsequent tests
+      await page.context().setOffline(false);
+    });
+
+    test(`space view - pending uploads - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Navigate to space and wait for items to load
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      // Directly set the component's reactive state to show pending uploads
+      // (IDB-based injection gets auto-synced by the service worker when online)
+      await page.evaluate(() => {
+        const sv = document.querySelector('space-view') as any;
+        if (sv) {
+          sv.offlineQueueItems = [
+            { id: '1', itemId: 'a1', spaceId: 'x', serverUrl: 'y', type: 'text', content: 'This message is waiting to be uploaded', timestamp: Date.now() },
+            { id: '2', itemId: 'a2', spaceId: 'x', serverUrl: 'y', type: 'file', fileName: 'presentation.pdf', fileType: 'application/pdf', timestamp: Date.now() - 30000 },
+          ];
+          sv.offlineQueueCount = 2;
+        }
+      });
+      await page.waitForTimeout(500);
+      await capture(page, 'space-pending-uploads', vp);
+    });
+
+    test(`space view - server unreachable with pending - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      // Build a decodable JWT pointing to a non-existent server
+      const deadServer = 'http://localhost:19999';
+      const deadSpaceId = '00000000-0000-0000-0000-000000000001';
+      const fakeJwt = buildFakeJwt({ server_url: deadServer, space_id: deadSpaceId, space_name: 'Unreachable Space' });
+      const fakeTokenMap: Record<string, string> = {};
+      fakeTokenMap[`${deadServer}:${deadSpaceId}`] = fakeJwt;
+      await injectTokens(page, fakeTokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+
+      // Pre-populate offline queue with pending items for this dead server
+      await page.evaluate(({ serverUrl, spaceId }) => {
+        return new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open('shared-spaces-db', 1);
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const db = request.result;
+            const tx = db.transaction('offline-queue', 'readwrite');
+            const store = tx.objectStore('offline-queue');
+            
+            store.put({
+              id: crypto.randomUUID(),
+              itemId: crypto.randomUUID(),
+              spaceId,
+              serverUrl,
+              type: 'text',
+              content: 'Failed to sync: server unreachable',
+              timestamp: Date.now() - 60000,
+            });
+            store.put({
+              id: crypto.randomUUID(),
+              itemId: crypto.randomUUID(),
+              spaceId,
+              serverUrl,
+              type: 'file',
+              fileName: 'report.docx',
+              fileType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              timestamp: Date.now() - 120000,
+            });
+
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          };
+        });
+      }, { serverUrl: deadServer, spaceId: deadSpaceId });
+
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(3000);
+      await capture(page, 'space-server-unreachable-with-pending', vp);
     });
 
     test(`admin view signed-in - ${vp.name}`, async ({ page }) => {

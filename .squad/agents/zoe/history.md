@@ -788,3 +788,31 @@ When implementing the auto-grow feature:
 - QR code elements may be either `<img>` with alt text or custom `<qr-code>` web components — selector covers both
 - Invitation string has pipe-delimited format (`server|spaceId|pin`) — use `[value*="|"]` to wait for generated value
 - Screenshot tests do NOT run in CI environment — they require running backend server
+
+## Learnings (2026-03-20 - Offline Screenshot Specs)
+
+**Updated Playwright screenshot spec for offline UI states (Issue #107):**
+
+- Renamed existing `space-dead-network` test to `space-server-unreachable` to reflect new banner-based behavior instead of full-page error
+- Added `space-offline` test: uses `page.context().setOffline(true)` to simulate client being offline; shows "You're offline" banner with compose box available
+- Added `space-pending-uploads` test: injects items into IndexedDB `offline-queue` object store to show "Pending to upload" section; uses `page.evaluate()` with IDB transaction to populate fake queued text/file items
+- Added `space-server-unreachable-with-pending` test: combines dead server JWT (localhost:19999) with pre-populated offline queue to show both server unreachable banner AND pending uploads section
+- All new tests capture both desktop (1280×800) and mobile (390×844) viewports following existing patterns
+
+**IndexedDB injection pattern for offline queue:**
+- Database: `shared-spaces-db`, version 1
+- Object store: `offline-queue`
+- Queue item shape: `{ id, itemId, spaceId, serverUrl, type: 'text'|'file', content/fileName/fileType, timestamp }`
+- Use `page.evaluate()` with Promise wrapper to ensure transaction completes before proceeding
+- After IDB injection, navigate away and back to trigger space-view re-render and pick up queued items
+
+**Offline test timing:**
+- Server unreachable scenarios need 3000ms timeout for connection attempts to fail
+- Client offline scenarios (setOffline) need 2000ms timeout to stabilize
+- Always restore online state with `page.context().setOffline(false)` after offline tests to prevent test contamination
+- IDB injection needs navigation away/back cycle (300ms wait between) to trigger component re-render
+
+**Test selector patterns:**
+- Space pills: `nav button:first-child` / `nav button:last-child`
+- Space view component: `space-view` selector
+- Banner elements will be tested post-implementation by Wash

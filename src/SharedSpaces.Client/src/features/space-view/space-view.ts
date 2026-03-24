@@ -24,13 +24,14 @@ import {
   getPendingShares,
   removePendingShare,
   clearOfflineQueueForSpace,
+  getOfflineQueueForSpace,
   type PendingShareItem,
+  type OfflineQueueItem,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
 import { getFileTypeIcon, getTextItemIcon } from '../../lib/file-icons';
 import {
   queueForOffline,
-  getOfflineQueueCount,
   processOfflineQueue,
 } from '../../lib/offline-sync';
 
@@ -59,6 +60,7 @@ export class SpaceView extends BaseElement {
   @state() private isOnline = navigator.onLine;
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private offlineQueueCount = 0;
+  @state() private offlineQueueItems: OfflineQueueItem[] = [];
   @state() private syncMessage = '';
   @state() private deleteConfirmItemId: string | null = null;
 
@@ -126,7 +128,7 @@ export class SpaceView extends BaseElement {
     document.addEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
     this.loadPendingShares();
-    this.refreshOfflineQueueCount();
+    this.refreshOfflineQueue();
   }
 
   override disconnectedCallback() {
@@ -193,6 +195,10 @@ export class SpaceView extends BaseElement {
     this.isLoading = true;
     this.errorMessage = '';
     this.connectionErrorType = 'none';
+
+    // Refresh offline queue and pending shares for the current space
+    this.refreshOfflineQueue();
+    this.loadPendingShares();
 
     try {
       const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
@@ -397,10 +403,12 @@ export class SpaceView extends BaseElement {
 
   // --- Offline Queue ---
 
-  private async refreshOfflineQueueCount() {
+  private async refreshOfflineQueue() {
     if (!this.serverUrl || !this.spaceId) return;
     try {
-      this.offlineQueueCount = await getOfflineQueueCount(this.serverUrl, this.spaceId);
+      const items = await getOfflineQueueForSpace(this.serverUrl, this.spaceId);
+      this.offlineQueueItems = items;
+      this.offlineQueueCount = items.length;
     } catch {
       // IndexedDB may not be available
     }
@@ -412,7 +420,7 @@ export class SpaceView extends BaseElement {
   ) {
     if (!this.serverUrl || !this.spaceId) return;
     await queueForOffline(this.serverUrl, this.spaceId, type, options);
-    this.offlineQueueCount++;
+    await this.refreshOfflineQueue();
   }
 
   private async syncOfflineQueue() {
@@ -420,7 +428,7 @@ export class SpaceView extends BaseElement {
 
     try {
       const result = await processOfflineQueue(this.serverUrl, this.spaceId, this.token);
-      await this.refreshOfflineQueueCount();
+      await this.refreshOfflineQueue();
 
       if (result.synced > 0 || result.failed > 0) {
         if (result.synced > 0 && result.failed > 0) {
@@ -767,12 +775,13 @@ export class SpaceView extends BaseElement {
       `;
     }
 
-    if (this.errorMessage && (this.connectionErrorType === 'auth' || this.connectionErrorType === 'network')) {
+    // Only block the view for auth errors (token revoked/invalid)
+    if (this.errorMessage && this.connectionErrorType === 'auth') {
       return html`
         <div class="mx-auto max-w-lg space-y-4 py-8">
           <div class="rounded-lg border border-red-900/60 bg-red-950/40 p-4">
             <p class="mb-1 text-sm font-semibold text-red-300">
-              ${this.connectionErrorType === 'auth' ? 'Access Denied' : 'Connection Failed'}
+              Access Denied
             </p>
             <p class="text-sm text-red-400">${this.errorMessage}</p>
           </div>
@@ -794,7 +803,7 @@ export class SpaceView extends BaseElement {
       `;
     }
 
-    if (this.errorMessage) {
+    if (this.errorMessage && this.connectionErrorType === 'none') {
       return html`
         <div class="mx-auto max-w-lg space-y-4 py-8">
           <p class="text-sm text-red-400">${this.errorMessage}</p>
@@ -808,11 +817,15 @@ export class SpaceView extends BaseElement {
       `;
     }
 
+    // For network errors, show banners but keep the compose box available
     return html`
       <div class="space-y-8">
+        ${this.renderOfflineBanner()}
+        ${this.renderServerUnreachableBanner()}
         ${this.renderSyncStatus()}
-        ${this.renderPendingSharesSection()}
         ${this.renderUploadArea()}
+        ${this.renderPendingSharesSection()}
+        ${this.renderPendingUploadsSection()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
       </div>
@@ -828,6 +841,36 @@ export class SpaceView extends BaseElement {
         role="status"
       >
         ✓ ${this.syncMessage}
+      </div>
+    `;
+  }
+
+  private renderOfflineBanner() {
+    if (this.isOnline) return nothing;
+    return html`
+      <div class="rounded-lg border border-amber-500/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-300" role="alert">
+        <p class="font-medium">📡 You're offline</p>
+        <p class="text-xs text-amber-400/80 mt-1">You can still share text and files — they'll upload when you're back online.</p>
+      </div>
+    `;
+  }
+
+  private renderServerUnreachableBanner() {
+    if (this.connectionErrorType !== 'network') return nothing;
+    return html`
+      <div class="rounded-lg border border-red-500/30 bg-red-950/30 px-4 py-3" role="alert">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-medium text-red-300">⚠ Unable to reach the server</p>
+            <p class="text-xs text-red-400/80 mt-1">Items you share will be queued and uploaded when the connection is restored.</p>
+          </div>
+          <button
+            @click=${() => this.loadData()}
+            class="shrink-0 rounded-full border border-sky-700 bg-sky-900/30 px-4 py-1.5 text-xs font-semibold text-sky-300 transition hover:border-sky-600 hover:bg-sky-900/50"
+          >
+            Reconnect
+          </button>
+        </div>
       </div>
     `;
   }
@@ -900,6 +943,62 @@ export class SpaceView extends BaseElement {
             `;
 
             return this.renderUnifiedItemCard(content, undefined, 'border-amber-500/40', 'bg-amber-950/20');
+          })}
+        </ul>
+      </section>
+    `;
+  }
+
+  private renderPendingUploadsSection() {
+    if (this.offlineQueueItems.length === 0) return nothing;
+
+    const canSync = this.isOnline && this.connectionErrorType !== 'network';
+
+    return html`
+      <section class="space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-sm font-medium text-slate-400">
+            📤 ${this.offlineQueueItems.length}
+            item${this.offlineQueueItems.length !== 1 ? 's' : ''} pending upload
+          </p>
+          ${canSync
+            ? html`
+              <button
+                @click=${() => this.syncOfflineQueue()}
+                ?disabled=${this.isUploading}
+                class="rounded-full bg-sky-500 px-4 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
+              >
+                Sync Now
+              </button>
+            `
+            : nothing}
+        </div>
+
+        <ul class="space-y-2">
+          ${this.offlineQueueItems.map((item) => {
+            const icon = item.type === 'file' 
+              ? getFileTypeIcon(item.fileName ?? 'file')
+              : getTextItemIcon();
+            
+            const content = html`
+              <!-- Left: Icon -->
+              <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+                ${icon.svg}
+              </div>
+              <!-- Center: Content -->
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-slate-200">
+                  ${item.type === 'file'
+                    ? item.fileName ?? 'File'
+                    : (item.content ?? '').substring(0, 100)}
+                </p>
+                <p class="text-xs text-slate-500">
+                  Queued for upload
+                </p>
+              </div>
+            `;
+
+            return this.renderUnifiedItemCard(content, undefined, 'border-slate-700/60', 'bg-slate-900/40');
           })}
         </ul>
       </section>
@@ -1007,11 +1106,36 @@ export class SpaceView extends BaseElement {
   }
 
   private renderItemsList() {
+    // Show inline error if network error and no items loaded
+    if (this.items.length === 0 && this.connectionErrorType === 'network') {
+      return html`
+        <section class="space-y-3">
+          <p
+            class="sticky z-10 bg-slate-950 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+            style="top: var(--header-height, 0px)"
+          >
+            Shared items
+          </p>
+          <p class="py-4 text-center text-sm text-slate-500">
+            Unable to load items — server unreachable
+          </p>
+        </section>
+      `;
+    }
+
     if (this.items.length === 0) {
       return html`
-        <p class="py-4 text-center text-sm text-slate-500">
-          No items shared yet. Be the first!
-        </p>
+        <section class="space-y-3">
+          <p
+            class="sticky z-10 bg-slate-950 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+            style="top: var(--header-height, 0px)"
+          >
+            Shared items
+          </p>
+          <p class="py-4 text-center text-sm text-slate-500">
+            No items shared yet. Be the first!
+          </p>
+        </section>
       `;
     }
 
