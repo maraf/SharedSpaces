@@ -414,8 +414,6 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
     it('handles last-space with server URL containing colon correctly', async () => {
       const serverUrlWithPort = 'http://example.com:8080';
-      const keyWithPort = `${serverUrlWithPort}:${spaceId}`;
-
       tokenStorage.setToken(serverUrlWithPort, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrlWithPort, spaceId);
 
