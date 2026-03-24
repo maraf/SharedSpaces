@@ -3249,9 +3249,8 @@ Cors__Origins__0=http://localhost:5173
 - ✅ AppHost.cs uses environment variable array format
 - ✅ AdminEndpointTests.cs uses in-memory array format
 
-**Runtime Verification (not automated):**
-- Requires manual testing or integration test to verify CORS policy allows multiple origins
-- Future test could validate multi-origin scenarios
+**Runtime Verification:**
+- ✅ `CorsConfigurationTests.cs` covers multi-origin allow/deny, default fallback, preflight, and credentials behavior (9 integration tests)
 
 ## Files Modified
 
@@ -3262,7 +3261,7 @@ Cors__Origins__0=http://localhost:5173
 
 ## Future Considerations
 
-- Consider integration test that verifies CORS policy allows configured origins (not just build-time check)
+- Maintain and extend `CorsConfigurationTests.cs` to cover additional CORS origin and configuration scenarios over time
 - Document deployment config migration in README or deployment guide
 # Test Coverage for Issue #104 — Auto-select Last Space
 

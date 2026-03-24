@@ -31,7 +31,7 @@ builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
     {
         var allowedOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
-            ?? new[] { "https://localhost:5173" };
+            ?? new[] { "http://localhost:5173", "https://localhost:5173" };
         policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()

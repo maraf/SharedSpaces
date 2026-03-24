@@ -21,13 +21,14 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { allowedOrigin });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", allowedOrigin);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
         response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(allowedOrigin);
     }
@@ -42,13 +43,14 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { origin1, origin2, origin3 });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", origin1);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
         response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(origin1);
     }
@@ -63,13 +65,14 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { origin1, origin2, origin3 });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", origin2);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
         response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(origin2);
     }
@@ -84,13 +87,14 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { origin1, origin2, origin3 });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", origin3);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
         response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(origin3);
     }
@@ -104,32 +108,54 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { allowedOrigin });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", disallowedOrigin);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         // When origin is not allowed, the CORS middleware won't add CORS headers
         response.Headers.Should().NotContainKey("Access-Control-Allow-Origin");
     }
 
     [Fact]
-    public async Task NoOriginsConfigured_FallsBackToDefaultOrigin()
+    public async Task NoOriginsConfigured_FallsBackToDefaultOrigin_Http()
     {
         // Arrange
-        var defaultOrigin = "https://localhost:5173";
+        var defaultOrigin = "http://localhost:5173";
         await using var factory = new TestWebApplicationFactory(origins: null); // No origins configured
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", defaultOrigin);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
+        response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(defaultOrigin);
+    }
+
+    [Fact]
+    public async Task NoOriginsConfigured_FallsBackToDefaultOrigin_Https()
+    {
+        // Arrange
+        var defaultOrigin = "https://localhost:5173";
+        await using var factory = new TestWebApplicationFactory(origins: null); // No origins configured
+        using var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("Origin", defaultOrigin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
         response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(defaultOrigin);
     }
@@ -142,7 +168,7 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { allowedOrigin });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Options, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Options, "/");
         request.Headers.Add("Origin", allowedOrigin);
         request.Headers.Add("Access-Control-Request-Method", "POST");
         request.Headers.Add("Access-Control-Request-Headers", "content-type");
@@ -167,7 +193,7 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { allowedOrigin });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Options, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Options, "/");
         request.Headers.Add("Origin", disallowedOrigin);
         request.Headers.Add("Access-Control-Request-Method", "POST");
 
@@ -186,13 +212,14 @@ public class CorsConfigurationTests
         await using var factory = new TestWebApplicationFactory(new[] { allowedOrigin });
         using var client = factory.CreateClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/health");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
         request.Headers.Add("Origin", allowedOrigin);
 
         // Act
         var response = await client.SendAsync(request);
 
         // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.Should().ContainKey("Access-Control-Allow-Credentials");
         response.Headers.GetValues("Access-Control-Allow-Credentials").Should().Contain("true");
     }
