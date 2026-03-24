@@ -462,3 +462,37 @@ All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug 
 
 **From Zoe:** SignalR hub auth tests now use resilient assertion pattern (`ThrowAsync<Exception>()` + connection state check) instead of specific exception types. This change affects how new hub tests should be written going forward and may inform how server code handles auth failures. See `.squad/decisions.md` for full decision.
 
+
+---
+
+## Session: Issue #115 (2026-03-24)
+
+### CORS Configuration Updated to Support Multiple Origins
+
+**What:** Changed `Cors:Origins` from a single string to an array to support multiple allowed origins for production/staging scenarios.
+
+**Why:** Previous config only supported one origin. For multi-environment deployments (e.g., production + staging), multiple origins need to be whitelisted.
+
+**Changes Made:**
+1. **Program.cs (lines 29-38):** Updated CORS config to read from `builder.Configuration.GetSection("Cors:Origins").Get<string[]>()` instead of single string. Falls back to `["https://localhost:5173"]` if not configured. The `WithOrigins()` method already accepts `params string[]`, so no signature change needed.
+   
+2. **appsettings.Development.json:** Changed `"Origins": "http://localhost:5173"` to `"Origins": ["http://localhost:5173"]` (JSON array format).
+
+3. **AppHost.cs (line 30):** Changed `server.WithEnvironment("Cors__Origins", ...)` to `server.WithEnvironment("Cors__Origins__0", ...)` to match ASP.NET Core array config format (double underscore + index).
+
+4. **AdminEndpointTests.cs (line 1468):** Changed in-memory config from `["Cors:Origins"]` to `["Cors:Origins:0"]` to match array index format (colon + index for in-memory provider).
+
+**Config Format Examples:**
+- **appsettings.json:** `"Origins": ["http://localhost:5173", "https://example.com"]`
+- **Environment variables:** `Cors__Origins__0=http://localhost:5173`, `Cors__Origins__1=https://example.com`
+- **In-memory (tests):** `["Cors:Origins:0"] = "...", ["Cors:Origins:1"] = "..."`
+
+**Build Verification:** Both `SharedSpaces.Server.csproj` and `SharedSpaces.Server.Tests.csproj` build successfully with the changes.
+
+### Files Modified
+
+- `src/SharedSpaces.Server/Program.cs` — CORS config now reads array
+- `src/SharedSpaces.Server/appsettings.Development.json` — Array format
+- `src/AppHost.cs` — Environment variable uses index format
+- `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs` — In-memory config uses index format
+
