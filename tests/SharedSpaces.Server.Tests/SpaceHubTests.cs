@@ -42,8 +42,17 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, null);
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<Exception>();
-        connection.State.Should().NotBe(HubConnectionState.Connected);
+        var exceptionAssertion = await act.Should().ThrowAsync<Exception>();
+        var exception = exceptionAssertion.Which;
+        if (exception is HttpRequestException httpEx && httpEx.StatusCode.HasValue)
+        {
+            httpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        else if (exception.InnerException is HttpRequestException innerHttpEx && innerHttpEx.StatusCode.HasValue)
+        {
+            innerHttpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        connection.State.Should().Be(HubConnectionState.Disconnected);
     }
 
     [Fact]
@@ -58,8 +67,17 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, invalidToken);
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<Exception>();
-        connection.State.Should().NotBe(HubConnectionState.Connected);
+        var exceptionAssertion = await act.Should().ThrowAsync<Exception>();
+        var exception = exceptionAssertion.Which;
+        if (exception is HttpRequestException httpEx && httpEx.StatusCode.HasValue)
+        {
+            httpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        else if (exception.InnerException is HttpRequestException innerHttpEx && innerHttpEx.StatusCode.HasValue)
+        {
+            innerHttpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        connection.State.Should().Be(HubConnectionState.Disconnected);
     }
 
     [Fact]
@@ -80,8 +98,17 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, token);
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<Exception>();
-        connection.State.Should().NotBe(HubConnectionState.Connected);
+        var exceptionAssertion = await act.Should().ThrowAsync<Exception>();
+        var exception = exceptionAssertion.Which;
+        if (exception is HttpRequestException httpEx && httpEx.StatusCode.HasValue)
+        {
+            httpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        else if (exception.InnerException is HttpRequestException innerHttpEx && innerHttpEx.StatusCode.HasValue)
+        {
+            innerHttpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        connection.State.Should().Be(HubConnectionState.Disconnected);
     }
 
     [Fact]
@@ -93,8 +120,17 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, "not-a-valid-jwt-token");
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<Exception>();
-        connection.State.Should().NotBe(HubConnectionState.Connected);
+        var exceptionAssertion = await act.Should().ThrowAsync<Exception>();
+        var exception = exceptionAssertion.Which;
+        if (exception is HttpRequestException httpEx && httpEx.StatusCode.HasValue)
+        {
+            httpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        else if (exception.InnerException is HttpRequestException innerHttpEx && innerHttpEx.StatusCode.HasValue)
+        {
+            innerHttpEx.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        connection.State.Should().Be(HubConnectionState.Disconnected);
     }
 
     [Fact]
