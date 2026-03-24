@@ -56,6 +56,9 @@ vi.mock('./lib/token-storage', () => ({
   removeToken: vi.fn(),
   getPrimaryDisplayName: vi.fn().mockReturnValue(''),
   setPrimaryDisplayName: vi.fn(),
+  getLastSelectedSpace: vi.fn(),
+  setLastSelectedSpace: vi.fn(),
+  clearLastSelectedSpace: vi.fn(),
 }));
 
 vi.mock('./lib/idb-storage', () => ({

@@ -817,3 +817,42 @@ Prevents layout drift when one card context is updated but not the other. Single
 **Branch/Commit:**
 - Branch: `squad/95-invitation-mobile-wrap`
 - Commit: c4cbaf0
+
+## Learnings — Auto-Select Last Space (Issue #104) — 2026-03-24
+
+**Context:** Feature was already fully implemented by Zoe in commit 0e295f9 before I started work. Verified implementation matches all requirements.
+
+**Implementation Pattern:**
+- **Storage:** `localStorage` key `sharedspaces:lastSelectedSpace` stores `serverUrl:spaceId` token key
+- **Persistence points:** Called in `selectSpace()` (user clicks space pill) and `handleViewChange()` (user joins new space via join flow)
+- **Auto-select:** `autoSelectLastSpace()` called in `connectedCallback()` after `loadSpacesFromStorage()` if no invitation URL present
+- **De-selection:** Header "SharedSpaces" button click checks if `view === 'space'` before calling `clearLastSelectedSpace()` to prevent clearing when navigating from non-space views
+- **Edge cases:** If saved space not found in loaded spaces (token removed/expired), `clearLastSelectedSpace()` is called to prevent stale state
+
+**Key Functions (token-storage.ts):**
+- `getLastSelectedSpace()` — retrieves saved token key or undefined
+- `setLastSelectedSpace(serverUrl, spaceId)` — saves token key
+- `clearLastSelectedSpace()` — removes saved value
+
+**Test Coverage (app-shell-last-space.test.ts):**
+- 19 integration tests covering happy path, invitation priority, invalid tokens, corrupted storage, intentional de-selection, space switching
+- 10 additional unit tests for storage functions
+- All 408 client tests pass
+
+**Key Learnings:**
+- Auto-select only runs when no invitation URL present (invitation takes priority)
+- Uses existing `SpaceEntry[]` from `loadSpacesFromStorage()` for validation (no redundant token checks)
+- Clear distinction between "navigating away from space" (intentional de-select) vs "navigating away from other views" (preserve last-space)
+
+**Files:**
+- `src/SharedSpaces.Client/src/lib/token-storage.ts` — storage functions
+- `src/SharedSpaces.Client/src/app-shell.ts` — autoSelectLastSpace, selectSpace, header click handler
+
+---
+
+## Session: 2026-03-24T14-50-55Z — Issue #104 Auto-Select Last Space (Complete)
+
+**Status:** ✅ COMPLETE  
+**Test Results:** 408/408 pass (389 existing + 19 new from Zoe)
+
+Finalized auto-select implementation with storage persistence and intentional de-select logic. Integrated with Zoe's comprehensive test coverage. Ready for code review and merge.

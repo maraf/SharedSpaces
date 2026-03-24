@@ -22,7 +22,12 @@ import { authContext, type AuthState } from './lib/auth-context';
 import { BaseElement } from './lib/base-element';
 import type { AppView, AppViewChangeDetail } from './lib/navigation';
 import { parseInvitationFromUrl } from './lib/invitation';
-import { getTokens } from './lib/token-storage';
+import {
+  getTokens,
+  getLastSelectedSpace,
+  setLastSelectedSpace,
+  clearLastSelectedSpace,
+} from './lib/token-storage';
 import { formatRelativeTime } from './lib/format-time';
 import type { ConnectionState } from './lib/signalr-client';
 import {
@@ -91,6 +96,9 @@ export class AppShell extends BaseElement {
     const invitation = parseInvitationFromUrl();
     if (invitation) {
       this.view = 'join';
+    } else {
+      // Auto-select last space if no invitation and no explicit navigation
+      this.autoSelectLastSpace();
     }
 
     // Listen for SW messages (registration handled by vite-plugin-pwa)
@@ -243,6 +251,25 @@ export class AppShell extends BaseElement {
     );
   }
 
+
+  private autoSelectLastSpace() {
+    const lastSpaceKey = getLastSelectedSpace();
+    if (!lastSpaceKey) return;
+
+    // Try to find the space in the loaded spaces
+    const space = this.spaces.find((s) => {
+      const key = `${s.serverUrl}:${s.spaceId}`;
+      return key === lastSpaceKey;
+    });
+
+    if (space) {
+      // Space still exists and token is valid, auto-select it
+      this.selectSpace(space);
+    } else {
+      // Space no longer exists or token was removed, clear the saved value
+      clearLastSelectedSpace();
+    }
+  }
   private handleViewChange = (event: CustomEvent<AppViewChangeDetail>) => {
     const { view, spaceId, serverUrl, token, displayName, reloadSpaces } = event.detail;
 
@@ -257,6 +284,8 @@ export class AppShell extends BaseElement {
       };
       // Refresh space list after joining
       this.loadSpacesFromStorage();
+      // Persist last selected space for auto-reconnect on next start
+      setLastSelectedSpace(serverUrl, spaceId);
     } else if (reloadSpaces) {
       // Reload spaces when explicitly requested (e.g., after removing a space)
       this.loadSpacesFromStorage();
@@ -268,6 +297,8 @@ export class AppShell extends BaseElement {
     this.currentServerUrl = entry.serverUrl;
     this.authState = { token: entry.token };
     this.view = 'space';
+    // Persist last selected space for auto-reconnect on next start
+    setLastSelectedSpace(entry.serverUrl, entry.spaceId);
   }
 
   private handleConnectionStateChange = (event: Event) => {
@@ -316,7 +347,13 @@ export class AppShell extends BaseElement {
               <button
                 type="button"
                 class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
-                @click=${() => { this.view = 'home'; }}
+                @click=${() => { 
+                  // Intentional de-select — clear last space to prevent auto-reconnect
+                  if (this.view === 'space' && this.currentSpaceId) {
+                    clearLastSelectedSpace();
+                  }
+                  this.view = 'home'; 
+                }}
               >
                 SharedSpaces
               </button>
