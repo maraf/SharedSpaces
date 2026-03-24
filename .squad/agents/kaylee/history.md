@@ -455,3 +455,10 @@ All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug 
 - Quota tests validate consistent accounting across regular and auto-converted files
 - Boundary tests confirm threshold behavior at edge cases
 
+
+---
+
+## Cross-Agent Note: Test Pattern Change (2026-03-24)
+
+**From Zoe:** SignalR hub auth tests now use resilient assertion pattern (`ThrowAsync<Exception>()` + connection state check) instead of specific exception types. This change affects how new hub tests should be written going forward and may inform how server code handles auth failures. See `.squad/decisions.md` for full decision.
+
