@@ -421,7 +421,7 @@ export class SpaceView extends BaseElement {
     try {
       const items = await getOfflineQueueForSpace(this.serverUrl, this.spaceId);
       // Strip fileData to avoid keeping large ArrayBuffers in reactive state
-      const lightweight = items.map(({ fileData, ...rest }) => rest);
+      const lightweight = items.map(({ fileData: _fileData, ...rest }) => rest);
       this.offlineQueueItems = lightweight;
       this.offlineQueueCount = lightweight.length;
     } catch {
