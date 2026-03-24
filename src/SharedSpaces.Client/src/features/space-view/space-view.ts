@@ -198,8 +198,10 @@ export class SpaceView extends BaseElement {
     this.connectionErrorType = 'none';
 
     // Refresh offline queue and pending shares for the current space
-    this.refreshOfflineQueue();
-    this.loadPendingShares();
+    await Promise.all([
+      this.refreshOfflineQueue(),
+      this.loadPendingShares(),
+    ]);
 
     try {
       const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
@@ -418,8 +420,10 @@ export class SpaceView extends BaseElement {
     if (!this.serverUrl || !this.spaceId) return;
     try {
       const items = await getOfflineQueueForSpace(this.serverUrl, this.spaceId);
-      this.offlineQueueItems = items;
-      this.offlineQueueCount = items.length;
+      // Strip fileData to avoid keeping large ArrayBuffers in reactive state
+      const lightweight = items.map(({ fileData, ...rest }) => rest);
+      this.offlineQueueItems = lightweight;
+      this.offlineQueueCount = lightweight.length;
     } catch {
       // IndexedDB may not be available
     }

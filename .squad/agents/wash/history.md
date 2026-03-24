@@ -41,8 +41,8 @@
 - Client offline (`!navigator.onLine`) → show additional "You're offline" banner
 
 **Banner hierarchy:**
-1. Optional "You're offline" banner (dismissible, amber)
-2. Optional "Server unreachable" banner (dismissible, red, with Reconnect button)
+1. Optional "You're offline" banner (amber; auto-hides when back online)
+2. Optional "Server unreachable" banner (red, with Reconnect button; auto-hides when connection recovers)
 3. Sync status (success feedback, emerald)
 4. Compose box (always available unless auth error)
 5. "Shared from other apps" section (Web Share Target items)

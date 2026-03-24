@@ -795,16 +795,20 @@ When implementing the auto-grow feature:
 
 - Renamed existing `space-dead-network` test to `space-server-unreachable` to reflect new banner-based behavior instead of full-page error
 - Added `space-offline` test: uses `page.context().setOffline(true)` to simulate client being offline; shows "You're offline" banner with compose box available
-- Added `space-pending-uploads` test: injects items into IndexedDB `offline-queue` object store to show "Pending to upload" section; uses `page.evaluate()` with IDB transaction to populate fake queued text/file items
-- Added `space-server-unreachable-with-pending` test: combines dead server JWT (localhost:19999) with pre-populated offline queue to show both server unreachable banner AND pending uploads section
+- Added `space-pending-uploads` test: uses `page.evaluate()` to set `offlineQueueItems` / `offlineQueueCount` directly on the `space-view` component instance to show the "Pending to upload" section (direct state injection, not IDB — because IDB items get auto-synced by the service worker when online)
+- Added `space-server-unreachable-with-pending` test: combines dead server JWT (localhost:19999) with IDB injection via `indexedDB.open('shared-spaces-db')` to populate the offline queue, then navigates to the dead-server space to show both the server-unreachable banner AND the pending uploads section
 - All new tests capture both desktop (1280×800) and mobile (390×844) viewports following existing patterns
 
-**IndexedDB injection pattern for offline queue:**
+**IndexedDB injection pattern for offline queue (used in `space-server-unreachable-with-pending` only):**
 - Database: `shared-spaces-db`, version 1
 - Object store: `offline-queue`
 - Queue item shape: `{ id, itemId, spaceId, serverUrl, type: 'text'|'file', content/fileName/fileType, timestamp }`
 - Use `page.evaluate()` with Promise wrapper to ensure transaction completes before proceeding
-- After IDB injection, navigate away and back to trigger space-view re-render and pick up queued items
+- Works reliably when server is unreachable (items can't auto-sync)
+
+**Direct state injection pattern (used in `space-pending-uploads`):**
+- Set `offlineQueueItems` array and `offlineQueueCount` directly on the `space-view` element via `page.evaluate()`
+- Needed when server is reachable (IDB items would auto-sync away before screenshot)
 
 **Offline test timing:**
 - Server unreachable scenarios need 3000ms timeout for connection attempts to fail
