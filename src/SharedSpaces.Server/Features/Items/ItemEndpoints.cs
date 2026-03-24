@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
@@ -17,6 +18,7 @@ public static class ItemEndpoints
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SpaceQuotaLocks = new();
     private const int DefaultMaxTextContentBytes = 1_048_576;
+    private const int DefaultMaxTextToFileThresholdBytes = 65_536;
 
     public static IEndpointRouteBuilder MapItemEndpoints(this IEndpointRouteBuilder app)
     {
@@ -187,113 +189,172 @@ public static class ItemEndpoints
             return Results.NotFound(new { Error = "Space not found" });
         }
 
-        await using var quotaLock = normalizedContentType == "file"
-            ? await AcquireQuotaLockAsync(spaceId, cancellationToken)
-            : null;
-        await using var transaction = normalizedContentType == "file" && db.Database.IsRelational()
-            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
-            : null;
-
-        var existingItem = await db.SpaceItems
-            .SingleOrDefaultAsync(item => item.SpaceId == spaceId && item.Id == itemId, cancellationToken);
-
-        var item = existingItem ?? new SpaceItem(itemId)
-        {
-            SpaceId = spaceId
-        };
-
-        var wasFile = existingItem is not null && string.Equals(existingItem.ContentType, "file", StringComparison.OrdinalIgnoreCase);
-        string content;
-        long fileSize;
-
-        if (normalizedContentType == "text")
-        {
-            if (request.File is not null)
-            {
-                return Results.BadRequest(new { Error = "File payload is only allowed when ContentType is 'file'" });
-            }
-
-            if (request.Content is null)
-            {
-                return Results.BadRequest(new { Error = "Content is required when ContentType is 'text'" });
-            }
-
-            if (Encoding.UTF8.GetByteCount(request.Content) > DefaultMaxTextContentBytes)
-            {
-                return Results.BadRequest(new { Error = $"Text content must not exceed {DefaultMaxTextContentBytes} bytes" });
-            }
-
-            content = request.Content;
-            fileSize = 0;
-        }
-        else
-        {
-            if (request.File is null)
-            {
-                return Results.BadRequest(new { Error = "File is required when ContentType is 'file'" });
-            }
-
-            var currentUsage = await db.SpaceItems
-                .Where(existing => existing.SpaceId == spaceId)
-                .SumAsync(existing => (long?)existing.FileSize, cancellationToken) ?? 0L;
-            var currentItemSize = existingItem?.FileSize ?? 0L;
-            var projectedUsage = currentUsage - currentItemSize + request.File.Length;
-
-            var quota = space.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes;
-            if (projectedUsage > quota)
-            {
-                return Results.Json(new { Error = "Space storage quota exceeded" }, statusCode: StatusCodes.Status413PayloadTooLarge);
-            }
-
-            await using var fileStream = request.File.OpenReadStream();
-            await fileStorage.SaveAsync(spaceId, itemId, fileStream, cancellationToken);
-            content = request.File.FileName;
-            fileSize = request.File.Length;
-        }
-
-        item.MemberId = memberId;
-        item.ContentType = normalizedContentType;
-        item.Content = content;
-        item.FileSize = fileSize;
-        item.SharedAt = DateTime.UtcNow;
-
-        if (existingItem is null)
-        {
-            db.SpaceItems.Add(item);
-        }
-
+        IAsyncDisposable? quotaLock = null;
+        IDbContextTransaction? transaction = null;
+        
         try
         {
-            await db.SaveChangesAsync(cancellationToken);
-
-            if (transaction is not null)
+            if (normalizedContentType == "file")
             {
-                await transaction.CommitAsync(cancellationToken);
+                quotaLock = await AcquireQuotaLockAsync(spaceId, cancellationToken);
+                if (db.Database.IsRelational())
+                {
+                    transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                }
             }
+
+            var existingItem = await db.SpaceItems
+                .SingleOrDefaultAsync(item => item.SpaceId == spaceId && item.Id == itemId, cancellationToken);
+
+            var item = existingItem ?? new SpaceItem(itemId)
+            {
+                SpaceId = spaceId
+            };
+
+            var wasFile = existingItem is not null && string.Equals(existingItem.ContentType, "file", StringComparison.OrdinalIgnoreCase);
+            string content;
+            long fileSize;
+
+            if (normalizedContentType == "text")
+            {
+                if (request.File is not null)
+                {
+                    return Results.BadRequest(new { Error = "File payload is only allowed when ContentType is 'file'" });
+                }
+
+                if (request.Content is null)
+                {
+                    return Results.BadRequest(new { Error = "Content is required when ContentType is 'text'" });
+                }
+
+                var textByteCount = Encoding.UTF8.GetByteCount(request.Content);
+                
+                if (textByteCount > DefaultMaxTextContentBytes)
+                {
+                    return Results.BadRequest(new { Error = $"Text content must not exceed {DefaultMaxTextContentBytes} bytes" });
+                }
+
+                if (textByteCount > DefaultMaxTextToFileThresholdBytes)
+                {
+                    // Auto-convert to file
+                    if (quotaLock is null)
+                    {
+                        quotaLock = await AcquireQuotaLockAsync(spaceId, cancellationToken);
+                    }
+                    
+                    if (transaction is null && db.Database.IsRelational())
+                    {
+                        transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                    }
+                    
+                    var currentUsage = await db.SpaceItems
+                        .Where(existing => existing.SpaceId == spaceId)
+                        .SumAsync(existing => (long?)existing.FileSize, cancellationToken) ?? 0L;
+                    var currentItemSize = existingItem?.FileSize ?? 0L;
+                    var projectedUsage = currentUsage - currentItemSize + textByteCount;
+
+                    var quota = space.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes;
+                    if (projectedUsage > quota)
+                    {
+                        return Results.Json(new { Error = "Space storage quota exceeded" }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                    }
+                    
+                    await using var textStream = new MemoryStream(Encoding.UTF8.GetBytes(request.Content));
+                    await fileStorage.SaveAsync(spaceId, itemId, textStream, cancellationToken);
+                    
+                    normalizedContentType = "file";
+                    content = $"{itemId:N}.txt";
+                    fileSize = textByteCount;
+                }
+                else
+                {
+                    content = request.Content;
+                    fileSize = 0;
+                }
+            }
+            else
+            {
+                if (request.File is null)
+                {
+                    return Results.BadRequest(new { Error = "File is required when ContentType is 'file'" });
+                }
+
+                var currentUsage = await db.SpaceItems
+                    .Where(existing => existing.SpaceId == spaceId)
+                    .SumAsync(existing => (long?)existing.FileSize, cancellationToken) ?? 0L;
+                var currentItemSize = existingItem?.FileSize ?? 0L;
+                var projectedUsage = currentUsage - currentItemSize + request.File.Length;
+
+                var quota = space.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes;
+                if (projectedUsage > quota)
+                {
+                    return Results.Json(new { Error = "Space storage quota exceeded" }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                }
+
+                await using var fileStream = request.File.OpenReadStream();
+                await fileStorage.SaveAsync(spaceId, itemId, fileStream, cancellationToken);
+                content = request.File.FileName;
+                fileSize = request.File.Length;
+            }
+
+            item.MemberId = memberId;
+            item.ContentType = normalizedContentType;
+            item.Content = content;
+            item.FileSize = fileSize;
+            item.SharedAt = DateTime.UtcNow;
 
             if (existingItem is null)
             {
-                var itemAddedEvent = new ItemAddedEvent(
-                    item.Id,
-                    item.SpaceId,
-                    item.MemberId,
-                    displayName,
-                    item.ContentType,
-                    item.Content,
-                    item.FileSize,
-                    item.SharedAt);
-
-                await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+                db.SpaceItems.Add(item);
             }
-        }
-        catch (Exception exception)
-        {
-            if (transaction is not null)
+
+            try
             {
-                await transaction.RollbackAsync(cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                if (existingItem is null)
+                {
+                    var itemAddedEvent = new ItemAddedEvent(
+                        item.Id,
+                        item.SpaceId,
+                        item.MemberId,
+                        displayName,
+                        item.ContentType,
+                        item.Content,
+                        item.FileSize,
+                        item.SharedAt);
+
+                    await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+                }
+            }
+            catch (Exception exception)
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                if (normalizedContentType == "file" && existingItem is null)
+                {
+                    try
+                    {
+                        await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                ExceptionDispatchInfo.Capture(exception).Throw();
+                throw;
             }
 
-            if (normalizedContentType == "file" && existingItem is null)
+            if (wasFile && normalizedContentType != "file")
             {
                 try
                 {
@@ -301,37 +362,35 @@ public static class ItemEndpoints
                 }
                 catch
                 {
+                    // Best-effort file cleanup when switching from file to text
                 }
             }
 
-            ExceptionDispatchInfo.Capture(exception).Throw();
-            throw;
-        }
+            var response = new SpaceItemResponse(
+                item.Id,
+                item.SpaceId,
+                item.MemberId,
+                item.ContentType,
+                item.Content,
+                item.FileSize,
+                item.SharedAt);
 
-        if (wasFile && normalizedContentType != "file")
+            return existingItem is null
+                ? Results.Created($"/v1/spaces/{spaceId}/items/{item.Id}", response)
+                : Results.Ok(response);
+        }
+        finally
         {
-            try
+            if (transaction is not null)
             {
-                await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+                await transaction.DisposeAsync();
             }
-            catch
+            
+            if (quotaLock is not null)
             {
-                // Best-effort file cleanup when switching from file to text
+                await quotaLock.DisposeAsync();
             }
         }
-
-        var response = new SpaceItemResponse(
-            item.Id,
-            item.SpaceId,
-            item.MemberId,
-            item.ContentType,
-            item.Content,
-            item.FileSize,
-            item.SharedAt);
-
-        return existingItem is null
-            ? Results.Created($"/v1/spaces/{spaceId}/items/{item.Id}", response)
-            : Results.Ok(response);
     }
 
     private static async Task<IResult> DeleteItem(
