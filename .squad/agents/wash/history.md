@@ -2,29 +2,76 @@
 
 - **Owner:** Marek Fišera
 - **Project:** SharedSpaces — A self-hostable web platform where users join shared spaces via QR code/URL+PIN, share files and text in real-time, with anonymous identity and JWT-based access.
-- **Stack:** .NET (ASP.NET Core Web API), React SPA (Vite), SignalR (WebSocket), SQLite + EF Core, JWT auth
+- **Stack:** .NET (ASP.NET Core Web API), Lit HTML + WebComponents (Vite), SignalR (WebSocket), SQLite + EF Core, JWT auth
 - **Created:** 2026-03-16
 
 ## Core Context
 
 ### Client Architecture
-- React SPA built with Vite — independently deployable
+- Lit HTML + WebComponents SPA built with Vite — independently deployable
+- Light DOM for Tailwind CSS compatibility
 - Can connect to any SharedSpaces server by URL
 - A single client instance may connect to multiple servers simultaneously
 - JWT stored in local storage per server+space combination
+- Offline-first: items queue via IndexedDB when server unreachable
 
 ### Key Client Flows
 - Join flow: parse invitation string or QR URL → display name input → exchange PIN for JWT
 - Multi-server: JWT claims contain server_url and space_id — client manages multiple connections
 - Space view: flat list of items ordered by SharedAt, text/file upload
 - SignalR: connect to /v1/hubs/space/{spaceId} for live item updates (new/deleted)
+- Offline queue: items shared while offline/server unreachable queue in IndexedDB, auto-sync when back online
 
 ### Project Structure (Client)
 - src/SharedSpaces.Client/src/
   - features/ — join, space-view, admin
   - components/ — shared UI components
-  - hooks/ — useSignalR, useOfflineQueue
-  - main.tsx
+  - lib/ — signalr-client, offline-sync, idb-storage
+  - main.ts
+
+## Learnings
+
+### Offline Experience UI (2026-03-20)
+
+**Decision:** Never block the compose box for network errors — only for auth errors.
+
+**Pattern implemented (issue #107):**
+- Auth errors (401/404, token revoked) → full-page error (token is invalid, composing is pointless)
+- Network errors (server unreachable) → show warning banners, keep compose box functional
+- Client offline (`!navigator.onLine`) → show additional "You're offline" banner
+
+**Banner hierarchy:**
+1. Optional "You're offline" banner (amber; auto-hides when back online)
+2. Optional "Server unreachable" banner (red, with Reconnect button; auto-hides when connection recovers)
+3. Sync status (success feedback, emerald)
+4. Compose box (always available unless auth error)
+5. "Shared from other apps" section (Web Share Target items)
+6. "Pending to upload" section (offline queue items with "Sync Now" button)
+7. "Shared items" section (with inline error if network error and no items loaded)
+
+**Key files:**
+- `src/features/space-view/space-view.ts` — main view component
+  - `renderOfflineBanner()` — shows when `!isOnline`
+  - `renderServerUnreachableBanner()` — shows when `connectionErrorType === 'network'`
+  - `renderPendingUploadsSection()` — displays offline queue items (`offlineQueueItems[]`)
+  - `refreshOfflineQueue()` — loads full queue items, not just count
+  - `render()` — auth errors block view, network errors show banners only
+
+**IndexedDB state:**
+- `offlineQueueItems: OfflineQueueItem[]` — full queue for current space (for UI display)
+- `offlineQueueCount: number` — count only (lightweight)
+- `enqueueForOffline()` now calls `refreshOfflineQueue()` to update display immediately
+
+**User experience:**
+- Users can compose text/files even when server is down (queues to IndexedDB)
+- Clear feedback via banners: offline vs server unreachable vs syncing
+- "Pending to upload" section shows what's queued (not just a count)
+- "Sync Now" button triggers manual sync when back online
+- Inline error in "Shared items" section when server unreachable and no items loaded
+
+**Testing:** All 379 vitest tests pass after changes.
+
+**Related:** Issue #107, `.squad/decisions/inbox/wash-offline-ui.md`
 
 ## Team Updates (2026-03-19)
 

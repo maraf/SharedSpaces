@@ -2750,3 +2750,125 @@ This pattern applies to any repeated UI structure: modals, pills, badges, etc.
 ## Related
 
 - Commit: 810fd33
+
+---
+
+# Decision: Offline UI Refinements
+
+**Date:** 2026-03-23  
+**Author:** Wash (Frontend Dev)  
+**Requested by:** Marek Fišera  
+**Status:** ✅ Implemented
+
+## Decision
+
+Implemented three UI refinements to improve the offline experience:
+
+### 1. Pending Upload Items Styling & Dismissal
+
+**Change:** Added dismiss functionality and distinctive sky/blue color scheme to pending upload items.
+
+**Rationale:** 
+- Users need ability to remove items from offline queue if they change their mind
+- Sky/blue color distinguishes pending uploads from pending shares (amber) while maintaining visual hierarchy
+- Consistent with existing dismiss pattern used for pending shares
+
+**Implementation:**
+- Added `removeFromOfflineQueue` import from `idb-storage`
+- Created `dismissOfflineQueueItem()` method that removes from IndexedDB and updates state
+- Added X button to each pending upload card (similar to pending shares)
+- Changed card styling from `border-slate-700/60, bg-slate-900/40` to `border-sky-500/40, bg-sky-950/20`
+
+### 2. Removed Top-Level Offline Banner
+
+**Change:** Removed offline banner from `app-shell.ts` (line 321).
+
+**Rationale:**
+- Duplicate banner — space-view already has its own offline banner at space level
+- Top-level banner was redundant and added visual clutter
+- Space-specific offline banner provides better context and is closer to where actions occur
+
+### 3. Server Unreachable Banner Conditional Display
+
+**Change:** Hide "Unable to reach server" banner when user is offline.
+
+**Rationale:**
+- When offline, showing "You're offline" already implies server is unreachable
+- "Server unreachable" banner should only show for server-specific issues when user IS online
+- Reduces banner redundancy and visual noise
+
+**Implementation:**
+- Modified `renderServerUnreachableBanner()` guard condition:
+  - FROM: `if (this.connectionErrorType !== 'network') return nothing;`
+  - TO: `if (this.connectionErrorType !== 'network' || !this.isOnline) return nothing;`
+
+## Color Scheme Semantics
+
+- **Amber** (`border-amber-500/40, bg-amber-950/20`) → Pending shares from external apps
+- **Sky/Blue** (`border-sky-500/40, bg-sky-950/20`) → Pending uploads (offline queue)
+- **Slate** → Regular items that have synced successfully
+
+## Verification
+
+- ✅ All 379 tests pass (`npx vitest run`)
+- ✅ Build succeeds (`npx vite build`)
+- ✅ No TypeScript errors
+
+## Related Work
+
+- Issue #107 — Offline experience improvements
+- Related decision: Offline Experience UI Implementation (companion decision)
+
+---
+
+# Decision: Offline Screenshot Test Strategy
+
+**Date:** 2026-03-20  
+**Author:** Zoe (Tester)  
+**Context:** Issue #107 offline experience improvements  
+**Status:** ✅ Implemented
+
+## Problem
+
+Need comprehensive screenshot coverage for offline UI states without running tests during implementation. The UI was changed to show banners + compose box instead of full-page errors, and a new "Pending to upload" section needs visual verification across viewports.
+
+## Decision
+
+Added 4 screenshot tests covering all offline states:
+
+1. **`space-server-unreachable`** (renamed from `space-dead-network`)
+   - Dead server JWT (localhost:19999) to simulate unreachable backend
+   - Expects banner + compose box, not full-page error
+   - 3000ms timeout for connection failure
+
+2. **`space-offline`**
+   - Uses `page.context().setOffline(true)` for client offline state
+   - Expects "You're offline" banner + compose box
+   - Restores online state after capture to prevent contamination
+
+3. **`space-pending-uploads`**
+   - Injects items into IndexedDB `offline-queue` object store via `page.evaluate()`
+   - Navigates away/back to trigger re-render
+   - Shows queued text + file items in "Pending to upload" section
+
+4. **`space-server-unreachable-with-pending`**
+   - Combines dead server + pre-populated offline queue
+   - Shows both banners simultaneously
+
+## Rationale
+
+- **Follow existing patterns:** All tests use same `for (const vp of Viewports)` loop, `capture()`, and helper functions
+- **IDB injection over mock:** Directly populating IndexedDB is more reliable than mocking through API layer
+- **Navigate away/back trick:** Ensures space-view picks up IDB changes without component knowledge
+- **Separate states:** Testing each state independently provides clearer failure signals
+
+## Testing Patterns
+
+- IDB schema must match: `shared-spaces-db` v1, `offline-queue` store
+- Tests validate banner styling, overflow behavior, mobile layout
+- Mobile viewports (390×844) critical for offline scenarios
+
+## Related
+
+- Issue #107: Improve offline experience
+- Spec file: `src/SharedSpaces.Client/e2e/screenshots.spec.ts`

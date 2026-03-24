@@ -61,7 +61,6 @@ export class AppShell extends BaseElement {
   @state() private currentServerUrl?: string;
   @state() private spaces: SpaceEntry[] = [];
   @state() private spaceConnectionStates: Record<string, ConnectionState> = {};
-  @state() private isOnline = navigator.onLine;
   @state() private pendingShareCount = 0;
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private sheetOpen = false;
@@ -70,8 +69,7 @@ export class AppShell extends BaseElement {
   private headerResizeObserver?: ResizeObserver;
   private mobileMediaQuery?: MediaQueryList;
 
-  private handleOnline = () => { this.isOnline = true; };
-  private handleOffline = () => { this.isOnline = false; };
+
 
   private handleBreakpointChange = (e: MediaQueryListEvent) => {
     if (!e.matches && this.sheetOpen) {
@@ -98,9 +96,6 @@ export class AppShell extends BaseElement {
     // Listen for SW messages (registration handled by vite-plugin-pwa)
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
 
-    // Track online/offline state
-    globalThis.addEventListener('online', this.handleOnline);
-    globalThis.addEventListener('offline', this.handleOffline);
 
     // Check pending shares from IndexedDB
     this.refreshPendingShareCount();
@@ -130,8 +125,6 @@ export class AppShell extends BaseElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    globalThis.removeEventListener('online', this.handleOnline);
-    globalThis.removeEventListener('offline', this.handleOffline);
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.removeEventListener('pending-shares-changed', this.handlePendingSharesChanged);
@@ -318,8 +311,6 @@ export class AppShell extends BaseElement {
         <div
           class="mx-auto flex min-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col gap-6"
         >
-          ${!this.isOnline ? this.renderOfflineBanner() : nothing}
-
           <header class="sticky top-0 z-20 bg-slate-950 pt-6 pb-2 flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <button
@@ -402,16 +393,6 @@ export class AppShell extends BaseElement {
     `;
   }
 
-  private renderOfflineBanner() {
-    return html`
-      <div
-        class="rounded-lg border border-amber-500/30 bg-amber-950/30 px-4 py-2 text-center text-sm text-amber-300"
-        role="alert"
-      >
-        📡 You're offline — uploads will be queued and sent when you reconnect
-      </div>
-    `;
-  }
 
   // --- Mobile Bottom Bar + Sheet ---
 
