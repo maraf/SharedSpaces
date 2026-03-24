@@ -2,6 +2,7 @@
 
 const STORAGE_KEY_TOKENS = 'sharedspaces:tokens';
 const STORAGE_KEY_PRIMARY_DISPLAY_NAME = 'sharedspaces:primaryDisplayName';
+const STORAGE_KEY_LAST_SELECTED_SPACE = 'sharedspaces:lastSelectedSpace';
 
 export interface TokenStore {
   [serverSpaceKey: string]: string;
@@ -83,4 +84,30 @@ export function getPrimaryDisplayName(): string {
  */
 export function setPrimaryDisplayName(name: string): void {
   localStorage.setItem(STORAGE_KEY_PRIMARY_DISPLAY_NAME, name);
+}
+
+/**
+ * Get the last selected space (auto-reconnect on next start)
+ * @returns Token key string (serverUrl:spaceId) or undefined if not set
+ */
+export function getLastSelectedSpace(): string | undefined {
+  const value = localStorage.getItem(STORAGE_KEY_LAST_SELECTED_SPACE);
+  return value || undefined;
+}
+
+/**
+ * Save the last selected space for auto-reconnect
+ * @param serverUrl - Server URL
+ * @param spaceId - Space GUID
+ */
+export function setLastSelectedSpace(serverUrl: string, spaceId: string): void {
+  const key = `${serverUrl}:${spaceId}`;
+  localStorage.setItem(STORAGE_KEY_LAST_SELECTED_SPACE, key);
+}
+
+/**
+ * Clear the last selected space (user intentionally de-selected)
+ */
+export function clearLastSelectedSpace(): void {
+  localStorage.removeItem(STORAGE_KEY_LAST_SELECTED_SPACE);
 }

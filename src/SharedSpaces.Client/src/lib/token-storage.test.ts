@@ -6,6 +6,9 @@ import {
   removeToken,
   getPrimaryDisplayName,
   setPrimaryDisplayName,
+  getLastSelectedSpace,
+  setLastSelectedSpace,
+  clearLastSelectedSpace,
 } from './token-storage';
 
 describe('token-storage', () => {
@@ -147,6 +150,78 @@ describe('token-storage', () => {
       setPrimaryDisplayName('Bob');
       const name = getPrimaryDisplayName();
       expect(name).toBe('Bob');
+    });
+  });
+
+  describe('getLastSelectedSpace', () => {
+    it('returns undefined when not set', () => {
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBeUndefined();
+    });
+
+    it('returns stored last selected space key', () => {
+      setLastSelectedSpace('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBe('http://localhost:5000:550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('returns undefined when localStorage item is empty string', () => {
+      localStorage.setItem('sharedspaces:lastSelectedSpace', '');
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBeUndefined();
+    });
+  });
+
+  describe('setLastSelectedSpace', () => {
+    it('stores the last selected space in serverUrl:spaceId format', () => {
+      setLastSelectedSpace('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
+      const stored = localStorage.getItem('sharedspaces:lastSelectedSpace');
+      expect(stored).toBe('http://localhost:5000:550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('overwrites existing last selected space', () => {
+      setLastSelectedSpace('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
+      setLastSelectedSpace('http://localhost:5001', '550e8400-e29b-41d4-a716-446655440001');
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBe('http://localhost:5001:550e8400-e29b-41d4-a716-446655440001');
+    });
+
+    it('handles server URLs with port numbers correctly', () => {
+      setLastSelectedSpace('http://localhost:8080', '550e8400-e29b-41d4-a716-446655440000');
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBe('http://localhost:8080:550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('handles server URLs with colons in path correctly', () => {
+      setLastSelectedSpace('http://example.com:3000/api', '550e8400-e29b-41d4-a716-446655440000');
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBe('http://example.com:3000/api:550e8400-e29b-41d4-a716-446655440000');
+    });
+  });
+
+  describe('clearLastSelectedSpace', () => {
+    it('removes the last selected space from storage', () => {
+      setLastSelectedSpace('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
+      clearLastSelectedSpace();
+      const lastSpace = getLastSelectedSpace();
+      expect(lastSpace).toBeUndefined();
+    });
+
+    it('does not throw when clearing non-existent value', () => {
+      expect(() => {
+        clearLastSelectedSpace();
+      }).not.toThrow();
+    });
+
+    it('leaves other localStorage keys intact', () => {
+      setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
+      setPrimaryDisplayName('Alice');
+      setLastSelectedSpace('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
+      
+      clearLastSelectedSpace();
+      
+      expect(getToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000')).toBe('token1');
+      expect(getPrimaryDisplayName()).toBe('Alice');
     });
   });
 });
