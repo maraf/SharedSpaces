@@ -2872,3 +2872,201 @@ Added 4 screenshot tests covering all offline states:
 
 - Issue #107: Improve offline experience
 - Spec file: `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
+
+---
+
+# Auto-Convert Long Text to .txt File
+
+**Decision Date:** 2026-03-24  
+**Decided By:** Kaylee (Backend Dev)  
+**Related Issue:** #109  
+**Status:** Active
+
+## Context
+
+When users share very long text messages, storing them inline in the database `Content` column becomes impractical. While SQLite can handle large TEXT values (up to 1GB), inline storage has performance and usability drawbacks for very long content.
+
+## Decision
+
+Implement automatic conversion of long text messages to `.txt` files when text exceeds a threshold:
+
+### Threshold Values
+
+- **Auto-convert threshold:** 65,536 bytes (64 KB)
+- **Maximum text size:** 1,048,576 bytes (1 MB)
+
+Text messages exceeding 64 KB are automatically converted to `.txt` files and stored via `IFileStorage`. Text between 64 KB and 1 MB triggers conversion. Text over 1 MB is rejected.
+
+### Implementation Details
+
+**Location:** `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs`
+
+**When text exceeds threshold:**
+1. Calculate UTF-8 byte count of the incoming text
+2. If > 64 KB and ≤ 1 MB:
+   - Acquire quota lock (same as file uploads)
+   - Check per-space storage quota
+   - Write text as a `.txt` file via `IFileStorage`
+   - Set `ContentType = "file"` instead of `"text"`
+   - Set `Content` to filename: `"{itemId:N}.txt"` (GUID without dashes + `.txt` extension)
+   - Set `FileSize` to byte count
+   - Use database transaction for consistency (relational databases only)
+
+**Quota enforcement:**
+- Auto-converted files count against the per-space storage quota (same as regular file uploads)
+- Quota check occurs before file write
+- Returns `413 Payload Too Large` if quota would be exceeded
+
+**SignalR broadcasts:**
+- Auto-converted items broadcast as file items with `ContentType = "file"`
+- Clients see these as downloadable `.txt` files
+
+### API Behavior Changes
+
+**For API clients:**
+- Submitting text > 64 KB with `ContentType=text` succeeds
+- Response shows `ContentType="file"` and `Content="{guid}.txt"`
+- No client-side change required; server handles conversion transparently
+- Download endpoint works identically for auto-converted files
+
+**File naming:**
+- Auto-converted files use item GUID without dashes: `f03e56cc54ae4e3ebf64f5ad7eb8cca5.txt`
+- Format: `{itemId:N}.txt` (N format removes dashes from GUID)
+
+## Rationale
+
+**Why 64 KB threshold?**
+- Practical balance between inline storage convenience and file handling
+- Most text messages are well under this limit
+- Allows substantial text (e.g., code snippets, logs) to stay inline
+- Large documents naturally convert to files
+
+**Why automatic conversion instead of rejection?**
+- Better user experience; no need to manually convert on client
+- Backwards compatible; clients don't need changes
+- Simplifies client implementation
+
+**Why count against quota?**
+- Auto-converted files consume disk space like regular uploads
+- Prevents quota bypass by submitting large text instead of files
+- Consistent resource accounting
+
+**Why use GUID without dashes for filename?**
+- Matches test expectations and provides clean, URL-safe filenames
+- Easy to parse and validate
+- Guaranteed unique per item
+
+## Impact
+
+- Users can share text messages up to 1 MB without manual file conversion
+- Text over 64 KB automatically becomes a downloadable `.txt` file
+- Storage quota enforcement applies uniformly to files and auto-converted text
+- No breaking changes for existing API clients
+
+## Testing
+
+Comprehensive test coverage in `tests/SharedSpaces.Server.Tests/ItemAutoConvertTests.cs`:
+- Short text stays inline
+- Text over threshold converts to file
+- Converted files are downloadable
+- Quota enforcement works for converted files
+- Filename format uses item GUID
+- Updates and edge cases handled correctly
+
+All 130 tests pass, including 13 tests specific to auto-conversion feature.
+
+## Alternatives Considered
+
+1. **Fixed 1 MB threshold** — Rejected: too large for practical inline storage
+2. **Reject instead of convert** — Rejected: worse UX, requires client changes
+3. **Configurable threshold** — Deferred: added as constant for now, can be made configurable if needed
+4. **Don't count against quota** — Rejected: creates quota bypass vulnerability
+
+---
+
+# Test Strategy: Auto-Convert Long Text to .txt File
+
+**Date:** 2026-03-24  
+**Author:** Zoe (Tester)  
+**Issue:** #109  
+**Status:** Implemented
+
+## Context
+
+Issue #109 requires automatic conversion of long text messages to `.txt` files when they exceed a byte threshold. Kaylee implemented this feature concurrently with test work. Comprehensive test strategy validates all edge cases.
+
+## Decision
+
+Created a dedicated test class `ItemAutoConvertTests.cs` with 13 integration tests covering:
+
+1. **Regression tests** — Verify existing behavior (short text stays as text)
+2. **Core feature tests** — Long text auto-converts to file with correct metadata
+3. **Boundary tests** — Text at/near the 64KB threshold
+4. **Unicode/multibyte tests** — Byte count vs char count with emoji and CJK characters
+5. **Quota enforcement tests** — Auto-converted files count against space quota
+6. **Update scenario tests** — Converting existing items works correctly
+7. **Download verification tests** — Auto-converted files are fully downloadable
+
+### Key Design Choices
+
+**Threshold Value: 64KB (65,536 bytes)**
+- Uses `DefaultMaxTextToFileThresholdBytes` constant directly from implementation
+- Single source of truth, no test/prod drift
+- Tests updated if threshold changes
+
+**Byte-Based Calculation**
+- All boundary tests use UTF-8 byte count, not character count
+- Unicode test validates 4-byte emoji chars exceed threshold in bytes even when under threshold in chars
+- Text encoding can vary by locale; bytes are unambiguous
+
+**Round-Trip Verification**
+- Tests verify full cycle: upsert → download → content equality
+- Ensures UTF-8 encoding is preserved through storage and retrieval
+- Catches encoding corruption issues that metadata-only tests would miss
+
+**Quota Enforcement Integration**
+- Auto-converted files must count against `Storage:MaxSpaceQuotaBytes`
+- Tests verify both successful conversion within quota and rejection when quota exceeded
+- Auto-conversion shouldn't bypass quota limits
+
+**Existing Test Pattern Reuse**
+- Uses `TestWebApplicationFactory` with InMemory database and file storage
+- Follows JWT generation, helper method, and assertion patterns from `ItemEndpointTests.cs`
+- Consistency, maintainability, leverages proven test infrastructure
+
+## Alternatives Considered
+
+1. **Configurable Threshold in Tests**
+   - Rejected: Would drift from production value, complicates test setup
+   - Better to use production constant and update tests if threshold changes
+
+2. **Mocking File Storage**
+   - Rejected: Need to verify real file storage integration
+   - InMemory implementation is lightweight enough for these tests
+
+3. **Unit Tests Instead of Integration Tests**
+   - Rejected: Auto-conversion involves quota checks, file storage, DB transactions
+   - Integration tests catch more issues in this feature
+
+4. **Single Large Test Method**
+   - Rejected: 13 focused tests give better failure messages and coverage reporting
+   - Easier to diagnose which scenario broke
+
+## Impact
+
+- **Test Coverage:** 13 new test cases specifically for auto-convert feature
+- **Maintenance:** Tests will need updating if threshold value changes
+- **CI Impact:** Tests compile independently and pass with implementation
+- **Documentation:** Tests serve as executable specification of auto-convert behavior
+
+## Acceptance Criteria
+
+✅ Tests compile independently  
+✅ Tests pass with server implementation  
+✅ All edge cases from issue description covered  
+✅ Quota enforcement validated  
+✅ UTF-8 encoding preservation verified  
+
+## Status
+
+✅ Complete — All tests pass, implementation validated.
