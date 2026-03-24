@@ -3124,3 +3124,87 @@ When adding new hub auth tests:
 2. Verify the connection state is NOT Connected
 3. Avoid asserting on HttpStatusCode unless testing a specific HTTP endpoint (not hub connections)
 
+# Test Coverage for Issue #104 — Auto-select Last Space
+
+**Date:** 2026-03-24  
+**Author:** Zoe (Tester)  
+**Status:** ✅ Complete
+
+## Summary
+
+Wrote comprehensive vitest test suite covering all aspects of the "auto-select last space on start" feature. Wash had already implemented the storage functions and auto-select logic; these tests verify correct behavior across all scenarios.
+
+## Test Coverage
+
+### Storage Layer Tests (token-storage.test.ts)
+Added 10 tests for last-space persistence functions:
+- `getLastSelectedSpace()`: returns undefined when not set, returns stored key, handles empty string
+- `setLastSelectedSpace()`: stores in `serverUrl:spaceId` format, overwrites existing, handles server URLs with colons/ports
+- `clearLastSelectedSpace()`: removes value, doesn't throw on missing value, preserves other localStorage keys
+
+### Integration Tests (app-shell-last-space.test.ts)
+Created 19 tests across 5 categories:
+
+**Auto-select on app start (6 tests):**
+- Happy path: auto-selects when both token and last-space exist
+- No saved space: stays on home view
+- Invitation priority: join view takes precedence over auto-select
+- Multiple spaces: selects correct space from list
+- Invalid JWT: graceful fallback when token corrupt
+- Space removed: clears last-space when token no longer exists
+
+**Intentional de-selection (2 tests):**
+- Header button from space view: clears last-space
+- Navigation from non-space view: preserves last-space
+
+**Space selection persistence (3 tests):**
+- Initial selection: persists to localStorage
+- Switching spaces: updates last-space to new space
+- Multiple restarts: preserves across restart cycles
+
+**Edge cases (4 tests):**
+- Corrupted localStorage value handling
+- Server URLs with colons (e.g., `http://example.com:8080`)
+- Token exists but doesn't match saved space
+- Empty spaces list graceful handling
+
+**Integration with selectSpace (2 tests):**
+- selectSpace method updates last-space correctly
+- Switching between multiple spaces updates last-space
+
+**De-selection behavior (2 tests):**
+- De-select and restart: no auto-select
+- Clearing last-space prevents auto-select
+
+## Implementation Details Verified
+
+1. **Storage key:** `sharedspaces:lastSelectedSpace`
+2. **Storage format:** `"serverUrl:spaceId"` (composite key string)
+3. **Lifecycle:** Auto-select runs in `connectedCallback()` after `loadSpacesFromStorage()`
+4. **Priority:** Invitation URL parsing checked before auto-select
+5. **Persistence:** `setLastSelectedSpace()` called in every `selectSpace()` invocation
+6. **De-selection:** Header button clears last-space when navigating home from space view
+
+## Test Strategy
+
+- Mocked invitation module to control URL parsing (avoids window.location manipulation)
+- Mocked jwt-decode to return predictable claims for test spaces
+- Used real localStorage (cleared in beforeEach) for true integration testing
+- Directly accessed component internal state via `(element as any).property` pattern
+- Followed existing app-shell test patterns (mock SignalR, mock idb-storage)
+
+## Quality Gates
+
+- ✅ All 408 client tests pass (389 existing + 19 new)
+- ✅ Token-storage tests: 27 total (17 existing + 10 new)
+- ✅ App-shell-last-space tests: 19 new
+- ✅ No breaking changes to existing tests
+- ✅ Coverage includes happy path, edge cases, error handling, multi-space scenarios
+
+## Impact
+
+- Issue #104 now has full test coverage before merging
+- Auto-select feature safe to ship with confidence
+- Regression protection for last-space persistence logic
+- Edge case handling verified (corrupted storage, missing tokens, invalid JWT)
+

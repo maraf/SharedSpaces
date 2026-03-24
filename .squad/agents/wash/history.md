@@ -847,3 +847,12 @@ Prevents layout drift when one card context is updated but not the other. Single
 **Files:**
 - `src/SharedSpaces.Client/src/lib/token-storage.ts` — storage functions
 - `src/SharedSpaces.Client/src/app-shell.ts` — autoSelectLastSpace, selectSpace, header click handler
+
+---
+
+## Session: 2026-03-24T14-50-55Z — Issue #104 Auto-Select Last Space (Complete)
+
+**Status:** ✅ COMPLETE  
+**Test Results:** 408/408 pass (389 existing + 19 new from Zoe)
+
+Finalized auto-select implementation with storage persistence and intentional de-select logic. Integrated with Zoe's comprehensive test coverage. Ready for code review and merge.
