@@ -25,6 +25,7 @@ import {
   removePendingShare,
   clearOfflineQueueForSpace,
   getOfflineQueueForSpace,
+  removeFromOfflineQueue,
   type PendingShareItem,
   type OfflineQueueItem,
 } from '../../lib/idb-storage';
@@ -399,6 +400,16 @@ export class SpaceView extends BaseElement {
     this.dispatchEvent(
       new CustomEvent('pending-shares-changed', { bubbles: true, composed: true }),
     );
+  }
+
+  private async dismissOfflineQueueItem(item: OfflineQueueItem) {
+    try {
+      await removeFromOfflineQueue(item.id);
+      this.offlineQueueItems = this.offlineQueueItems.filter((i) => i.id !== item.id);
+      this.offlineQueueCount = this.offlineQueueItems.length;
+    } catch {
+      // IndexedDB may not be available
+    }
   }
 
   // --- Offline Queue ---
@@ -856,7 +867,7 @@ export class SpaceView extends BaseElement {
   }
 
   private renderServerUnreachableBanner() {
-    if (this.connectionErrorType !== 'network') return nothing;
+    if (this.connectionErrorType !== 'network' || !this.isOnline) return nothing;
     return html`
       <div class="rounded-lg border border-red-500/30 bg-red-950/30 px-4 py-3" role="alert">
         <div class="flex items-center justify-between gap-3">
@@ -996,9 +1007,20 @@ export class SpaceView extends BaseElement {
                   Queued for upload
                 </p>
               </div>
+              <!-- Right: Dismiss Button -->
+              <div class="shrink-0">
+                <button
+                  @click=${() => this.dismissOfflineQueueItem(item)}
+                  class="rounded p-2 text-slate-500 transition hover:text-red-400"
+                  title="Dismiss"
+                  aria-label="Dismiss pending upload"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </div>
             `;
 
-            return this.renderUnifiedItemCard(content, undefined, 'border-slate-700/60', 'bg-slate-900/40');
+            return this.renderUnifiedItemCard(content, undefined, 'border-sky-500/40', 'bg-sky-950/20');
           })}
         </ul>
       </section>

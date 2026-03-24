@@ -318,8 +318,6 @@ export class AppShell extends BaseElement {
         <div
           class="mx-auto flex min-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col gap-6"
         >
-          ${!this.isOnline ? this.renderOfflineBanner() : nothing}
-
           <header class="sticky top-0 z-20 bg-slate-950 pt-6 pb-2 flex flex-col gap-4">
             <div class="flex items-center justify-between">
               <button
