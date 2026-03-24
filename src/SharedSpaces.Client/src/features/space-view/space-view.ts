@@ -1008,7 +1008,7 @@ export class SpaceView extends BaseElement {
                 </p>
               </div>
               <!-- Right: Dismiss Button -->
-              <div class="shrink-0">
+              <div class="-mr-2 shrink-0">
                 <button
                   @click=${() => this.dismissOfflineQueueItem(item)}
                   class="rounded p-2 text-slate-500 transition hover:text-red-400"
