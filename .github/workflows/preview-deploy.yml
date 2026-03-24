@@ -1,0 +1,68 @@
+name: Preview Deploy
+
+on:
+  pull_request:
+    types: [labeled, synchronize, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    name: Deploy Preview
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'deploy-preview') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency:
+      group: preview-deploy-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/SharedSpaces.Client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/SharedSpaces.Client
+        run: npm ci
+
+      - name: Build client
+        working-directory: src/SharedSpaces.Client
+        run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        id: deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_PREVIEW_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          skip_app_build: true
+          app_location: src/SharedSpaces.Client/dist
+          output_location: ''
+
+  teardown:
+    name: Teardown Preview
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'unlabeled' &&
+      github.event.label.name == 'deploy-preview' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency:
+      group: preview-deploy-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Close staging environment
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_PREVIEW_API_TOKEN }}
+          action: close
+          skip_app_build: true
+          app_location: src/SharedSpaces.Client/dist
