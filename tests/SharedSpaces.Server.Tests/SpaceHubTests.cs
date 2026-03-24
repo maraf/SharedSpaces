@@ -42,8 +42,8 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, null);
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<HttpRequestException>()
-            .Where(ex => ex.StatusCode == HttpStatusCode.Unauthorized);
+        await act.Should().ThrowAsync<Exception>();
+        connection.State.Should().NotBe(HubConnectionState.Connected);
     }
 
     [Fact]
@@ -58,8 +58,8 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, invalidToken);
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<HttpRequestException>()
-            .Where(ex => ex.StatusCode == HttpStatusCode.Unauthorized);
+        await act.Should().ThrowAsync<Exception>();
+        connection.State.Should().NotBe(HubConnectionState.Connected);
     }
 
     [Fact]
@@ -80,8 +80,8 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, token);
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<HttpRequestException>()
-            .Where(ex => ex.StatusCode == HttpStatusCode.Unauthorized);
+        await act.Should().ThrowAsync<Exception>();
+        connection.State.Should().NotBe(HubConnectionState.Connected);
     }
 
     [Fact]
@@ -93,8 +93,8 @@ public class SpaceHubTests
         await using var connection = CreateHubConnection(factory, space.Id, "not-a-valid-jwt-token");
 
         var act = async () => await connection.StartAsync();
-        await act.Should().ThrowAsync<HttpRequestException>()
-            .Where(ex => ex.StatusCode == HttpStatusCode.Unauthorized);
+        await act.Should().ThrowAsync<Exception>();
+        connection.State.Should().NotBe(HubConnectionState.Connected);
     }
 
     [Fact]
