@@ -3124,6 +3124,145 @@ When adding new hub auth tests:
 2. Verify the connection state is NOT Connected
 3. Avoid asserting on HttpStatusCode unless testing a specific HTTP endpoint (not hub connections)
 
+# Decision: CORS Origins Configuration Format Change
+
+**Date:** 2026-03-24  
+**Author:** Kaylee  
+**Issue:** #115  
+**Status:** Implemented
+
+## Context
+
+The CORS configuration previously accepted only a single origin string via `Cors:Origins`. For multi-environment deployments (e.g., production + staging), multiple origins need to be whitelisted.
+
+## Decision
+
+Changed `Cors:Origins` from a single string to an array of strings.
+
+### Configuration Format
+
+**Before:**
+```json
+{
+  "Cors": {
+    "Origins": "http://localhost:5173"
+  }
+}
+```
+
+**After:**
+```json
+{
+  "Cors": {
+    "Origins": ["http://localhost:5173", "https://example.com"]
+  }
+}
+```
+
+### Implementation Details
+
+**1. Program.cs (CORS Policy Setup):**
+```csharp
+var allowedOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
+    ?? new[] { "https://localhost:5173" };
+policy.WithOrigins(allowedOrigins)
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials();
+```
+
+**2. Configuration Provider Formats:**
+
+| Provider | Format | Example |
+|----------|--------|---------|
+| appsettings.json | JSON array | `"Origins": ["http://localhost:5173"]` |
+| Environment variables | Double underscore + index | `Cors__Origins__0=http://localhost:5173`<br>`Cors__Origins__1=https://example.com` |
+| In-memory (tests) | Colon + index | `["Cors:Origins:0"] = "..."` |
+
+**3. Aspire AppHost.cs:**
+```csharp
+server.WithEnvironment("Cors__Origins__0", client.GetEndpoint("http"));
+```
+
+Uses `Cors__Origins__0` (environment variable format) to set the first origin dynamically.
+
+**4. Test Configuration:**
+```csharp
+["Cors:Origins:0"] = "https://localhost:5173"
+```
+
+Uses colon-based indexing for ASP.NET Core in-memory configuration provider.
+
+## Rationale
+
+**Why array format?**
+- Supports multiple origins without needing multiple config keys
+- Standard ASP.NET Core configuration pattern for collections
+- `WithOrigins()` already accepts `params string[]`, so minimal code change
+
+**Why these index formats?**
+- ASP.NET Core configuration binder uses `:` for hierarchy in structured providers (JSON, in-memory)
+- Environment variables use `__` instead of `:` (colons not portable across shells)
+- Both map to the same logical array structure
+
+**Fallback behavior:**
+- If `Cors:Origins` is not configured, defaults to `["https://localhost:5173"]`
+- Ensures localhost development works out-of-the-box
+
+## Backwards Compatibility
+
+**Breaking change:** Existing single-string configuration will no longer work. Deployments must update config to array format.
+
+**Migration:**
+```bash
+# Old environment variable
+Cors__Origins=http://localhost:5173
+
+# New environment variable (array format)
+Cors__Origins__0=http://localhost:5173
+```
+
+**Impact:** Low. This is a development/ops config change only. No client-side changes required. The server build and tests both pass with the new format.
+
+## Alternatives Considered
+
+**1. Keep single string, add second key (`Cors:Origins2`, etc.)**
+- ❌ Not scalable; arbitrary key names
+- ❌ Doesn't leverage configuration binder's array support
+
+**2. Comma-separated string**
+- ❌ Requires custom parsing logic
+- ❌ Doesn't match ASP.NET Core conventions
+
+**3. Accept both string and array (union type)**
+- ❌ Increases complexity
+- ❌ Ambiguous behavior if both are configured
+
+## Testing
+
+**Build Verification:**
+- ✅ `SharedSpaces.Server.csproj` builds successfully
+- ✅ `SharedSpaces.Server.Tests.csproj` builds successfully
+
+**Configuration Verification:**
+- ✅ appsettings.Development.json uses array format
+- ✅ AppHost.cs uses environment variable array format
+- ✅ AdminEndpointTests.cs uses in-memory array format
+
+**Runtime Verification:**
+- ✅ `CorsConfigurationTests.cs` covers multi-origin allow/deny, default fallback, preflight, and credentials behavior (9 integration tests)
+
+## Files Modified
+
+- `src/SharedSpaces.Server/Program.cs` — CORS config reads array
+- `src/SharedSpaces.Server/appsettings.Development.json` — JSON array format
+- `src/AppHost.cs` — Environment variable with index
+- `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs` — In-memory config with index
+
+## Future Considerations
+
+- Maintain and extend `CorsConfigurationTests.cs` to cover additional CORS origin and configuration scenarios over time
+- Document deployment config migration in README or deployment guide
 # Test Coverage for Issue #104 — Auto-select Last Space
 
 **Date:** 2026-03-24  

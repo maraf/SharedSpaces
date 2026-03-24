@@ -27,6 +27,6 @@ var client = builder.AddNpmApp("client", "./SharedSpaces.Client", "dev")
     .WithEnvironment("BROWSER", "none")
     .WaitFor(server);
 
-server.WithEnvironment("Cors__Origins", client.GetEndpoint("http"));
+server.WithEnvironment("Cors__Origins__0", client.GetEndpoint("http"));
 
 builder.Build().Run();

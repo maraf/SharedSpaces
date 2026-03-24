@@ -915,6 +915,42 @@ Tests defined expected behavior precisely:
 
 Implementation matched specification exactly, demonstrating the power of comprehensive test design for fast, reliable delivery.
 
+---
+
+## Session: Issue #115 CORS Multi-Origin Tests (2026-03-24)
+
+### CORS Configuration Integration Tests
+
+**Created:** `tests/SharedSpaces.Server.Tests/CorsConfigurationTests.cs` with 9 comprehensive tests covering multi-origin CORS behavior after Kaylee's change from single-value `Cors:Origins` to array-based configuration.
+
+**Test coverage:**
+
+1. **Single origin configured** — Verifies existing behavior preserved: single origin allowed, CORS headers present
+2. **Multiple origins (3 tests)** — Verifies array config works: first/second/third origin all allowed independently
+3. **Unconfigured origin rejected** — Non-whitelisted origin receives no CORS headers (silent rejection)
+4. **Default fallback** — When no origins configured (`origins: null`), falls back to `https://localhost:5173`
+5. **Preflight requests (2 tests)** — OPTIONS requests with allowed/disallowed origins return correct headers
+6. **Credentials header** — Verifies `AllowCredentials` policy includes `Access-Control-Allow-Credentials: true`
+
+**Testing patterns:**
+
+- Uses `TestWebApplicationFactory` with custom constructor accepting `string[]? origins` parameter
+- Injects config via `ConfigureAppConfiguration` with indexed keys (`Cors:Origins:0`, `Cors:Origins:1`, etc.)
+- Passes `null` to factory to test default fallback behavior (no origins configured)
+- Validates CORS headers by sending requests with `Origin` header and checking response headers
+- Preflight tests use OPTIONS method with `Access-Control-Request-Method` header
+
+**Key discoveries:**
+
+- CORS middleware returns no `Access-Control-Allow-Origin` header when origin is not whitelisted (silent rejection, not 403)
+- Preflight requests (OPTIONS) follow same origin validation as regular requests
+- `AllowCredentials` adds `Access-Control-Allow-Credentials: true` header when origin is allowed
+- Config array binding works with indexed keys in ASP.NET Core configuration system
+
+**Test results:** All 9 CORS tests pass. Full test suite: 138 passing (includes these 9 new tests), 1 pre-existing flaky test unrelated to CORS changes.
+
+Implementation matched specification exactly, demonstrating the power of comprehensive test design for fast, reliable delivery.
+
 
 ---
 
