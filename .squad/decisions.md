@@ -3496,3 +3496,35 @@ Add a helper (extension method or property) that decodes the JWT (without valida
 
 Follow-up PR after #121 merges to implement this simplification.
 
+
+---
+
+## 2026-03-25: CLI config stores only JWT token (Implemented)
+
+**Date:** 2026-03-25
+**Author:** Kaylee (Backend Dev)
+**Status:** ✅ Implemented & tested
+**PR:** #121
+
+### Decision
+
+`SpaceEntry` in CLI config now persists only the `jwtToken` field. All other metadata (`SpaceId`, `ServerUrl`, `DisplayName`, `SpaceName`) is extracted from JWT claims at runtime using `JwtSecurityTokenHandler`. The `JoinedAt` field was removed entirely — it was never in the JWT and added no value.
+
+### Rationale
+
+- **Single source of truth:** The JWT already carries `space_id`, `server_url`, `display_name`, and `space_name` as claims. Duplicating them in config creates drift risk.
+- **Simpler config:** Config JSON shrinks to `{ "spaces": [{ "jwtToken": "eyJ..." }] }`.
+- **No signature validation needed:** We're just reading claims, not validating trust — the server already validated when issuing the token.
+
+### Implementation
+
+- `SpaceEntry` computed properties use `[JsonIgnore]` so they never serialize.
+- `ConfigService.GetSpaceAsync` and `UpsertSpaceAsync` match on computed `SpaceId` — no logic changes needed.
+- `JoinCommand` now sets only `JwtToken` when creating entries.
+- `UploadCommand` unchanged — it already read `space.ServerUrl` and `space.SpaceId` which are now computed.
+- Added `System.IdentityModel.Tokens.Jwt` 8.17.0 to `SharedSpaces.Cli.Core.csproj`.
+- All 19 existing CLI Core tests pass.
+
+### Directive Source
+
+User directive from Marek (2026-03-25T11:30:44Z): Drop `JoinedAt` from CLI config entirely. Config should only store JwtToken — all other fields are extracted from JWT claims at runtime.

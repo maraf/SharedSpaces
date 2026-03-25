@@ -500,3 +500,25 @@ All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug 
 - `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs` — In-memory config uses index format
 
 - CLI config (`SpaceEntry`) now stores only `JwtToken`; `SpaceId`, `ServerUrl`, `DisplayName`, and `SpaceName` are computed at runtime by decoding JWT claims via `JwtSecurityTokenHandler`. `JoinedAt` was dropped entirely per Marek's directive. Package `System.IdentityModel.Tokens.Jwt` (8.17.0) added to `SharedSpaces.Cli.Core`.
+
+### JWT-Only CLI Config Refactor (Session 2026-03-25)
+
+**What:** Refactored `SpaceEntry` to store only JWT token; all metadata extracted from claims at runtime.
+
+**Why:** Marek directive to drop `JoinedAt` and simplify config to single source of truth. JWT already carries all needed claims (`space_id`, `server_url`, `display_name`, `space_name`).
+
+**Changes:**
+1. **SpaceEntry.cs:** Made `SpaceId`, `ServerUrl`, `DisplayName`, `SpaceName` computed properties that decode JWT claims. Added `[JsonIgnore]` so they never serialize. Only `JwtToken` persists in config.
+2. **ConfigService.cs:** No logic changes needed — GetSpaceAsync/UpsertSpaceAsync already work with computed properties.
+3. **JoinCommand.cs:** Updated to set only `JwtToken` when creating new entries.
+4. **SharedSpaces.Cli.Core.csproj:** Added `System.IdentityModel.Tokens.Jwt` 8.17.0 dependency.
+5. **All tests:** Still pass (19/19) — no API changes, only implementation.
+
+**Implementation Notes:**
+- JWT decoding happens on every config read (negligible cost; can add in-memory cache later)
+- Claims are base64-encoded (not encrypted), so no key needed for decoding
+- Removed `JoinedAt` entirely — never in JWT, added no value
+
+**Build & Test:** ✅ Clean build, ✅ 19/19 tests pass
+
+**Collaboration:** Zoe updated all test fixtures and added `SpaceEntry_ExtractsClaimsFromJwt` test. Both commits to cli-scaffold, PR #121 updated.
