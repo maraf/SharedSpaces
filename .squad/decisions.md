@@ -3347,3 +3347,152 @@ Created 19 tests across 5 categories:
 - Regression protection for last-space persistence logic
 - Edge case handling verified (corrupted storage, missing tokens, invalid JWT)
 
+
+---
+
+# Decision: In-memory sync manifest
+
+**Decision Date:** 2026-03-25  
+**Decided By:** Marek Fišera (via Copilot directive)  
+**Status:** Active
+
+## Summary
+
+Sync manifest is stored in-memory only — no JSON file on disk. On startup, scan the sync folder to rebuild known file state from existing filenames. During runtime, track downloaded files in memory to prevent re-upload loops.
+
+## Rationale
+
+Multiple concurrent daemons targeting the same space (and thus potentially overlapping sync folders) create write contention if the manifest is a shared JSON file. An in-memory + folder scan on startup is simpler, conflict-free, and avoids lock contention.
+
+## Implementation
+
+- On daemon startup: scan the sync folder and build an in-memory map of known files and their state
+- During runtime: maintain the manifest in memory, updating as files are downloaded/uploaded
+- No persistent manifest file
+
+## Trade-offs
+
+**Pros:**
+- No lock contention between concurrent daemons
+- Simpler code (no JSON persistence layer)
+- Folder scan is fast for reasonable file counts
+
+**Cons:**
+- Manifest is ephemeral — lost on restart (but rebuild from folder is deterministic)
+- Larger memory footprint for sync folders with many files (acceptable unless tracking 100K+ files per space)
+
+## Impact
+
+- Sync daemon startup adds folder scan phase (negligible latency for typical folders)
+- Download tracking will not persist across daemon restarts
+
+---
+
+# Decision: CLI config file security model
+
+**Decision Date:** 2026-03-25  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Active
+
+## Context
+
+PR #121 review feedback on `ConfigService.SaveAsync` — how to safely store JWT tokens in `~/.sharedspaces/config.json`.
+
+## Decision
+
+The CLI config file containing JWT tokens is now written **atomically** (temp file + `File.Move`) and restricted to **owner-only permissions** (`0600`) on Unix systems.
+
+## Rationale
+
+- **Atomic writes:** Prevent partial/corrupt config if the process is killed mid-write (ensures config is either fully old state or fully new state, never partial)
+- **Owner-only permissions:** Ensure other users on shared machines cannot read stored JWT tokens (threat: token theft)
+- **Cross-platform handling:** Windows doesn't support Unix file mode, so atomic write behavior is gated on `OperatingSystem.IsWindows()`
+
+## Implementation
+
+- Write to temporary file first (e.g., `config.json.tmp`)
+- Use `File.Move(tmp, target, overwrite: true)` to make it atomic
+- On Unix: call `File.SetUnixFileMode(configPath, UnixFileMode.UserRead | UnixFileMode.UserWrite)` after move
+- On Windows: skip `SetUnixFileMode` (no-op, permissions inherited from ACLs)
+
+## Impact
+
+- **Affected code:** `ConfigService` in `SharedSpaces.Cli.Core` (specifically `SaveAsync` method)
+- **Team awareness:** All CLI feature developers should know that config writes briefly create a `.tmp` sibling file
+- **User benefit:** JWTs stored in config are now secure against local user enumeration
+
+---
+
+# Decision: Simplify CliConfig by extracting fields from JWT
+
+**Decision Date:** 2026-03-25  
+**Decided By:** Mal (Lead/Architect)  
+**Context:** PR #121 review comment from Marek — are CliConfig fields redundant with JWT data?  
+**Status:** Recommendation — pending implementation
+
+## Question & Analysis
+
+Marek asked: Does the CLI config store data that's already in the JWT?
+
+After analyzing the server's JWT generation code (`TokenEndpoints.cs:CreateToken`), the answer is **yes — 3 of 5 fields are redundant**.
+
+### JWT Claims Available
+
+The server embeds these claims in every JWT:
+
+| Claim | Type | Example |
+|-------|------|---------|
+| `sub` | Member ID | `a1b2c3d4-...` |
+| `display_name` | Display name | `Alice` |
+| `server_url` | Server URL | `https://spaces.example.com` |
+| `space_id` | Space ID | `e5f6g7h8-...` |
+| `space_name` | Space name | `My Space` |
+
+### Current CliConfig Fields & Audit
+
+| Field | In JWT? | Verdict | Reason |
+|-------|---------|---------|--------|
+| `JwtToken` | N/A | **KEEP** | IS the token; cannot be derived |
+| `SpaceId` | ✅ `space_id` | **REMOVE** | Extract from JWT |
+| `ServerUrl` | ✅ `server_url` | **REMOVE** | Extract from JWT |
+| `DisplayName` | ✅ `display_name` | **REMOVE** | Extract from JWT |
+| `JoinedAt` | ❌ | **KEEP** | No `iat` claim; not derivable |
+
+## Recommendation
+
+Reduce `SpaceEntry` to two stored fields only:
+
+```csharp
+public sealed class SpaceEntry
+{
+    public required string JwtToken { get; set; }
+    public required DateTime JoinedAt { get; set; }
+}
+```
+
+Add a helper (extension method or property) that decodes the JWT (without validation — server validates) to expose `SpaceId`, `ServerUrl`, `DisplayName`, and `SpaceName` as computed properties at read time.
+
+## Trade-offs
+
+### Pros
+- **Single source of truth:** Token IS the authority; config can't drift from claims
+- **Resiliency:** If display name changes server-side, re-issued token auto-reflects it
+- **Smaller config:** Less data on disk
+- **Correctness:** Eliminates subtle sync bugs (stale cached fields)
+
+### Cons
+- **New dependency:** `System.IdentityModel.Tokens.Jwt` in Cli.Core (small, standard)
+- **Runtime cost:** JWT decoding on every config read (negligible; can cache in-memory)
+- **Debuggability:** Base64-decoded claims slightly less human-readable than plain JSON fields (minor trade-off)
+
+## Implementation Notes
+
+1. JWT can be decoded without the signing key (claims are base64-encoded, not encrypted)
+2. Use `JwtSecurityTokenHandler.ReadJwtToken()` to parse, or manual base64 decode of payload
+3. Consider a lazy cache (decode once, hold in memory during app lifetime) to avoid repeated decode
+4. `space_name` claim is a bonus — not currently in CliConfig but available for display commands
+
+## Next Steps
+
+Follow-up PR after #121 merges to implement this simplification.
+
