@@ -19,7 +19,7 @@ Join a space by exchanging an invitation PIN for an access token.
 sharedspaces join "https://server.example.com|550e8400-e29b-41d4-a716-446655440000|123456"
 
 # Using a client invite URL
-sharedspaces join "https://app.example.com/?join=https%3A%2F%2Fserver.example.com%7C550e8400%7C123456"
+sharedspaces join "https://app.example.com/?join=https%3A%2F%2Fserver.example.com%7C550e8400-e29b-41d4-a716-446655440000%7C123456"
 
 # PIN provided separately
 sharedspaces join "https://server.example.com|550e8400-e29b-41d4-a716-446655440000" --pin 123456

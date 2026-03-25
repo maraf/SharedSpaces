@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using SharedSpaces.Cli.Core.Models;
 using SharedSpaces.Cli.Core.Services;
 
 namespace SharedSpaces.Cli.Commands;
@@ -28,7 +29,18 @@ public static class UploadCommand
     private static async Task HandleAsync(FileInfo file, string spaceId, CancellationToken ct)
     {
         var configService = new ConfigService();
-        var space = await configService.GetSpaceAsync(spaceId, ct);
+        SpaceEntry? space;
+
+        try
+        {
+            space = await configService.GetSpaceAsync(spaceId, ct);
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
 
         if (space is null)
         {
@@ -74,7 +86,7 @@ public static class UploadCommand
         }
         catch (JsonException ex)
         {
-            Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
+            Console.Error.WriteLine($"Error: Failed to parse server response — {ex.Message}");
             Environment.ExitCode = 1;
         }
     }

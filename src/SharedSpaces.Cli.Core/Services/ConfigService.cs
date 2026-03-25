@@ -49,7 +49,14 @@ public sealed class ConfigService
         Directory.CreateDirectory(_configDir);
 
         var tempPath = _configPath + ".tmp";
-        await using (var stream = File.Create(tempPath))
+        await using (var stream = OperatingSystem.IsWindows()
+            ? File.Create(tempPath)
+            : new FileStream(tempPath, new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+            }))
         {
             await JsonSerializer.SerializeAsync(stream, config, JsonOptions, ct);
         }

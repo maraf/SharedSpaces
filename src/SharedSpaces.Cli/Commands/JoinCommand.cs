@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.Json;
 using SharedSpaces.Cli.Core;
 using SharedSpaces.Cli.Core.Models;
 using SharedSpaces.Cli.Core.Services;
@@ -73,6 +74,21 @@ public static class JoinCommand
         catch (HttpRequestException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (IOException ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"Error: Failed to write CLI config — {ex.Message}");
             Environment.ExitCode = 1;
         }
     }

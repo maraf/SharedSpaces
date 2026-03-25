@@ -13,7 +13,8 @@ public static partial class InvitationParser
     private static partial Regex PinPattern();
 
     /// <summary>
-    /// Parses a raw invitation string in the format "serverUrl|spaceId|pin".
+    /// Parses a raw invitation string in the format "serverUrl|spaceId[|pin]".
+    /// The optional PIN segment, if present, must be a 6-digit code.
     /// </summary>
     public static InvitationData? ParseInvitationString(string invitation)
     {
