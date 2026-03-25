@@ -560,3 +560,77 @@ Owner must configure trusted publisher on nuget.org:
 
 **Commit:** `ci(cli): add NuGet trusted publishing to CLI workflow` (7e0e74b)
 
+
+---
+
+## Session: PR #121 Second Round Review (2026-03-25)
+
+### Applied Reviewer Feedback on Error Handling & Security
+
+**What:** Addressed 5 unresolved PR review threads with fixes for error handling, documentation accuracy, and security issues.
+
+**Why:** 
+1. CLI should catch local filesystem/config failures gracefully instead of crashing
+2. Documentation examples should use valid data that passes validation
+3. Security: temp files containing JWTs should have restrictive permissions from creation
+4. Error messages should accurately describe the failure source
+
+**Changes Made:**
+
+1. **JoinCommand.cs (Thread r2987688869):**
+   - Added catch blocks for `UnauthorizedAccessException`, `IOException`, and `JsonException`
+   - Local config write failures now show user-friendly stderr messages with exit code 1
+   - Mirrors UploadCommand's comprehensive error handling
+
+2. **README.md (Thread r2987688890):**
+   - Fixed truncated GUID in client invite URL example
+   - Changed `550e8400` → `550e8400-e29b-41d4-a716-446655440000`
+   - Now passes InvitationParser's GUID validation
+
+3. **InvitationParser.cs (Thread r2987688910):**
+   - Updated XML doc to reflect optional PIN parameter
+   - Format changed from `"serverUrl|spaceId|pin"` → `"serverUrl|spaceId[|pin]"`
+   - Added note that optional PIN must be 6 digits
+
+4. **ConfigService.cs (Thread r2987688928):**
+   - Fixed security issue: temp file now created with 0600 permissions from start
+   - Uses `FileStreamOptions` with `UnixCreateMode` on non-Windows platforms
+   - Prevents brief window where JWT file could be world-readable with permissive umask
+
+5. **UploadCommand.cs (Thread r2987764102):**
+   - Narrowed try/catch scope to separate config errors from server response errors
+   - Config read errors handled at start with "Failed to read CLI config"
+   - Server response JsonException now shows "Failed to parse server response"
+   - Eliminates misleading error messages
+
+**Build & Test:** ✅ Clean build, ✅ 19/19 tests pass
+
+**Commit:** `fix(cli): apply second round of PR review feedback` (02877cb)
+
+**PR Activity:** Replied to all 5 unresolved threads on PR #121 confirming fixes with commit reference.
+
+## Learnings
+
+### Exception Handling Strategy
+- **Scope Matters:** Narrow try/catch blocks to specific operations when error sources differ (config I/O vs server responses). This enables accurate error messages.
+- **Local vs Remote Failures:** Commands should catch both network errors (HttpRequestException) and local filesystem errors (UnauthorizedAccessException, IOException, JsonException).
+- **Mirror Patterns:** When two commands do similar operations (join/upload both use config), mirror their error handling for consistency.
+
+### Unix File Permissions
+- **FileStreamOptions.UnixCreateMode:** Sets permissions atomically at file creation (available in .NET 6+).
+- **Security:** For sensitive files (JWT tokens), use 0600 from creation — don't rely on post-creation `SetUnixFileMode()`.
+- **Pattern:** `new FileStream(path, new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite })`
+
+### Documentation Best Practices
+- **Valid Examples:** All code/URL examples in docs should pass the actual parser/validator.
+- **Full GUIDs:** Always use complete GUIDs in examples (8-4-4-4-12 format), never truncated.
+- **Optional Params:** XML docs should accurately reflect optional parameters with `[|param]` notation.
+
+---
+
+## 2026-03-25: PR #121 Feedback Round 2 Completed
+
+📌 **Team update (2026-03-25T12:07:59Z):** All 5 unresolved PR #121 review feedback items applied — error handling, documentation, file permissions, error messaging. 19 tests passing, committed 02877cb, pushed, thread replies sent.
+
+**Session:** `2026-03-25T12-07-59Z-pr-feedback-round2`  
+**Outcome:** ✅ Complete
