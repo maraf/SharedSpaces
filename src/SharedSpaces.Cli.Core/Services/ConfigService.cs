@@ -29,16 +29,37 @@ public sealed class ConfigService
         if (!File.Exists(_configPath))
             return new CliConfig();
 
-        await using var stream = File.OpenRead(_configPath);
-        return await JsonSerializer.DeserializeAsync<CliConfig>(stream, JsonOptions, ct) ?? new CliConfig();
+        try
+        {
+            await using var stream = File.OpenRead(_configPath);
+            return await JsonSerializer.DeserializeAsync<CliConfig>(stream, JsonOptions, ct) ?? new CliConfig();
+        }
+        catch (JsonException)
+        {
+            return new CliConfig();
+        }
+        catch (IOException)
+        {
+            return new CliConfig();
+        }
     }
 
     public async Task SaveAsync(CliConfig config, CancellationToken ct = default)
     {
         Directory.CreateDirectory(_configDir);
 
-        await using var stream = File.Create(_configPath);
-        await JsonSerializer.SerializeAsync(stream, config, JsonOptions, ct);
+        var tempPath = _configPath + ".tmp";
+        await using (var stream = File.Create(tempPath))
+        {
+            await JsonSerializer.SerializeAsync(stream, config, JsonOptions, ct);
+        }
+
+        File.Move(tempPath, _configPath, overwrite: true);
+
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(_configPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     public async Task<SpaceEntry?> GetSpaceAsync(string spaceId, CancellationToken ct = default)

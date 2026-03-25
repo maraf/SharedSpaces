@@ -122,7 +122,7 @@ public class ConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_UsesDashesInJsonKeys()
+    public async Task SaveAsync_UsesCamelCaseInJsonKeys()
     {
         await _service.UpsertSpaceAsync(new SpaceEntry
         {

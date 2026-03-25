@@ -962,3 +962,7 @@ Implementation matched specification exactly, demonstrating the power of compreh
 **Quality Gate:** All 408 tests pass, no breaking changes
 
 Wrote comprehensive test suite for Wash's auto-select implementation. Full regression protection in place. Feature ready for code review and merge.
+
+## Learnings
+
+- **Test name accuracy matters:** Renamed `SaveAsync_UsesDashesInJsonKeys` → `SaveAsync_UsesCamelCaseInJsonKeys` in `tests/SharedSpaces.Cli.Core.Tests/ConfigServiceTests.cs` (line 125). The test asserted camelCase JSON keys (`spaceId`, `serverUrl`, etc.) but the method name incorrectly referenced "dashes." Test names must precisely describe what is being asserted to avoid misleading future readers. Caught via PR #121 code review.

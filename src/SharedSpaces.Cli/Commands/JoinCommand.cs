@@ -35,8 +35,9 @@ public static class JoinCommand
         if (invitation is null)
         {
             Console.Error.WriteLine("Error: Invalid invite URL or invitation string.");
-            Console.Error.WriteLine("Expected format: serverUrl|spaceId|pin");
+            Console.Error.WriteLine("Expected format: serverUrl|spaceId[|pin]");
             Console.Error.WriteLine("            or: https://app.example.com/?join=serverUrl%7CspaceId%7Cpin");
+            Console.Error.WriteLine("Use --pin to provide the PIN separately when not embedded in the invite.");
             Environment.ExitCode = 1;
             return;
         }

@@ -290,3 +290,28 @@ All 6 architecture decisions listed above require user input before implementati
 - Client uses Lit HTML + Web Components (NOT React) — confirmed from `.squad/agents/mal/history.md` decision log
 - Screenshots exist in `docs/screenshots/`
 - Tech stack matches actual implementation (.NET 10, SQLite, SignalR, JWT)
+
+### CLI Config vs JWT Claims Analysis (PR #121 Review)
+
+**Context:** Marek asked on PR #121 whether CliConfig fields are redundant with JWT claims.
+
+**JWT Claims in SharedSpaces tokens** (from `Features/Tokens/TokenEndpoints.cs` and `JwtAuthenticationExtensions.cs`):
+- `sub` — member ID (GUID)
+- `display_name` — member's display name
+- `server_url` — server URL
+- `space_id` — space UUID
+- `space_name` — space name
+
+**CliConfig SpaceEntry fields vs JWT:**
+- `SpaceId` — ✅ redundant (in JWT as `space_id`)
+- `ServerUrl` — ✅ redundant (in JWT as `server_url`)
+- `DisplayName` — ✅ redundant (in JWT as `display_name`)
+- `JwtToken` — must be stored (it IS the credential)
+- `JoinedAt` — must be stored (NOT in JWT; no `iat` claim is set)
+
+**Recommendation:** Config can be reduced to `JwtToken` + `JoinedAt`. Other fields parsed from JWT at runtime. Trade-off: requires JWT parsing dependency in Cli.Core, but ensures single source of truth and prevents config/token drift.
+
+**Key file paths:**
+- JWT generation: `src/SharedSpaces.Server/Features/Tokens/TokenEndpoints.cs` (CreateToken method)
+- Claim type constants: `src/SharedSpaces.Server/Features/Tokens/JwtAuthenticationExtensions.cs` (SpaceMemberClaimTypes)
+- CLI config model: `src/SharedSpaces.Cli.Core/Models/CliConfig.cs`

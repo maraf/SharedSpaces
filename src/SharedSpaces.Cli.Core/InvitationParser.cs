@@ -9,7 +9,7 @@ public static partial class InvitationParser
     [GeneratedRegex(@"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOptions.IgnoreCase)]
     private static partial Regex GuidPattern();
 
-    [GeneratedRegex(@"^\d+$")]
+    [GeneratedRegex(@"^\d{6}$")]
     private static partial Regex PinPattern();
 
     /// <summary>

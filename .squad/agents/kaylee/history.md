@@ -102,6 +102,9 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - `ForwardedHeadersOptions` must clear `KnownIPNetworks` and `KnownProxies` for reverse proxy deployments (containers, cloud)—ASP.NET Core defaults to trusting only localhost, silently ignoring `X-Forwarded-*` headers from real proxies. Note: `KnownNetworks` is deprecated in .NET 10; use `KnownIPNetworks`.
 - `UseForwardedHeaders()` is placed first in the middleware pipeline (before CORS, auth, HTTPS redirection) so `HttpRequest.Scheme` and `HttpRequest.Host` reflect the proxy's values when endpoints generate URLs.
 - To include related entity counts in response DTOs (e.g. `ItemCount` on `MemberResponse`), use a correlated subquery via `db.SpaceItems.Count(...)` inside the `.Select()` projection rather than a navigation property or join — EF Core translates it to efficient SQL and keeps the query as a single round-trip.
+- CLI `ConfigService.SaveAsync` uses atomic temp-file + `File.Move(overwrite: true)` and sets 0600 Unix permissions via `File.SetUnixFileMode` to protect JWT tokens at rest.
+- CLI PIN validation enforces exactly 6 digits (`^\d{6}$`) to match server-generated PINs; previously accepted any digit length.
+- CLI error handling strategy: catch `HttpRequestException`, `UnauthorizedAccessException`, `IOException`, and `JsonException` in command handlers, printing user-friendly messages to stderr rather than crashing with stack traces.
 
 ## Team Updates (2026-03-17 Continued)
 
