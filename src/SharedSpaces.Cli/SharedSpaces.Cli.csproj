@@ -8,8 +8,8 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>sharedspaces</ToolCommandName>
     <PackageId>SharedSpaces.Cli</PackageId>
-    <Version>0.1.0</Version>
-    <Description>SharedSpaces CLI — join spaces and upload files from the command line</Description>
+    <VersionPrefix>0.0.0</VersionPrefix>
+    <Description>SharedSpaces CLI — join spaces and sync files from the command line</Description>
   </PropertyGroup>
 
   <ItemGroup>

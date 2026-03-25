@@ -134,11 +134,10 @@ public class ConfigServiceTests : IDisposable
         });
 
         var json = await File.ReadAllTextAsync(Path.Combine(_tempDir, "config.json"));
-        json.Should().Contain("\"space-id\"");
-        json.Should().Contain("\"server-url\"");
-        json.Should().Contain("\"jwt-token\"");
-        json.Should().Contain("\"display-name\"");
-        json.Should().Contain("\"joined-at\"");
-        json.Should().NotContain("_");
+        json.Should().Contain("\"spaceId\"");
+        json.Should().Contain("\"serverUrl\"");
+        json.Should().Contain("\"jwtToken\"");
+        json.Should().Contain("\"displayName\"");
+        json.Should().Contain("\"joinedAt\"");
     }
 }
