@@ -3623,3 +3623,168 @@ The `sync` command uses a hybrid approach:
 - Persistent manifest for resumable sync across command restarts
 - Progress UI with file count / size transferred
 - Conflict resolution strategy options (prompt, rename, skip)
+
+---
+
+# Decision: Bidirectional Sync via FileSystemWatcher
+
+**Author:** Kaylee (Backend Dev)  
+**Date:** 2025-01-26  
+**Issue:** #120  
+**Status:** Implemented
+
+## Context
+
+The `sync` command (issue #119) implemented download-only synchronization — files added to a space via web/API were downloaded to the local folder. Issue #120 required extending this to bidirectional sync: files created locally should be uploaded to the space automatically.
+
+## Decision
+
+Implemented FileSystemWatcher-based upload with **two-level loop prevention** to distinguish downloaded files from user-created files.
+
+### Architecture
+
+**Two tracking mechanisms:**
+
+1. **Guid-based manifest** (`_downloadedItems: ConcurrentDictionary<Guid, byte>`)
+   - Tracks server item IDs
+   - Prevents re-downloading the same item
+   - Used for SignalR echo prevention (uploaded item IDs added here)
+
+2. **Filename-based manifest** (`_knownFiles: ConcurrentDictionary<string, byte>`)
+   - Tracks local filenames (case-insensitive)
+   - Distinguishes downloaded/pre-existing files from user-created files
+   - Prevents upload loop
+
+### Upload Flow
+
+1. **Startup:** Scan local folder → add all existing filenames to `_knownFiles`
+2. **Download:** After saving file → add filename to `_knownFiles`
+3. **FileSystemWatcher Created event:**
+   - If filename in `_knownFiles` → ignore (downloaded or pre-existing)
+   - If NOT in `_knownFiles` → upload to space
+   - Add filename to `_knownFiles` immediately (prevent double-upload)
+   - Add item ID to `_downloadedItems` after upload (prevent SignalR echo download)
+
+### Implementation Details
+
+**FileSystemWatcher configuration:**
+- Filter: `*.*` (all files)
+- `IncludeSubdirectories = false`
+- `NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime`
+- Ignores `.*.tmp` files (used by download atomic write pattern)
+
+**Upload robustness:**
+- 100ms delay before reading file (ensures fully written)
+- 3 retry attempts for file access (handles locked files from antivirus/indexing)
+- Background task via `Task.Run` (don't block FileSystemWatcher thread)
+- Failure handling: Remove from `_knownFiles` to allow retry
+
+**Thread safety:**
+- Both manifests use `ConcurrentDictionary`
+- FileSystemWatcher events fire on ThreadPool threads
+- Upload runs on background task with proper cancellation token propagation
+
+## Alternatives Considered
+
+**1. Hash-based tracking**
+- Track file content hashes instead of filenames
+- **Rejected:** Requires reading entire file on every event, performance overhead
+
+**2. Timestamp-based tracking**
+- Track file creation timestamps
+- **Rejected:** Not reliable across filesystems, prone to clock skew
+
+**3. Single manifest (Guid-only)**
+- Map filenames to server item IDs
+- **Rejected:** Doesn't handle pre-existing files on startup
+
+## Implications
+
+**Positive:**
+- Bidirectional sync works transparently — users just drop files in the folder
+- Loop prevention is robust — no risk of infinite upload/download cycles
+- Cross-platform (FileSystemWatcher works on Windows, Linux, macOS)
+
+**Limitations (known MVP tradeoffs):**
+- No file modification tracking (only new file creation)
+- No file deletion tracking (local deletes don't propagate to space)
+- No conflict resolution (filename collisions overwrite)
+- No sub-directory support
+- Brief window (100ms) where file is inaccessible after creation
+
+**Future enhancements (out of scope for #120):**
+- Modification detection via `Changed` events
+- Deletion propagation via `Deleted` events
+- Conflict resolution (rename, prompt, version)
+- Sub-directory recursion
+
+## Testing Recommendations
+
+**Manual test scenarios:**
+1. Start sync → create new file → verify upload
+2. Start sync → file uploaded via web → verify no re-upload
+3. Pre-existing files in folder → start sync → verify no upload
+4. Upload file → verify SignalR echo doesn't trigger download
+5. Create file while antivirus scanning → verify retry succeeds
+6. Large file (>10MB) → verify delayed read succeeds
+
+**Edge cases:**
+- Temp file creation (`.*.tmp`) → should be ignored
+- Filename with special characters → verify sanitization
+- File locked by another process → verify retry logic
+- Rapid file creation → verify no double-upload
+
+## References
+
+- Issue #119: Download-only sync implementation
+- Issue #120: Bidirectional upload specification
+- `src/SharedSpaces.Cli.Core/Services/SyncService.cs` — Implementation
+- `src/SharedSpaces.Cli.Core/Services/SharedSpacesApiClient.cs` — Upload API client
+
+---
+
+# Decision: MockHttpMessageHandler Prefix Matching
+
+**Date:** 2026-01-19  
+**Author:** Zoe (Tester)  
+**Context:** FileSystemWatcher upload tests (#120)
+
+## Problem
+
+The `SyncService.UploadLocalFileAsync` method generates a new `Guid` for each upload at runtime:
+```csharp
+var itemId = Guid.NewGuid();
+// Uploads to: {serverUrl}/v1/spaces/{spaceId}/items/{itemId}
+```
+
+The existing `MockHttpMessageHandler` only supported exact URL matching, making it impossible to mock upload endpoints since we can't predict the generated GUID.
+
+## Decision
+
+Enhanced `MockHttpMessageHandler` with prefix-based matching via `AddResponseByPrefix()`:
+
+```csharp
+_mockHttp.AddResponseByPrefix(
+    $"{serverUrl}/v1/spaces/{spaceId}/items/",
+    HttpStatusCode.OK,
+    JsonSerializer.Serialize(uploadResponse));
+```
+
+The handler now tries exact match first, then falls back to prefix matching, allowing tests to match any upload request to the `/items/` path regardless of the generated itemId.
+
+## Alternatives Considered
+
+1. **Reflection to set itemId** — Too brittle, couples tests to internal implementation
+2. **Seeded GUID generator** — Would require refactoring SyncService to inject GUID factory
+3. **Wildcard/regex matching** — More complex than needed for our use case
+
+## Impact
+
+- ✅ Upload tests can now verify HTTP requests without coupling to GUID generation
+- ✅ Pattern is reusable for other dynamic URL scenarios (e.g., timestamps, random tokens)
+- ✅ Maintains backward compatibility (exact matching still works)
+- ⚠️ Prefix matching is ORDER-DEPENDENT in the internal list (first match wins)
+
+## Validation
+
+All 37 tests pass, including 10 new FileSystemWatcher upload tests that rely on prefix matching.
