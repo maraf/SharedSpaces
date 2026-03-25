@@ -304,7 +304,7 @@ public sealed class SyncService : IAsyncDisposable
         {
             var fileName = Path.GetFileName(filePath);
             // Ignore temp files
-            if (fileName.StartsWith(".") && fileName.EndsWith(".tmp"))
+            if (fileName.StartsWith(".") && fileName.EndsWith(".tmp", System.StringComparison.OrdinalIgnoreCase))
                 continue;
 
             _knownFiles.TryAdd(fileName, 0);
@@ -317,9 +317,10 @@ public sealed class SyncService : IAsyncDisposable
     {
         Console.WriteLine("[FileWatcher] Starting file system watcher...");
 
+        _watcher?.Dispose();
         _watcher = new FileSystemWatcher(_localFolder)
         {
-            Filter = "*.*",
+            Filter = "*",
             IncludeSubdirectories = false,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime
         };
@@ -335,18 +336,15 @@ public sealed class SyncService : IAsyncDisposable
         var fileName = Path.GetFileName(e.FullPath);
 
         // Ignore temp files created by download process
-        if (fileName.StartsWith(".") && fileName.EndsWith(".tmp"))
+        if (fileName.StartsWith(".") && fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Check if this file was just downloaded or already existed
-        if (_knownFiles.ContainsKey(fileName))
+        // Attempt to mark as known; if already known, ignore to prevent double-upload
+        if (!_knownFiles.TryAdd(fileName, 0))
         {
             Console.WriteLine($"[FileWatcher] Ignoring known file: {fileName}");
             return;
         }
-
-        // Mark as known immediately to prevent double-upload
-        _knownFiles.TryAdd(fileName, 0);
 
         Console.WriteLine($"[FileWatcher] New file detected: {fileName}");
 
@@ -380,6 +378,7 @@ public sealed class SyncService : IAsyncDisposable
                 if (!File.Exists(filePath))
                 {
                     Console.WriteLine($"[Upload] File no longer exists: {fileName}");
+                    _knownFiles.TryRemove(fileName, out _);
                     return;
                 }
 
