@@ -786,3 +786,21 @@ Extended `SyncService` with FileSystemWatcher-based upload to detect and upload 
 - **Case-insensitive filename tracking:** Use `StringComparer.OrdinalIgnoreCase` for cross-platform filename comparison
 - **100ms write delay:** Brief delay before reading new file ensures it's fully written (especially for large files or slow writes)
 - **NotifyFilters:** Setting `NotifyFilters.FileName | NotifyFilters.CreationTime` reduces spurious events
+
+### 2026-03-17 — PR #123 Review: SyncService Robustness Fixes
+
+Applied 6 targeted fixes to `SyncService.cs` from PR review feedback:
+
+1. **Case-insensitive temp-file filtering** — Changed `.EndsWith(".tmp")` to use `OrdinalIgnoreCase` comparison in both `ScanExistingFiles` (line 307) and `OnFileCreated` (line 339). Prevents `.TMP` variants from bypassing exclusion on Windows.
+
+2. **FileSystemWatcher filter** — Changed `Filter = "*.*"` to `Filter = "*"`. The `*.*` pattern misses extensionless files on some platforms (Linux/macOS).
+
+3. **FileSystemWatcher disposal guard** — Added `_watcher?.Dispose()` before creating a new watcher in `StartFileWatcher`. Prevents OS handle leaks if the method is called multiple times.
+
+4. **Atomic duplicate upload prevention** — Replaced `ContainsKey` check + `TryAdd` with a single `TryAdd` as gate. The `!_knownFiles.TryAdd(...)` pattern is atomic and prevents race conditions where multiple FileSystemWatcher events for the same file can trigger duplicate uploads.
+
+5. **Cleanup on file-not-found** — Added `_knownFiles.TryRemove(fileName, out _)` when `File.Exists(filePath)` returns false in `UploadLocalFileAsync`. Ensures vanished files don't block future uploads with the same name.
+
+**Pattern learned:** Always use `StringComparison.OrdinalIgnoreCase` for file extension checks in cross-platform code. Windows is case-insensitive but explicit comparison ensures consistent behavior.
+
+**Pattern learned:** `ConcurrentDictionary.TryAdd` as a gate is cleaner than separate `ContainsKey` checks — it's atomic and avoids TOCTOU bugs.

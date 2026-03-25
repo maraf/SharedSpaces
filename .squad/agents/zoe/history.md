@@ -1049,3 +1049,38 @@ Wrote comprehensive test suite for Wash's auto-select implementation. Full regre
 - `DownloadAndSaveFileAsync` adds downloaded filenames to _knownFiles (line 259) immediately after the atomic file move completes, ensuring subsequent FileSystemWatcher events for that file are ignored.
 - Upload failure handling in `SyncService.UploadLocalFileAsync` removes the filename from _knownFiles (lines 410, 416) on exception, allowing the FileSystemWatcher to retry upload if the file is modified or recreated.
 - FileSystemWatcher test suite covers 10 scenarios: ScanExistingFiles population, download→_knownFiles, upload PUT requests, manifest tracking, known-files-before-upload, failure removal, exception throwing, known-file ignoring, temp-file ignoring, and unknown-file uploading.
+- PR #123 review for issue #120: All 37 CLI tests pass (18 in SyncServiceTests). Upload flow uses PUT with client-generated GUID (SharedSpacesApiClient.cs:63). Graceful shutdown relies on System.CommandLine CancellationToken + IAsyncDisposable (SyncCommand.cs:19, SyncService.cs:419). Cross-platform FileSystemWatcher is used but no OS-specific tests exist. No test for DisposeAsync watcher cleanup or concurrent upload thread-safety.
+
+---
+
+## Session: 2026-03-26T15-00-00Z — PR #123 Test Feedback (Complete)
+
+**Status:** ✅ COMPLETE  
+**Tests Fixed:** 8 feedback items in SyncServiceTests.cs  
+**Quality Gate:** All 18 SyncService tests pass
+
+Applied PR #123 review feedback on SyncServiceTests to address test hygiene issues:
+
+### Fixes Applied
+
+1. **Test name accuracy (line 446):** Renamed `UploadLocalFile_AddsToDownloadedManifest` → `UploadLocalFile_MakesUploadRequest` to match actual assertion (tests upload request, not manifest side-effect).
+
+2. **Proper disposal (lines 497, 594, 624, 668):** Changed `var service = ...` to `await using var service = ...` in all FileSystemWatcher tests so SyncService (which implements IAsyncDisposable) gets properly cleaned up after cancellation.
+
+3. **Test name accuracy (line 560):** Renamed `UploadLocalFile_LogsErrorOnFailure` → `UploadLocalFile_ThrowsExceptionOnFailure` to reflect actual behavior tested (exception throwing, not logging).
+
+4. **Known-file test correctness (line 586):** Fixed `FileWatcher_IgnoresKnownFiles` to trigger Created event properly:
+   - Old approach: modified existing file (but SyncService only subscribes to Created, not Changed)
+   - New approach: scan existing file → delete it → recreate it → triggers Created for known filename
+   - Now correctly tests the known-file detection logic.
+
+5. **Thread-safety (line 705):** Replaced `List<string> _requestUrls` with `ConcurrentQueue<string>` in MockHttpMessageHandler to prevent race conditions when FileSystemWatcher tests trigger concurrent background uploads. Added `GetRequestUrls() => _requestUrls.ToList()` to preserve test API.
+
+### Learnings
+
+- **Test names must match assertions precisely:** A test claiming to verify manifest behavior but only asserting upload requests is misleading. Either rename or add the missing assertion.
+- **IAsyncDisposable + FileSystemWatcher = mandatory await using:** SyncService starts a FileSystemWatcher that must be cleaned up. Using `await using var` ensures DisposeAsync runs after cancellation, preventing file handle leaks.
+- **FileSystemWatcher event subscription matters:** Tests must trigger the exact events the watcher subscribes to. SyncService only subscribes to `Created`, so tests must create new files (not modify existing ones) to verify behavior.
+- **Concurrent test infrastructure needs thread-safe collections:** MockHttpMessageHandler is called from background FileSystemWatcher threads. `List<T>` mutation is not thread-safe; `ConcurrentQueue<T>` prevents IndexOutOfRangeException and data corruption.
+- **Known-file test pattern:** To test "ignore known files on Created event": (1) scan existing file → (2) delete it → (3) recreate it. This triggers Created for a filename already in _knownFiles, properly exercising the known-file check.
+
