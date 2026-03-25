@@ -48,12 +48,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # NuGet.org trusted publishing setup (manual configuration required):
-      # 1. Go to https://www.nuget.org/account/Packages
-      # 2. Select package "SharedSpaces.Cli"
-      # 3. Add trusted publisher: GitHub Actions, owner/repo, workflow "cli-publish.yml", environment "nuget.org"
+      # NuGet.org trusted publishing setup (one-time, manual):
+      # 1. Go to https://www.nuget.org → Trusted Publishing → Add policy
+      # 2. Repository: maraf/SharedSpaces, workflow: cli-publish.yml, environment: nuget.org
+      # 3. Set repo variable NUGET_USER to your nuget.org username (Settings → Variables → Actions)
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Push to NuGet.org
         run: |
           dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
