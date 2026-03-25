@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -410,7 +411,7 @@ public class SyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadLocalFile_AddsToDownloadedManifest()
+    public async Task UploadLocalFile_MakesUploadRequest()
     {
         var spaceId = Guid.NewGuid();
         var serverUrl = "https://server.example.com";
@@ -439,10 +440,10 @@ public class SyncServiceTests : IDisposable
 
         await service.UploadLocalFileAsync(localFile, CancellationToken.None);
 
-        // Verify upload request was made (indirect verification that manifest was updated)
+        // Verify upload request was made
         var requests = _mockHttp.GetRequestUrls();
         requests.Should().Contain(r => r.Contains($"/v1/spaces/{spaceId}/items/"),
-            "upload request should be made, and implementation adds local itemId to manifest");
+            "upload request should be made");
     }
 
     [Fact]
@@ -470,7 +471,7 @@ public class SyncServiceTests : IDisposable
             delayMs: 500);
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
-        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
 
         using var cts = new CancellationTokenSource(5000);
 
@@ -536,7 +537,7 @@ public class SyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadLocalFile_LogsErrorOnFailure()
+    public async Task UploadLocalFile_ThrowsExceptionOnFailure()
     {
         var spaceId = Guid.NewGuid();
         var serverUrl = "https://server.example.com";
@@ -571,10 +572,13 @@ public class SyncServiceTests : IDisposable
         File.WriteAllText(existingFile, "existing content");
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
-        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
 
-        // Scan to populate _knownFiles
+        // Scan to populate _knownFiles with the existing filename
         service.ScanExistingFiles();
+
+        // Remove the file so that recreating it will trigger a Created event for a known filename
+        File.Delete(existingFile);
 
         using var cts = new CancellationTokenSource();
 
@@ -582,8 +586,8 @@ public class SyncServiceTests : IDisposable
         _ = Task.Run(() => service.StartFileWatcher(cts.Token));
         await Task.Delay(200); // Let watcher initialize
 
-        // Modify existing file (simulates re-save)
-        File.WriteAllText(existingFile, "modified content");
+        // Recreate the file (triggers Created for a known filename)
+        File.WriteAllText(existingFile, "recreated content");
         await Task.Delay(300); // Wait for watcher to process
 
         cts.Cancel();
@@ -601,7 +605,7 @@ public class SyncServiceTests : IDisposable
         var jwt = "fake-jwt-token";
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
-        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
 
         using var cts = new CancellationTokenSource();
 
@@ -646,7 +650,7 @@ public class SyncServiceTests : IDisposable
             JsonSerializer.Serialize(uploadResponse));
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
-        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
 
         using var cts = new CancellationTokenSource(5000); // 5 second timeout
 
@@ -672,7 +676,7 @@ public class MockHttpMessageHandler : HttpMessageHandler
 {
     private readonly Dictionary<string, (HttpStatusCode status, byte[] content, int delayMs)> _responses = new();
     private readonly List<(string prefix, HttpStatusCode status, byte[] content, int delayMs)> _prefixResponses = new();
-    private readonly List<string> _requestUrls = [];
+    private readonly ConcurrentQueue<string> _requestUrls = new();
 
     public void AddResponse(string url, HttpStatusCode status, string content, int delayMs = 0)
     {
@@ -694,14 +698,14 @@ public class MockHttpMessageHandler : HttpMessageHandler
         _prefixResponses.Add((urlPrefix, status, content, delayMs));
     }
 
-    public List<string> GetRequestUrls() => _requestUrls;
+    public List<string> GetRequestUrls() => _requestUrls.ToList();
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         var url = request.RequestUri?.ToString() ?? string.Empty;
-        _requestUrls.Add(url);
+        _requestUrls.Enqueue(url);
 
         // Try exact match first
         if (_responses.TryGetValue(url, out var response))
