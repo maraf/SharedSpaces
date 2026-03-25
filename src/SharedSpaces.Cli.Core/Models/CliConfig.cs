@@ -10,18 +10,18 @@ public sealed class CliConfig
 
 public sealed class SpaceEntry
 {
-    [JsonPropertyName("space_id")]
+    [JsonPropertyName("space-id")]
     public required string SpaceId { get; set; }
 
-    [JsonPropertyName("server_url")]
+    [JsonPropertyName("server-url")]
     public required string ServerUrl { get; set; }
 
-    [JsonPropertyName("jwt_token")]
+    [JsonPropertyName("jwt-token")]
     public required string JwtToken { get; set; }
 
-    [JsonPropertyName("display_name")]
+    [JsonPropertyName("display-name")]
     public required string DisplayName { get; set; }
 
-    [JsonPropertyName("joined_at")]
+    [JsonPropertyName("joined-at")]
     public required DateTime JoinedAt { get; set; }
 }
