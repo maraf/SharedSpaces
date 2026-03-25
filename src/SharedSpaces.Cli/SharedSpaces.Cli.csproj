@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sharedspaces</ToolCommandName>
+    <PackageId>SharedSpaces.Cli</PackageId>
+    <Version>0.1.0</Version>
+    <Description>SharedSpaces CLI — join spaces and upload files from the command line</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta5.25306.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharedSpaces.Cli.Core\SharedSpaces.Cli.Core.csproj" />
+  </ItemGroup>
+
+</Project>
