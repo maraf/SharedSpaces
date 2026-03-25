@@ -634,3 +634,83 @@ Owner must configure trusted publisher on nuget.org:
 
 **Session:** `2026-03-25T12-07-59Z-pr-feedback-round2`  
 **Outcome:** ✅ Complete
+
+---
+
+## 2026-03-25: Issue #119 - `sync` Command Implementation
+
+📌 **Task:** Implement `sync` command for real-time file synchronization from SharedSpaces spaces via SignalR with HTTP polling fallback.
+
+**Session:** `2026-03-25T16-30Z-sync-command`  
+**Outcome:** ✅ Complete
+
+### Implementation
+
+**1. Added NuGet Package**
+- Added `Microsoft.AspNetCore.SignalR.Client` to `SharedSpaces.Cli.Core.csproj`
+- Version: 10.0.5 (matching .NET 10 target framework)
+
+**2. Extended SharedSpacesApiClient.cs**
+- `ListItemsAsync(serverUrl, spaceId, jwtToken, ct)` — GET /v1/spaces/{spaceId}/items
+- `DownloadFileAsync(serverUrl, spaceId, itemId, jwtToken, ct)` — GET /v1/spaces/{spaceId}/items/{itemId}/download
+- Added `SpaceItemResponse` record with all item fields (Id, SpaceId, MemberId, ContentType, Content, FileSize, SharedAt)
+- Download method uses `HttpCompletionOption.ResponseHeadersRead` for efficient streaming
+
+**3. Created SyncService.cs**
+- **Initial sync:** Lists all items, downloads files (skips text items)
+- **SignalR connection:** Connects to `/v1/spaces/{spaceId}/hub` with JWT via `AccessTokenProvider`
+- **Auto-reconnect:** Uses `WithAutomaticReconnect()` for resilience
+- **Event handlers:**
+  - `ItemAdded` → downloads file items automatically
+  - `ItemDeleted` → logs only (no local deletion per MVP scope)
+- **Polling fallback:** If disconnected >30 seconds, polls every 5 seconds via HTTP
+- **In-memory manifest:** Tracks downloaded item IDs (`HashSet<Guid>`) to avoid re-downloads
+- **File naming:** Uses `item.Content` field as filename, falls back to `{itemId}.bin` if empty
+- **Conflict strategy:** Overwrites existing files (same itemId)
+- **Connection state tracking:** Logs all state changes (connected, reconnecting, reconnected, closed)
+- **Graceful shutdown:** Accepts CancellationToken, disposes hub and timer cleanly
+
+**4. Created SyncCommand.cs**
+- Follows UploadCommand pattern exactly
+- Options: `--space-id` (required), `--folder` (required)
+- Validates space exists in config, creates folder if needed
+- Runs SyncService until cancelled (Ctrl+C / SIGTERM)
+- Error handling: HttpRequestException, UnauthorizedAccessException, IOException, JsonException, OperationCanceledException
+
+**5. Registered Command**
+- Added `rootCommand.Add(SyncCommand.Create())` to `Program.cs`
+
+### Build Verification
+✅ `dotnet build SharedSpaces.sln` succeeded  
+✅ All projects compile cleanly
+
+### Key Decisions
+- **SignalR hub route:** Uses existing `/v1/spaces/{spaceId}/hub` endpoint with JWT query string auth
+- **Polling threshold:** 30 seconds disconnect before fallback (balances reconnection attempts vs responsiveness)
+- **Polling interval:** 5 seconds (conservative, avoids server overload)
+- **Event payload records:** Defined internally in SyncService.cs to avoid coupling CLI Core to server event types
+- **File overwrite:** MVP behavior — same itemId always overwrites (no versioning/conflict resolution)
+- **No local deletion:** `ItemDeleted` events are logged but don't trigger local file removal (safety-first for MVP)
+
+### SignalR Connection Pattern
+```csharp
+var connection = new HubConnectionBuilder()
+    .WithUrl($"{serverUrl}/v1/spaces/{spaceId}/hub", options =>
+    {
+        options.AccessTokenProvider = () => Task.FromResult<string?>(jwtToken);
+    })
+    .WithAutomaticReconnect()
+    .Build();
+```
+
+### Learnings
+
+- **System.CommandLine API:** Option required flag is `Required = true` (property), not `IsRequired = true`
+- **SignalR event handlers:** Must use exact event names from server (`ItemAdded`, `ItemDeleted`) and matching payload types
+- **Async disposal:** HubConnection implements `IAsyncDisposable` — must call `DisposeAsync().AsTask().Wait()` in synchronous Dispose
+- **Timer threading:** Timer callbacks execute on thread pool; must capture CancellationToken in closure for async operations
+- **Polling vs SignalR:** Best-effort fallback pattern — don't stop trying SignalR reconnection while polling
+- **Stream disposal:** DownloadFileAsync returns Stream — caller owns disposal, but underlying HttpResponseMessage must stay alive
+- **Connection state events:** SignalR provides `Reconnecting`, `Reconnected`, and `Closed` — hook all three for complete observability
+- **Hub auto-join:** Server-side `OnConnectedAsync` auto-joins space groups, so CLI doesn't need explicit join method call
+
