@@ -996,3 +996,47 @@ Wrote comprehensive test suite for Wash's auto-select implementation. Full regre
 **Build & Test:** ✅ Clean build, ✅ 19/19 tests pass (no regressions)
 
 **Team Notes:** This pattern (unsigned JWT test helper + computed properties + JSON-persisted-only fields) provides clean separation between serialization and runtime model state. Future SpaceEntry enhancements can follow the same pattern.
+
+---
+
+**Date:** 2026-03-20
+**Session:** sync-service-tests
+**Assignee:** Zoe
+**What:** Wrote comprehensive test suite for SyncService (Issue #119) before implementation by Kaylee.
+
+**Changes:**
+1. **SyncServiceTests.cs:** Created 8 test cases covering:
+   - Initial sync downloads file items only (skips text items)
+   - Manifest tracking prevents re-downloading existing items
+   - Filename uses Content field, falls back to `{itemId}.bin` when empty
+   - SignalR ItemAdded events trigger downloads for new file items
+   - Graceful cancellation stops download mid-sync
+2. **MockHttpMessageHandler:** Custom test double with configurable responses, delay simulation, and request URL tracking for verification
+3. **Placeholder types:** Added `SpaceItemResponse`, `ItemAddedEvent`, `ItemDeletedEvent`, and stub `SyncService` class with `NotImplementedException` methods
+4. **Test patterns:** Follows existing CLI test conventions: xUnit `[Fact]`, FluentAssertions, temp directory cleanup via `IDisposable`
+
+**Key Test Design Decisions:**
+- Manifest logic is testable via public `MarkAsDownloaded` / `IsDownloaded` methods (design assumption for Kaylee)
+- Mock HTTP handler simulates latency for cancellation tests (50ms per request)
+- Tests focus on PUBLIC BEHAVIOR (manifest, filtering, file naming) rather than implementation details
+- SignalR connection mocking avoided — tests verify service methods that can be isolated
+- Tests will need minor adjustments once Kaylee's actual SyncService API is implemented, but should compile as-is
+
+**Build Verification:** ✅ `dotnet build tests/SharedSpaces.Cli.Core.Tests/` succeeds with 0 warnings
+
+**Test Coverage Goals:**
+- ✅ File vs text item filtering
+- ✅ Manifest-based deduplication
+- ✅ File naming strategy (Content field or fallback)
+- ✅ SignalR event handling for new items
+- ✅ Cancellation token support
+
+**Team Notes:** Tests are designed to be as close to compilable as possible. When Kaylee implements SyncService, the placeholder class and data records should be replaced with the real implementation. The mock HTTP handler pattern may be reusable for other API client tests.
+
+## Learnings
+
+- CLI test project uses temp directories with Guid-based naming (`sharedspaces-test-{Guid}`) to prevent test isolation issues when running in parallel or with leftover artifacts.
+- Custom `MockHttpMessageHandler` enables precise HTTP response mocking with status codes, byte arrays, and artificial latency for cancellation scenarios — more flexible than string-only mocks.
+- Testing sync logic before implementation requires designing tests around observable PUBLIC BEHAVIOR (manifest state, file system side effects, request patterns) rather than internal state.
+- SyncService tests assume a simple manifest API (`MarkAsDownloaded`, `IsDownloaded`) for testability; Kaylee's implementation may use internal manifest files or in-memory sets, but exposing these helpers aids verification.
+- Cancellation tests should verify PARTIAL progress (some files downloaded, not all) rather than expecting zero side effects, as graceful cancellation means stopping mid-operation.
