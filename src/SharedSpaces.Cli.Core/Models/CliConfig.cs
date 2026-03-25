@@ -26,14 +26,30 @@ public sealed class SpaceEntry
     [JsonIgnore]
     public string SpaceName => GetClaim("space_name");
 
+    private string? _cachedJwtSource;
+    private JwtSecurityToken? _cachedToken;
+
+    private JwtSecurityToken? GetParsedToken()
+    {
+        if (_cachedToken is null || _cachedJwtSource != JwtToken)
+        {
+            var handler = new JwtSecurityTokenHandler();
+            if (handler.CanReadToken(JwtToken))
+            {
+                _cachedToken = handler.ReadJwtToken(JwtToken);
+                _cachedJwtSource = JwtToken;
+            }
+            else
+            {
+                _cachedToken = null;
+                _cachedJwtSource = null;
+            }
+        }
+        return _cachedToken;
+    }
+
     private string GetClaim(string claimType)
     {
-        var handler = new JwtSecurityTokenHandler();
-        if (handler.CanReadToken(JwtToken))
-        {
-            var token = handler.ReadJwtToken(JwtToken);
-            return token.Claims.FirstOrDefault(c => c.Type == claimType)?.Value ?? string.Empty;
-        }
-        return string.Empty;
+        return GetParsedToken()?.Claims.FirstOrDefault(c => c.Type == claimType)?.Value ?? string.Empty;
     }
 }
