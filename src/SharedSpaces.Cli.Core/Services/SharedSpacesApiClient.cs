@@ -122,7 +122,11 @@ public sealed class SharedSpacesApiClient : IDisposable
                 $"Download failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
         }
 
-        return await response.Content.ReadAsStreamAsync(ct);
+        var memoryStream = new MemoryStream();
+        await response.Content.CopyToAsync(memoryStream, ct);
+        memoryStream.Position = 0;
+        response.Dispose();
+        return memoryStream;
     }
 
     public void Dispose() => _http.Dispose();

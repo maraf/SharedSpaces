@@ -1,19 +1,21 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace SharedSpaces.Cli.Core.Services;
 
-public sealed class SyncService : IDisposable
+public sealed class SyncService : IAsyncDisposable
 {
     private readonly SharedSpacesApiClient _apiClient;
     private readonly string _serverUrl;
     private readonly string _spaceId;
     private readonly string _jwtToken;
     private readonly string _localFolder;
-    private readonly HashSet<Guid> _downloadedItems = [];
+    private readonly ConcurrentDictionary<Guid, byte> _downloadedItems = new();
     private HubConnection? _hubConnection;
     private DateTime _lastDisconnect = DateTime.MinValue;
-    private Timer? _pollingTimer;
+    private PeriodicTimer? _pollingTimer;
+    private Task? _pollingTask;
 
     public SyncService(
         SharedSpacesApiClient apiClient,
@@ -29,9 +31,9 @@ public sealed class SyncService : IDisposable
         _localFolder = localFolder;
     }
 
-    public bool IsDownloaded(Guid itemId) => _downloadedItems.Contains(itemId);
+    public bool IsDownloaded(Guid itemId) => _downloadedItems.ContainsKey(itemId);
 
-    public void MarkAsDownloaded(Guid itemId) => _downloadedItems.Add(itemId);
+    public void MarkAsDownloaded(Guid itemId) => _downloadedItems.TryAdd(itemId, 0);
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -105,6 +107,8 @@ public sealed class SyncService : IDisposable
         _hubConnection.Reconnecting += error =>
         {
             Console.WriteLine($"[SignalR] Reconnecting... ({error?.Message ?? "unknown error"})");
+            _lastDisconnect = DateTime.UtcNow;
+            StartPolling(ct);
             return Task.CompletedTask;
         };
 
@@ -144,10 +148,16 @@ public sealed class SyncService : IDisposable
 
         Console.WriteLine("[Polling] Starting HTTP polling fallback (every 5 seconds)...");
 
-        _pollingTimer = new Timer(async _ =>
+        _pollingTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _pollingTask = PollLoopAsync(ct);
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        while (await _pollingTimer!.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
             if ((DateTime.UtcNow - _lastDisconnect).TotalSeconds < 30)
-                return;
+                continue;
 
             Console.WriteLine("[Polling] Checking for new items...");
 
@@ -155,7 +165,7 @@ public sealed class SyncService : IDisposable
             {
                 var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
                 var newFileItems = items
-                    .Where(i => i.ContentType == "file" && !_downloadedItems.Contains(i.Id))
+                    .Where(i => i.ContentType == "file" && !_downloadedItems.ContainsKey(i.Id))
                     .ToList();
 
                 if (newFileItems.Count > 0)
@@ -167,11 +177,11 @@ public sealed class SyncService : IDisposable
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Console.Error.WriteLine($"[Polling] Failed: {ex.Message}");
             }
-        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        }
     }
 
     private void StopPolling()
@@ -186,7 +196,7 @@ public sealed class SyncService : IDisposable
 
     private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, CancellationToken ct)
     {
-        if (_downloadedItems.Contains(itemId))
+        if (_downloadedItems.ContainsKey(itemId))
         {
             Console.WriteLine($"[Download] Skipping already downloaded item: {itemId}");
             return;
@@ -194,16 +204,19 @@ public sealed class SyncService : IDisposable
 
         try
         {
-            var effectiveFilename = string.IsNullOrWhiteSpace(filename) ? $"{itemId}.bin" : filename;
-            var localPath = Path.Combine(_localFolder, effectiveFilename);
+            var rawName = string.IsNullOrWhiteSpace(filename) ? $"{itemId}.bin" : filename;
+            var safeName = Path.GetFileName(rawName);
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = $"{itemId}.bin";
+            var localPath = Path.Combine(_localFolder, safeName);
 
-            Console.WriteLine($"[Download] Downloading {effectiveFilename}...");
+            Console.WriteLine($"[Download] Downloading {safeName}...");
 
             using var stream = await _apiClient.DownloadFileAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, ct);
             using var fileStream = File.Create(localPath);
             await stream.CopyToAsync(fileStream, ct);
 
-            _downloadedItems.Add(itemId);
+            _downloadedItems.TryAdd(itemId, 0);
             Console.WriteLine($"[Download] Saved to {localPath}");
         }
         catch (OperationCanceledException)
@@ -216,10 +229,17 @@ public sealed class SyncService : IDisposable
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _pollingTimer?.Dispose();
-        _hubConnection?.DisposeAsync().AsTask().Wait();
+        StopPolling();
+        if (_pollingTask != null)
+        {
+            try { await _pollingTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
+        }
+        if (_hubConnection != null)
+        {
+            await _hubConnection.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
 

@@ -59,22 +59,16 @@ public static class SyncCommand
                 Console.WriteLine($"Created directory: {folder}");
             }
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Error: Failed to create directory — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
+            Console.Error.WriteLine($"Error: Invalid folder path — {ex.Message}");
             Environment.ExitCode = 1;
             return;
         }
 
         // Create and run sync service
         using var apiClient = new SharedSpacesApiClient();
-        using var syncService = new SyncService(
+        await using var syncService = new SyncService(
             apiClient,
             space.ServerUrl,
             space.SpaceId,
