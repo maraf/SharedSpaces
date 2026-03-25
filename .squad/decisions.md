@@ -3528,3 +3528,98 @@ Follow-up PR after #121 merges to implement this simplification.
 ### Directive Source
 
 User directive from Marek (2026-03-25T11:30:44Z): Drop `JoinedAt` from CLI config entirely. Config should only store JwtToken — all other fields are extracted from JWT claims at runtime.
+# Sync Command Architecture — SignalR + HTTP Polling Fallback
+
+**Decision Date:** 2026-03-25  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Implemented (Issue #119)  
+**Context:** CLI `sync` command for real-time file download from spaces
+
+## Decision
+
+The `sync` command uses a hybrid approach:
+1. **Primary:** SignalR connection with automatic reconnection
+2. **Fallback:** HTTP polling every 5 seconds after 30 seconds of disconnection
+3. **Resumption:** Stop polling and return to SignalR when reconnected
+
+## Key Implementation Details
+
+### SignalR Connection
+- Route: `/v1/spaces/{spaceId}/hub`
+- Auth: JWT via `AccessTokenProvider` (query string `access_token`)
+- Features: `WithAutomaticReconnect()` for built-in resilience
+- Event handlers: `ItemAdded`, `ItemDeleted`
+- State tracking: Hooks `Reconnecting`, `Reconnected`, `Closed` events for observability
+
+### Polling Fallback
+- **Trigger:** Disconnection >30 seconds
+- **Interval:** 5 seconds
+- **Mechanism:** `GET /v1/spaces/{spaceId}/items`, compare with in-memory manifest, download new files
+- **Termination:** Stops automatically on SignalR reconnection
+
+### In-Memory Manifest
+- `HashSet<Guid>` tracks all downloaded item IDs
+- Prevents re-downloads during both SignalR and polling phases
+- Survives disconnections (lives for command lifetime)
+
+### File Handling
+- **Naming:** Uses `item.Content` field (server stores original filename there), fallback to `{itemId}.bin`
+- **Conflict strategy:** Overwrite (MVP — no versioning/conflict UI)
+- **Deletion:** `ItemDeleted` events logged only (no local file removal for safety)
+
+## Rationale
+
+**Why 30-second threshold?**
+- Gives SignalR automatic reconnection multiple attempts (exponential backoff)
+- Balances responsiveness vs server load
+- Typical network blips resolve within this window
+
+**Why 5-second polling?**
+- Conservative interval to avoid server overload
+- Good enough for "near real-time" when SignalR is down
+- Can be tuned later based on usage patterns
+
+**Why not stop SignalR during polling?**
+- SignalR reconnection continues in background
+- Seamless transition back to real-time when network recovers
+- Polling is safety net, not replacement
+
+**Why overwrite files?**
+- MVP scope — conflict resolution UI is complex
+- Matches "last write wins" semantics of server PUT endpoint
+- User can always re-download from space if needed
+
+**Why no local deletion?**
+- Safety first — accidental server deletion shouldn't wipe local work
+- User explicitly chose to sync down; deletion should be explicit action
+- Can be revisited with `--sync-deletes` flag later
+
+## Alternatives Considered
+
+1. **HTTP polling only (no SignalR)**
+   - ❌ Higher latency, higher server load, no true real-time
+   
+2. **SignalR only (no fallback)**
+   - ❌ Unreliable in poor network conditions, no offline tolerance
+   
+3. **Webhook push (server → CLI)**
+   - ❌ Requires CLI to run HTTP server, firewall/NAT issues, complex setup
+   
+4. **Persistent manifest file**
+   - ❌ Adds filesystem complexity, race conditions, corruption risk
+   - ✅ In-memory is sufficient for command-lifetime tracking
+
+## Impact
+
+- Users get real-time file sync with automatic resilience
+- Server load remains reasonable (SignalR primary, polling rare)
+- CLI architecture now supports long-running commands with cancellation
+- Foundation for future offline queue (Issue #28) and PWA sync
+
+## Future Enhancements
+
+- `--sync-deletes` flag to opt into local deletion mirroring
+- `--poll-interval` flag for custom polling rate
+- Persistent manifest for resumable sync across command restarts
+- Progress UI with file count / size transferred
+- Conflict resolution strategy options (prompt, rename, skip)
