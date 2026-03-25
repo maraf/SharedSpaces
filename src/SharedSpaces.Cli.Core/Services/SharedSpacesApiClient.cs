@@ -76,6 +76,55 @@ public sealed class SharedSpacesApiClient : IDisposable
             ?? throw new InvalidOperationException("Server returned empty upload response.");
     }
 
+    public async Task<List<SpaceItemResponse>> ListItemsAsync(
+        string serverUrl,
+        string spaceId,
+        string jwtToken,
+        CancellationToken ct = default)
+    {
+        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/items";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+        using var response = await _http.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"List items failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
+        }
+
+        return await response.Content.ReadFromJsonAsync<List<SpaceItemResponse>>(ct)
+            ?? throw new InvalidOperationException("Server returned empty items list.");
+    }
+
+    public async Task<Stream> DownloadFileAsync(
+        string serverUrl,
+        string spaceId,
+        string itemId,
+        string jwtToken,
+        CancellationToken ct = default)
+    {
+        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/items/{itemId}/download";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            response.Dispose();
+            throw new HttpRequestException(
+                $"Download failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
+        }
+
+        return await response.Content.ReadAsStreamAsync(ct);
+    }
+
     public void Dispose() => _http.Dispose();
 }
 
@@ -89,6 +138,15 @@ public sealed record TokenResponse(
 public sealed record UploadResponse(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("spaceId")] Guid SpaceId,
+    [property: JsonPropertyName("contentType")] string ContentType,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("fileSize")] long FileSize,
+    [property: JsonPropertyName("sharedAt")] DateTime SharedAt);
+
+public sealed record SpaceItemResponse(
+    [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("spaceId")] Guid SpaceId,
+    [property: JsonPropertyName("memberId")] Guid MemberId,
     [property: JsonPropertyName("contentType")] string ContentType,
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("fileSize")] long FileSize,

@@ -1,0 +1,238 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.SignalR.Client;
+
+namespace SharedSpaces.Cli.Core.Services;
+
+public sealed class SyncService : IDisposable
+{
+    private readonly SharedSpacesApiClient _apiClient;
+    private readonly string _serverUrl;
+    private readonly string _spaceId;
+    private readonly string _jwtToken;
+    private readonly string _localFolder;
+    private readonly HashSet<Guid> _downloadedItems = [];
+    private HubConnection? _hubConnection;
+    private DateTime _lastDisconnect = DateTime.MinValue;
+    private Timer? _pollingTimer;
+
+    public SyncService(
+        SharedSpacesApiClient apiClient,
+        string serverUrl,
+        string spaceId,
+        string jwtToken,
+        string localFolder)
+    {
+        _apiClient = apiClient;
+        _serverUrl = serverUrl.TrimEnd('/');
+        _spaceId = spaceId;
+        _jwtToken = jwtToken;
+        _localFolder = localFolder;
+    }
+
+    public bool IsDownloaded(Guid itemId) => _downloadedItems.Contains(itemId);
+
+    public void MarkAsDownloaded(Guid itemId) => _downloadedItems.Add(itemId);
+
+    public async Task RunAsync(CancellationToken ct)
+    {
+        Console.WriteLine($"Starting sync for space {_spaceId}...");
+        Console.WriteLine($"Local folder: {_localFolder}");
+
+        await InitialSyncAsync(ct);
+        await ConnectSignalRAsync(ct);
+
+        try
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+        }
+        catch (TaskCanceledException)
+        {
+            Console.WriteLine("Sync stopped.");
+        }
+    }
+
+    public async Task InitialSyncAsync(CancellationToken ct)
+    {
+        Console.WriteLine("Performing initial sync...");
+
+        var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
+        var fileItems = items.Where(i => i.ContentType == "file").ToList();
+
+        Console.WriteLine($"Found {fileItems.Count} file(s) to download.");
+
+        foreach (var item in fileItems)
+        {
+            ct.ThrowIfCancellationRequested();
+            await DownloadAndSaveFileAsync(item.Id, item.Content, ct);
+        }
+
+        Console.WriteLine("Initial sync complete.");
+    }
+
+    public async Task OnItemAddedAsync(ItemAddedEvent itemAdded, CancellationToken ct)
+    {
+        Console.WriteLine($"[Event] ItemAdded: {itemAdded.Id} ({itemAdded.ContentType})");
+
+        if (itemAdded.ContentType == "file")
+        {
+            await DownloadAndSaveFileAsync(itemAdded.Id, itemAdded.Content, ct);
+        }
+    }
+
+    private async Task ConnectSignalRAsync(CancellationToken ct)
+    {
+        var hubUrl = $"{_serverUrl}/v1/spaces/{_spaceId}/hub";
+        Console.WriteLine($"Connecting to SignalR hub: {hubUrl}");
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(hubUrl, options =>
+            {
+                options.AccessTokenProvider = () => Task.FromResult<string?>(_jwtToken);
+            })
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<ItemAddedEvent>("ItemAdded", async itemAdded =>
+        {
+            await OnItemAddedAsync(itemAdded, ct);
+        });
+
+        _hubConnection.On<ItemDeletedEvent>("ItemDeleted", itemDeleted =>
+        {
+            Console.WriteLine($"[Event] ItemDeleted: {itemDeleted.Id}");
+        });
+
+        _hubConnection.Reconnecting += error =>
+        {
+            Console.WriteLine($"[SignalR] Reconnecting... ({error?.Message ?? "unknown error"})");
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Reconnected += connectionId =>
+        {
+            Console.WriteLine($"[SignalR] Reconnected (connectionId: {connectionId})");
+            _lastDisconnect = DateTime.MinValue;
+            StopPolling();
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Closed += error =>
+        {
+            Console.WriteLine($"[SignalR] Connection closed ({error?.Message ?? "normal closure"})");
+            _lastDisconnect = DateTime.UtcNow;
+            StartPolling(ct);
+            return Task.CompletedTask;
+        };
+
+        try
+        {
+            await _hubConnection.StartAsync(ct);
+            Console.WriteLine("[SignalR] Connected successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SignalR] Connection failed: {ex.Message}");
+            _lastDisconnect = DateTime.UtcNow;
+            StartPolling(ct);
+        }
+    }
+
+    private void StartPolling(CancellationToken ct)
+    {
+        if (_pollingTimer != null)
+            return;
+
+        Console.WriteLine("[Polling] Starting HTTP polling fallback (every 5 seconds)...");
+
+        _pollingTimer = new Timer(async _ =>
+        {
+            if ((DateTime.UtcNow - _lastDisconnect).TotalSeconds < 30)
+                return;
+
+            Console.WriteLine("[Polling] Checking for new items...");
+
+            try
+            {
+                var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
+                var newFileItems = items
+                    .Where(i => i.ContentType == "file" && !_downloadedItems.Contains(i.Id))
+                    .ToList();
+
+                if (newFileItems.Count > 0)
+                {
+                    Console.WriteLine($"[Polling] Found {newFileItems.Count} new file(s).");
+                    foreach (var item in newFileItems)
+                    {
+                        await DownloadAndSaveFileAsync(item.Id, item.Content, ct);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Polling] Failed: {ex.Message}");
+            }
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private void StopPolling()
+    {
+        if (_pollingTimer == null)
+            return;
+
+        Console.WriteLine("[Polling] Stopping HTTP polling.");
+        _pollingTimer?.Dispose();
+        _pollingTimer = null;
+    }
+
+    private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, CancellationToken ct)
+    {
+        if (_downloadedItems.Contains(itemId))
+        {
+            Console.WriteLine($"[Download] Skipping already downloaded item: {itemId}");
+            return;
+        }
+
+        try
+        {
+            var effectiveFilename = string.IsNullOrWhiteSpace(filename) ? $"{itemId}.bin" : filename;
+            var localPath = Path.Combine(_localFolder, effectiveFilename);
+
+            Console.WriteLine($"[Download] Downloading {effectiveFilename}...");
+
+            using var stream = await _apiClient.DownloadFileAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, ct);
+            using var fileStream = File.Create(localPath);
+            await stream.CopyToAsync(fileStream, ct);
+
+            _downloadedItems.Add(itemId);
+            Console.WriteLine($"[Download] Saved to {localPath}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Download] Failed to download {itemId}: {ex.Message}");
+        }
+    }
+
+    public void Dispose()
+    {
+        _pollingTimer?.Dispose();
+        _hubConnection?.DisposeAsync().AsTask().Wait();
+    }
+}
+
+public sealed record ItemAddedEvent(
+    Guid Id,
+    Guid SpaceId,
+    Guid MemberId,
+    string DisplayName,
+    string ContentType,
+    string Content,
+    long FileSize,
+    DateTime SharedAt);
+
+public sealed record ItemDeletedEvent(
+    Guid Id,
+    Guid SpaceId);
