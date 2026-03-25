@@ -962,3 +962,37 @@ Implementation matched specification exactly, demonstrating the power of compreh
 **Quality Gate:** All 408 tests pass, no breaking changes
 
 Wrote comprehensive test suite for Wash's auto-select implementation. Full regression protection in place. Feature ready for code review and merge.
+
+## Learnings
+
+- **Test name accuracy matters:** Renamed `SaveAsync_UsesDashesInJsonKeys` → `SaveAsync_UsesCamelCaseInJsonKeys` in `tests/SharedSpaces.Cli.Core.Tests/ConfigServiceTests.cs` (line 125). The test asserted camelCase JSON keys (`spaceId`, `serverUrl`, etc.) but the method name incorrectly referenced "dashes." Test names must precisely describe what is being asserted to avoid misleading future readers. Caught via PR #121 code review.
+- **JWT-only SpaceEntry test pattern:** After the `SpaceEntry` refactor to JWT-only (single `JwtToken` stored property, computed `SpaceId`/`ServerUrl`/`DisplayName`/`SpaceName` from claims), tests use a `CreateTestJwt` helper that builds unsigned JWTs with base64url-encoded header/payload/signature. This avoids any crypto dependency in tests while producing structurally valid JWTs the model can parse. JSON serialization test (`SaveAsync_WritesOnlyJwtTokenToJson`) now asserts that only `jwtToken` appears in persisted JSON — no more `spaceId`, `serverUrl`, `displayName`, or `joinedAt`. Added `SpaceEntry_ExtractsClaimsFromJwt` to directly verify computed property extraction.
+
+## Session: 2026-03-25T11-36-50Z — CLI Config JWT Refactor Tests (Complete)
+
+**Status:** ✅ COMPLETE  
+**Tests Updated:** 19 ConfigServiceTests refactored to use JWT pattern  
+**New Tests:** SpaceEntry_ExtractsClaimsFromJwt  
+**Coverage:** JWT claim extraction, JSON serialization (jwtToken-only), config roundtrip  
+**Quality Gate:** All 19 tests pass, no breaking changes, clean build
+
+**What:** Updated all `ConfigServiceTests` to use `CreateTestJwt` helper for JWT-only `SpaceEntry` refactor. Added test to verify computed properties extract correctly from JWT claims.
+
+**Changes:**
+1. **CreateTestJwt helper:** Builds unsigned but structurally valid JWTs with base64url-encoded header/payload/signature. No crypto dependency in tests.
+2. **Refactored existing tests:** All test fixtures now create `SpaceEntry` objects via JWT helper instead of direct property assignment.
+3. **New test:** `SpaceEntry_ExtractsClaimsFromJwt` — asserts that `SpaceId`, `ServerUrl`, `DisplayName`, `SpaceName` computed properties correctly decode and extract claims.
+4. **JSON serialization test:** `SaveAsync_WritesOnlyJwtTokenToJson` — confirms only `jwtToken` persists to JSON, no computed properties.
+
+**Cross-Agent Dependency:** Zoe's tests depend on Kaylee's ConfigService refactor. Both committed to cli-scaffold branch, PR #121 replies logged.
+
+**Test Coverage:**
+- ✅ JWT creation and valid structure
+- ✅ Claim extraction for all metadata fields
+- ✅ Config JSON serialization (jwtToken-only)
+- ✅ ConfigService GetSpace/UpsertSpace with computed properties
+- ✅ Edge cases: invalid tokens, missing claims
+
+**Build & Test:** ✅ Clean build, ✅ 19/19 tests pass (no regressions)
+
+**Team Notes:** This pattern (unsigned JWT test helper + computed properties + JSON-persisted-only fields) provides clean separation between serialization and runtime model state. Future SpaceEntry enhancements can follow the same pattern.

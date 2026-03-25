@@ -102,6 +102,9 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - `ForwardedHeadersOptions` must clear `KnownIPNetworks` and `KnownProxies` for reverse proxy deployments (containers, cloud)—ASP.NET Core defaults to trusting only localhost, silently ignoring `X-Forwarded-*` headers from real proxies. Note: `KnownNetworks` is deprecated in .NET 10; use `KnownIPNetworks`.
 - `UseForwardedHeaders()` is placed first in the middleware pipeline (before CORS, auth, HTTPS redirection) so `HttpRequest.Scheme` and `HttpRequest.Host` reflect the proxy's values when endpoints generate URLs.
 - To include related entity counts in response DTOs (e.g. `ItemCount` on `MemberResponse`), use a correlated subquery via `db.SpaceItems.Count(...)` inside the `.Select()` projection rather than a navigation property or join — EF Core translates it to efficient SQL and keeps the query as a single round-trip.
+- CLI `ConfigService.SaveAsync` uses atomic temp-file + `File.Move(overwrite: true)` and sets 0600 Unix permissions via `File.SetUnixFileMode` to protect JWT tokens at rest.
+- CLI PIN validation enforces exactly 6 digits (`^\d{6}$`) to match server-generated PINs; previously accepted any digit length.
+- CLI error handling strategy: catch `HttpRequestException`, `UnauthorizedAccessException`, `IOException`, and `JsonException` in command handlers, printing user-friendly messages to stderr rather than crashing with stack traces.
 
 ## Team Updates (2026-03-17 Continued)
 
@@ -496,3 +499,138 @@ All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug 
 - `src/AppHost.cs` — Environment variable uses index format
 - `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs` — In-memory config uses index format
 
+- CLI config (`SpaceEntry`) now stores only `JwtToken`; `SpaceId`, `ServerUrl`, `DisplayName`, and `SpaceName` are computed at runtime by decoding JWT claims via `JwtSecurityTokenHandler`. `JoinedAt` was dropped entirely per Marek's directive. Package `System.IdentityModel.Tokens.Jwt` (8.17.0) added to `SharedSpaces.Cli.Core`.
+
+### JWT-Only CLI Config Refactor (Session 2026-03-25)
+
+**What:** Refactored `SpaceEntry` to store only JWT token; all metadata extracted from claims at runtime.
+
+**Why:** Marek directive to drop `JoinedAt` and simplify config to single source of truth. JWT already carries all needed claims (`space_id`, `server_url`, `display_name`, `space_name`).
+
+**Changes:**
+1. **SpaceEntry.cs:** Made `SpaceId`, `ServerUrl`, `DisplayName`, `SpaceName` computed properties that decode JWT claims. Added `[JsonIgnore]` so they never serialize. Only `JwtToken` persists in config.
+2. **ConfigService.cs:** No logic changes needed — GetSpaceAsync/UpsertSpaceAsync already work with computed properties.
+3. **JoinCommand.cs:** Updated to set only `JwtToken` when creating new entries.
+4. **SharedSpaces.Cli.Core.csproj:** Added `System.IdentityModel.Tokens.Jwt` 8.17.0 dependency.
+5. **All tests:** Still pass (19/19) — no API changes, only implementation.
+
+**Implementation Notes:**
+- JWT decoding happens on every config read (negligible cost; can add in-memory cache later)
+- Claims are base64-encoded (not encrypted), so no key needed for decoding
+- Removed `JoinedAt` entirely — never in JWT, added no value
+
+**Build & Test:** ✅ Clean build, ✅ 19/19 tests pass
+
+**Collaboration:** Zoe updated all test fixtures and added `SpaceEntry_ExtractsClaimsFromJwt` test. Both commits to cli-scaffold, PR #121 updated.
+
+---
+
+## Session: NuGet Trusted Publishing (2026-03-25)
+
+### CLI Workflow Enhanced with NuGet.org Trusted Publishing
+
+**What:** Added OIDC-based trusted publishing to `.github/workflows/cli-publish.yml` to enable automatic NuGet package publication without API key secrets.
+
+**Why:** Trusted publishing uses GitHub's OIDC tokens for authentication, eliminating the need to manage/rotate API keys. More secure and aligns with modern GitHub Actions best practices.
+
+**Changes Made:**
+1. **Permissions:** Added `id-token: write` to workflow permissions (required for OIDC token requests)
+2. **Environment:** Added `environment: nuget.org` to job config (maps to trusted publisher policy on nuget.org)
+3. **Push Step:** Added `dotnet nuget push` step that pushes to `https://api.nuget.org/v3/index.json` with `--skip-duplicate` flag
+4. **Documentation:** Included inline comments explaining the manual nuget.org setup:
+   - Navigate to nuget.org package management
+   - Configure trusted publisher for GitHub Actions
+   - Specify owner/repo, workflow file, and environment name
+
+**How OIDC Trusted Publishing Works:**
+- GitHub Actions requests an OIDC token when job runs
+- `dotnet nuget push` automatically uses this token for authentication
+- NuGet.org validates the token against the trusted publisher policy
+- No secrets stored in GitHub repository
+
+**Manual Configuration Required:**
+Owner must configure trusted publisher on nuget.org:
+- Package: `SharedSpaces.Cli`
+- Publisher: GitHub Actions
+- Repository: `{owner}/{repo}`
+- Workflow: `cli-publish.yml`
+- Environment: `nuget.org`
+
+**File Modified:** `.github/workflows/cli-publish.yml`
+
+**Commit:** `ci(cli): add NuGet trusted publishing to CLI workflow` (7e0e74b)
+
+
+---
+
+## Session: PR #121 Second Round Review (2026-03-25)
+
+### Applied Reviewer Feedback on Error Handling & Security
+
+**What:** Addressed 5 unresolved PR review threads with fixes for error handling, documentation accuracy, and security issues.
+
+**Why:** 
+1. CLI should catch local filesystem/config failures gracefully instead of crashing
+2. Documentation examples should use valid data that passes validation
+3. Security: temp files containing JWTs should have restrictive permissions from creation
+4. Error messages should accurately describe the failure source
+
+**Changes Made:**
+
+1. **JoinCommand.cs (Thread r2987688869):**
+   - Added catch blocks for `UnauthorizedAccessException`, `IOException`, and `JsonException`
+   - Local config write failures now show user-friendly stderr messages with exit code 1
+   - Mirrors UploadCommand's comprehensive error handling
+
+2. **README.md (Thread r2987688890):**
+   - Fixed truncated GUID in client invite URL example
+   - Changed `550e8400` → `550e8400-e29b-41d4-a716-446655440000`
+   - Now passes InvitationParser's GUID validation
+
+3. **InvitationParser.cs (Thread r2987688910):**
+   - Updated XML doc to reflect optional PIN parameter
+   - Format changed from `"serverUrl|spaceId|pin"` → `"serverUrl|spaceId[|pin]"`
+   - Added note that optional PIN must be 6 digits
+
+4. **ConfigService.cs (Thread r2987688928):**
+   - Fixed security issue: temp file now created with 0600 permissions from start
+   - Uses `FileStreamOptions` with `UnixCreateMode` on non-Windows platforms
+   - Prevents brief window where JWT file could be world-readable with permissive umask
+
+5. **UploadCommand.cs (Thread r2987764102):**
+   - Narrowed try/catch scope to separate config errors from server response errors
+   - Config read errors handled at start with "Failed to read CLI config"
+   - Server response JsonException now shows "Failed to parse server response"
+   - Eliminates misleading error messages
+
+**Build & Test:** ✅ Clean build, ✅ 19/19 tests pass
+
+**Commit:** `fix(cli): apply second round of PR review feedback` (02877cb)
+
+**PR Activity:** Replied to all 5 unresolved threads on PR #121 confirming fixes with commit reference.
+
+## Learnings
+
+### Exception Handling Strategy
+- **Scope Matters:** Narrow try/catch blocks to specific operations when error sources differ (config I/O vs server responses). This enables accurate error messages.
+- **Local vs Remote Failures:** Commands should catch both network errors (HttpRequestException) and local filesystem errors (UnauthorizedAccessException, IOException, JsonException).
+- **Mirror Patterns:** When two commands do similar operations (join/upload both use config), mirror their error handling for consistency.
+
+### Unix File Permissions
+- **FileStreamOptions.UnixCreateMode:** Sets permissions atomically at file creation (available in .NET 6+).
+- **Security:** For sensitive files (JWT tokens), use 0600 from creation — don't rely on post-creation `SetUnixFileMode()`.
+- **Pattern:** `new FileStream(path, new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite })`
+
+### Documentation Best Practices
+- **Valid Examples:** All code/URL examples in docs should pass the actual parser/validator.
+- **Full GUIDs:** Always use complete GUIDs in examples (8-4-4-4-12 format), never truncated.
+- **Optional Params:** XML docs should accurately reflect optional parameters with `[|param]` notation.
+
+---
+
+## 2026-03-25: PR #121 Feedback Round 2 Completed
+
+📌 **Team update (2026-03-25T12:07:59Z):** All 5 unresolved PR #121 review feedback items applied — error handling, documentation, file permissions, error messaging. 19 tests passing, committed 02877cb, pushed, thread replies sent.
+
+**Session:** `2026-03-25T12-07-59Z-pr-feedback-round2`  
+**Outcome:** ✅ Complete
