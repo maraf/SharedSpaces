@@ -120,12 +120,35 @@ public sealed class SyncService : IAsyncDisposable
             return Task.CompletedTask;
         };
 
-        _hubConnection.Closed += error =>
+        _hubConnection.Closed += async error =>
         {
             Console.WriteLine($"[SignalR] Connection closed ({error?.Message ?? "normal closure"})");
             _lastDisconnect = DateTime.UtcNow;
             StartPolling(ct);
-            return Task.CompletedTask;
+
+            // Fix 1: Retry SignalR reconnection with exponential backoff
+            var delays = new[] { 2, 5, 10, 30, 60 };
+            foreach (var delaySec in delays)
+            {
+                if (ct.IsCancellationRequested)
+                    break;
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
+                    await _hubConnection.StartAsync(ct);
+                    Console.WriteLine("[SignalR] Reconnected successfully after retry.");
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[SignalR] Reconnection retry failed ({delaySec}s delay): {ex.Message}");
+                }
+            }
         };
 
         try
@@ -148,13 +171,14 @@ public sealed class SyncService : IAsyncDisposable
 
         Console.WriteLine("[Polling] Starting HTTP polling fallback (every 5 seconds)...");
 
-        _pollingTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-        _pollingTask = PollLoopAsync(ct);
+        var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _pollingTimer = timer;
+        _pollingTask = PollLoopAsync(timer, ct);
     }
 
-    private async Task PollLoopAsync(CancellationToken ct)
+    private async Task PollLoopAsync(PeriodicTimer timer, CancellationToken ct)
     {
-        while (await _pollingTimer!.WaitForNextTickAsync(ct).ConfigureAwait(false))
+        while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
             if ((DateTime.UtcNow - _lastDisconnect).TotalSeconds < 30)
                 continue;
@@ -196,37 +220,64 @@ public sealed class SyncService : IAsyncDisposable
 
     private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, CancellationToken ct)
     {
-        if (_downloadedItems.ContainsKey(itemId))
+        // Fix 3: Atomic claim
+        if (!_downloadedItems.TryAdd(itemId, 0))
         {
-            Console.WriteLine($"[Download] Skipping already downloaded item: {itemId}");
+            Console.WriteLine($"[Download] Skipping already claimed item: {itemId}");
             return;
         }
 
         try
         {
-            var rawName = string.IsNullOrWhiteSpace(filename) ? $"{itemId}.bin" : filename;
-            var safeName = Path.GetFileName(rawName);
-            if (string.IsNullOrWhiteSpace(safeName))
-                safeName = $"{itemId}.bin";
+            // Fix 4: Sanitize filename
+            var safeName = SanitizeFileName(filename, itemId);
             var localPath = Path.Combine(_localFolder, safeName);
+            // Fix 6: Temp file
+            var tempPath = Path.Combine(_localFolder, $".{itemId}.tmp");
 
             Console.WriteLine($"[Download] Downloading {safeName}...");
 
-            using var stream = await _apiClient.DownloadFileAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, ct);
-            using var fileStream = File.Create(localPath);
-            await stream.CopyToAsync(fileStream, ct);
+            try
+            {
+                // Fix 5 + 6: Stream directly to temp file
+                await using (var tempFileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    await _apiClient.DownloadFileToAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, tempFileStream, ct);
+                    await tempFileStream.FlushAsync(ct);
+                }
 
-            _downloadedItems.TryAdd(itemId, 0);
-            Console.WriteLine($"[Download] Saved to {localPath}");
+                File.Move(tempPath, localPath, overwrite: true);
+                Console.WriteLine($"[Download] Saved to {localPath}");
+            }
+            catch
+            {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                throw;
+            }
         }
         catch (OperationCanceledException)
         {
+            _downloadedItems.TryRemove(itemId, out _);
             throw;
         }
         catch (Exception ex)
         {
+            _downloadedItems.TryRemove(itemId, out _);
             Console.Error.WriteLine($"[Download] Failed to download {itemId}: {ex.Message}");
         }
+    }
+
+    private static string SanitizeFileName(string filename, Guid itemId)
+    {
+        var rawName = string.IsNullOrWhiteSpace(filename) ? $"{itemId}.bin" : filename;
+        var safeName = Path.GetFileName(rawName);
+        if (string.IsNullOrWhiteSpace(safeName))
+            safeName = $"{itemId}.bin";
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new string(safeName.Where(c => !invalidChars.Contains(c)).ToArray());
+
+        return string.IsNullOrWhiteSpace(sanitized) ? $"{itemId}.bin" : sanitized;
     }
 
     public async ValueTask DisposeAsync()

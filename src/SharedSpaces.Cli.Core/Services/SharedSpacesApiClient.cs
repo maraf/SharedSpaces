@@ -100,11 +100,12 @@ public sealed class SharedSpacesApiClient : IDisposable
             ?? throw new InvalidOperationException("Server returned empty items list.");
     }
 
-    public async Task<Stream> DownloadFileAsync(
+    public async Task DownloadFileToAsync(
         string serverUrl,
         string spaceId,
         string itemId,
         string jwtToken,
+        Stream destination,
         CancellationToken ct = default)
     {
         var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/items/{itemId}/download";
@@ -112,21 +113,16 @@ public sealed class SharedSpacesApiClient : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
 
-        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(ct);
-            response.Dispose();
             throw new HttpRequestException(
                 $"Download failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
         }
 
-        var memoryStream = new MemoryStream();
-        await response.Content.CopyToAsync(memoryStream, ct);
-        memoryStream.Position = 0;
-        response.Dispose();
-        return memoryStream;
+        await response.Content.CopyToAsync(destination, ct);
     }
 
     public void Dispose() => _http.Dispose();
