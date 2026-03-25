@@ -12,7 +12,9 @@ public sealed class SyncService : IAsyncDisposable
     private readonly string _jwtToken;
     private readonly string _localFolder;
     private readonly ConcurrentDictionary<Guid, byte> _downloadedItems = new();
+    private readonly ConcurrentDictionary<string, byte> _knownFiles = new(StringComparer.OrdinalIgnoreCase);
     private HubConnection? _hubConnection;
+    private FileSystemWatcher? _watcher;
     private DateTime _lastDisconnect = DateTime.MinValue;
     private PeriodicTimer? _pollingTimer;
     private Task? _pollingTask;
@@ -35,13 +37,17 @@ public sealed class SyncService : IAsyncDisposable
 
     public void MarkAsDownloaded(Guid itemId) => _downloadedItems.TryAdd(itemId, 0);
 
+    public bool IsKnownFile(string filename) => _knownFiles.ContainsKey(filename);
+
     public async Task RunAsync(CancellationToken ct)
     {
         Console.WriteLine($"Starting sync for space {_spaceId}...");
         Console.WriteLine($"Local folder: {_localFolder}");
 
+        ScanExistingFiles();
         await InitialSyncAsync(ct);
         await ConnectSignalRAsync(ct);
+        StartFileWatcher(ct);
 
         try
         {
@@ -248,6 +254,9 @@ public sealed class SyncService : IAsyncDisposable
 
                 File.Move(tempPath, localPath, overwrite: true);
                 Console.WriteLine($"[Download] Saved to {localPath}");
+
+                // Track downloaded file to prevent upload loop
+                _knownFiles.TryAdd(safeName, 0);
             }
             catch
             {
@@ -280,8 +289,149 @@ public sealed class SyncService : IAsyncDisposable
         return string.IsNullOrWhiteSpace(sanitized) ? $"{itemId}.bin" : sanitized;
     }
 
+    public void ScanExistingFiles()
+    {
+        Console.WriteLine("[FileWatcher] Scanning existing files...");
+
+        if (!Directory.Exists(_localFolder))
+        {
+            Directory.CreateDirectory(_localFolder);
+            return;
+        }
+
+        var files = Directory.GetFiles(_localFolder);
+        foreach (var filePath in files)
+        {
+            var fileName = Path.GetFileName(filePath);
+            // Ignore temp files
+            if (fileName.StartsWith(".") && fileName.EndsWith(".tmp", System.StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            _knownFiles.TryAdd(fileName, 0);
+        }
+
+        Console.WriteLine($"[FileWatcher] Found {_knownFiles.Count} existing file(s).");
+    }
+
+    public void StartFileWatcher(CancellationToken ct)
+    {
+        Console.WriteLine("[FileWatcher] Starting file system watcher...");
+
+        _watcher?.Dispose();
+        _watcher = new FileSystemWatcher(_localFolder)
+        {
+            Filter = "*",
+            IncludeSubdirectories = false,
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime
+        };
+
+        _watcher.Created += (sender, e) => OnFileCreated(e, ct);
+        _watcher.EnableRaisingEvents = true;
+
+        Console.WriteLine("[FileWatcher] Now watching for new files.");
+    }
+
+    private void OnFileCreated(FileSystemEventArgs e, CancellationToken ct)
+    {
+        var fileName = Path.GetFileName(e.FullPath);
+
+        // Ignore temp files created by download process
+        if (fileName.StartsWith(".") && fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Attempt to mark as known; if already known, ignore to prevent double-upload
+        if (!_knownFiles.TryAdd(fileName, 0))
+        {
+            Console.WriteLine($"[FileWatcher] Ignoring known file: {fileName}");
+            return;
+        }
+
+        Console.WriteLine($"[FileWatcher] New file detected: {fileName}");
+
+        // Upload on background thread to avoid blocking FileSystemWatcher
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await UploadLocalFileAsync(e.FullPath, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Console.Error.WriteLine($"[FileWatcher] Upload failed: {ex.Message}");
+            }
+        }, ct);
+    }
+
+    public async Task UploadLocalFileAsync(string filePath, CancellationToken ct)
+    {
+        var fileName = Path.GetFileName(filePath);
+
+        // Wait briefly to ensure file is fully written
+        await Task.Delay(100, ct);
+
+        // Retry file access in case it's locked
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                // Verify file still exists and is accessible
+                if (!File.Exists(filePath))
+                {
+                    Console.WriteLine($"[Upload] File no longer exists: {fileName}");
+                    _knownFiles.TryRemove(fileName, out _);
+                    return;
+                }
+
+                var itemId = Guid.NewGuid();
+                // Pre-mark to prevent echo download race (server broadcasts ItemAdded before PUT returns)
+                _downloadedItems.TryAdd(itemId, 0);
+
+                Console.WriteLine($"[Upload] Uploading {fileName} as {itemId}...");
+
+                try
+                {
+                    var response = await _apiClient.UploadFileAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, filePath, ct);
+
+                    // Use server-returned ID in case it differs
+                    if (response.Id != itemId)
+                    {
+                        _downloadedItems.TryAdd(response.Id, 0);
+                    }
+
+                    Console.WriteLine($"[Upload] Successfully uploaded {fileName} as {response.Id}");
+                    return;
+                }
+                catch
+                {
+                    _downloadedItems.TryRemove(itemId, out _);
+                    throw;
+                }
+            }
+            catch (IOException) when (attempt < 2)
+            {
+                // File might be locked, retry
+                await Task.Delay(200, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Upload] Failed to upload {fileName}: {ex.Message}");
+                // Remove from known files to allow retry
+                _knownFiles.TryRemove(fileName, out _);
+                throw;
+            }
+        }
+
+        Console.Error.WriteLine($"[Upload] Failed to access {fileName} after 3 attempts.");
+        _knownFiles.TryRemove(fileName, out _);
+    }
+
     public async ValueTask DisposeAsync()
     {
+        _watcher?.Dispose();
         StopPolling();
         if (_pollingTask != null)
         {

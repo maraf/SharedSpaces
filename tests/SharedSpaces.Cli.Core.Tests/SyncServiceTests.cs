@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -305,12 +306,377 @@ public class SyncServiceTests : IDisposable
         downloadedCount.Should().BeLessThan(100, "sync should stop before downloading all files");
         downloadedCount.Should().BeGreaterThan(0, "sync should download some files before cancellation");
     }
+
+    // ===== FileSystemWatcher Upload Tests (Issue #120) =====
+    // These tests verify the bidirectional sync upload functionality.
+
+    [Fact]
+    public void ScanExistingFiles_PopulatesKnownFiles()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        // Create files before creating SyncService
+        var file1 = Path.Combine(_tempDir, "existing1.txt");
+        var file2 = Path.Combine(_tempDir, "existing2.pdf");
+        var file3 = Path.Combine(_tempDir, "CAPS.TXT");
+        File.WriteAllText(file1, "content1");
+        File.WriteAllText(file2, "content2");
+        File.WriteAllText(file3, "content3");
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        // Call ScanExistingFiles
+        service.ScanExistingFiles();
+
+        // Verify all files are tracked (case-insensitive)
+        service.IsKnownFile("existing1.txt").Should().BeTrue("file1 should be known");
+        service.IsKnownFile("existing2.pdf").Should().BeTrue("file2 should be known");
+        service.IsKnownFile("CAPS.TXT").Should().BeTrue("file3 should be known");
+        service.IsKnownFile("caps.txt").Should().BeTrue("filename tracking should be case-insensitive");
+    }
+
+    [Fact]
+    public async Task DownloadAndSave_AddsToKnownFiles()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "downloaded.txt",
+            FileSize: 1024,
+            SharedAt: DateTime.UtcNow);
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
+            HttpStatusCode.OK,
+            Encoding.UTF8.GetBytes("file-content"));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        // Verify filename is in _knownFiles
+        service.IsKnownFile("downloaded.txt").Should().BeTrue(
+            "downloaded file should be added to known files");
+    }
+
+    [Fact]
+    public async Task UploadLocalFile_UploadsNewFile()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        // Create a local file
+        var localFile = Path.Combine(_tempDir, "upload.txt");
+        File.WriteAllText(localFile, "test content");
+
+        // Configure mock for PUT upload endpoint (prefix match for dynamic itemId)
+        var uploadResponse = new
+        {
+            id = Guid.NewGuid(),
+            spaceId = spaceId,
+            contentType = "file",
+            content = "upload.txt",
+            fileSize = new FileInfo(localFile).Length,
+            sharedAt = DateTime.UtcNow
+        };
+
+        _mockHttp.AddResponseByPrefix(
+            $"{serverUrl}/v1/spaces/{spaceId}/items/",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(uploadResponse));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        await service.UploadLocalFileAsync(localFile, CancellationToken.None);
+
+        // Verify PUT request was made
+        var requests = _mockHttp.GetRequests();
+        requests.Should().Contain(r => r.Method == HttpMethod.Put && r.Url.Contains($"/v1/spaces/{spaceId}/items/"),
+            "upload should use PUT method");
+    }
+
+    [Fact]
+    public async Task UploadLocalFile_MakesUploadRequest()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        var localFile = Path.Combine(_tempDir, "manifest-test.txt");
+        File.WriteAllText(localFile, "manifest content");
+
+        var uploadResponse = new
+        {
+            id = Guid.NewGuid(),
+            spaceId = spaceId,
+            contentType = "file",
+            content = "manifest-test.txt",
+            fileSize = new FileInfo(localFile).Length,
+            sharedAt = DateTime.UtcNow
+        };
+
+        _mockHttp.AddResponseByPrefix(
+            $"{serverUrl}/v1/spaces/{spaceId}/items/",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(uploadResponse));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        await service.UploadLocalFileAsync(localFile, CancellationToken.None);
+
+        // Verify upload request was made
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().Contain(r => r.Contains($"/v1/spaces/{spaceId}/items/"),
+            "upload request should be made");
+    }
+
+    [Fact]
+    public async Task FileWatcher_AddsToKnownFilesBeforeUpload()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        var uploadResponse = new
+        {
+            id = Guid.NewGuid(),
+            spaceId = spaceId,
+            contentType = "file",
+            content = "newfile.txt",
+            fileSize = 12,
+            sharedAt = DateTime.UtcNow
+        };
+
+        // Add delay to upload to ensure we can check _knownFiles before upload completes
+        _mockHttp.AddResponseByPrefix(
+            $"{serverUrl}/v1/spaces/{spaceId}/items/",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(uploadResponse),
+            delayMs: 500);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        using var cts = new CancellationTokenSource(5000);
+
+        // Start file watcher
+        _ = Task.Run(() => service.StartFileWatcher(cts.Token));
+        await Task.Delay(200); // Let watcher initialize
+
+        // Create a new file
+        var newFile = Path.Combine(_tempDir, "newfile.txt");
+        File.WriteAllText(newFile, "new content!");
+        await Task.Delay(150); // Wait for watcher to detect and add to _knownFiles
+
+        // File should be in _knownFiles immediately (before upload completes)
+        service.IsKnownFile("newfile.txt").Should().BeTrue(
+            "file should be added to known files before upload starts");
+
+        await Task.Delay(1000); // Wait for upload to complete
+        cts.Cancel();
+
+        // Verify upload request was made
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().Contain(r => r.Contains($"/v1/spaces/{spaceId}/items/"),
+            "file should have been uploaded");
+    }
+
+    [Fact]
+    public async Task UploadLocalFile_RemovesFromKnownFilesOnFailure()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        // Create file first so it can be scanned
+        var localFile = Path.Combine(_tempDir, "failure-test.txt");
+        File.WriteAllText(localFile, "failure content");
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        // Scan to add file to _knownFiles
+        service.ScanExistingFiles();
+        service.IsKnownFile("failure-test.txt").Should().BeTrue("file should be in known files before upload");
+
+        // Configure mock to return 500
+        _mockHttp.AddResponseByPrefix(
+            $"{serverUrl}/v1/spaces/{spaceId}/items/",
+            HttpStatusCode.InternalServerError,
+            "Server error");
+
+        // Upload should fail and remove from _knownFiles
+        try
+        {
+            await service.UploadLocalFileAsync(localFile, CancellationToken.None);
+        }
+        catch (HttpRequestException)
+        {
+            // Expected exception
+        }
+
+        // Verify filename is NOT in _knownFiles after failure (allowing retry)
+        service.IsKnownFile("failure-test.txt").Should().BeFalse(
+            "failed upload should remove file from known files to allow retry");
+    }
+
+    [Fact]
+    public async Task UploadLocalFile_ThrowsExceptionOnFailure()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        var localFile = Path.Combine(_tempDir, "error-test.txt");
+        File.WriteAllText(localFile, "error content");
+
+        // Configure mock to return 500
+        _mockHttp.AddResponseByPrefix(
+            $"{serverUrl}/v1/spaces/{spaceId}/items/",
+            HttpStatusCode.InternalServerError,
+            "Server error");
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        // Upload should throw on failure
+        var act = async () => await service.UploadLocalFileAsync(localFile, CancellationToken.None);
+        await act.Should().ThrowAsync<HttpRequestException>("upload failure should throw");
+    }
+
+    [Fact]
+    public async Task FileWatcher_IgnoresKnownFiles()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        // Create a file before starting watcher
+        var existingFile = Path.Combine(_tempDir, "existing.txt");
+        File.WriteAllText(existingFile, "existing content");
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        // Scan to populate _knownFiles with the existing filename
+        service.ScanExistingFiles();
+
+        // Remove the file so that recreating it will trigger a Created event for a known filename
+        File.Delete(existingFile);
+
+        using var cts = new CancellationTokenSource();
+
+        // Start file watcher
+        _ = Task.Run(() => service.StartFileWatcher(cts.Token));
+        await Task.Delay(200); // Let watcher initialize
+
+        // Recreate the file (triggers Created for a known filename)
+        File.WriteAllText(existingFile, "recreated content");
+        await Task.Delay(300); // Wait for watcher to process
+
+        cts.Cancel();
+
+        // Verify no upload request was made
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().BeEmpty("known files should not trigger uploads");
+    }
+
+    [Fact]
+    public async Task FileWatcher_IgnoresTempFiles()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        using var cts = new CancellationTokenSource();
+
+        // Start file watcher
+        _ = Task.Run(() => service.StartFileWatcher(cts.Token));
+        await Task.Delay(200); // Let watcher initialize
+
+        // Create temp files that match the pattern (start with . AND end with .tmp)
+        var tempFile1 = Path.Combine(_tempDir, ".download1.tmp");
+        var tempFile2 = Path.Combine(_tempDir, ".upload2.tmp");
+        File.WriteAllText(tempFile1, "temp file 1");
+        File.WriteAllText(tempFile2, "temp file 2");
+        await Task.Delay(300); // Wait for watcher to process
+
+        cts.Cancel();
+
+        // Verify no upload requests were made
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().BeEmpty("temp files (starting with . and ending with .tmp) should be ignored by watcher");
+    }
+
+    [Fact]
+    public async Task FileWatcher_UploadsUnknownFiles()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        var uploadResponse = new
+        {
+            id = Guid.NewGuid(),
+            spaceId = spaceId,
+            contentType = "file",
+            content = "newfile.txt",
+            fileSize = 12,
+            sharedAt = DateTime.UtcNow
+        };
+
+        _mockHttp.AddResponseByPrefix(
+            $"{serverUrl}/v1/spaces/{spaceId}/items/",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(uploadResponse));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        using var cts = new CancellationTokenSource(5000); // 5 second timeout
+
+        // Start file watcher
+        _ = Task.Run(() => service.StartFileWatcher(cts.Token));
+        await Task.Delay(200); // Let watcher initialize
+
+        // Create a new file
+        var newFile = Path.Combine(_tempDir, "newfile.txt");
+        File.WriteAllText(newFile, "new content!");
+        await Task.Delay(1000); // Wait for watcher to process and upload
+
+        cts.Cancel();
+
+        // Verify upload request was made
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().Contain(r => r.Contains($"/v1/spaces/{spaceId}/items/"),
+            "unknown file should trigger upload");
+    }
 }
 
 public class MockHttpMessageHandler : HttpMessageHandler
 {
     private readonly Dictionary<string, (HttpStatusCode status, byte[] content, int delayMs)> _responses = new();
-    private readonly List<string> _requestUrls = [];
+    private readonly List<(string prefix, HttpStatusCode status, byte[] content, int delayMs)> _prefixResponses = new();
+    private readonly ConcurrentQueue<(HttpMethod Method, string Url)> _requestUrls = new();
 
     public void AddResponse(string url, HttpStatusCode status, string content, int delayMs = 0)
     {
@@ -322,31 +688,61 @@ public class MockHttpMessageHandler : HttpMessageHandler
         _responses[url] = (status, content, delayMs);
     }
 
-    public List<string> GetRequestUrls() => _requestUrls;
+    public void AddResponseByPrefix(string urlPrefix, HttpStatusCode status, string content, int delayMs = 0)
+    {
+        _prefixResponses.Add((urlPrefix, status, Encoding.UTF8.GetBytes(content), delayMs));
+    }
+
+    public void AddResponseByPrefix(string urlPrefix, HttpStatusCode status, byte[] content, int delayMs = 0)
+    {
+        _prefixResponses.Add((urlPrefix, status, content, delayMs));
+    }
+
+    public List<(HttpMethod Method, string Url)> GetRequests() => _requestUrls.ToList();
+    // Keep backwards compat
+    public List<string> GetRequestUrls() => _requestUrls.Select(r => r.Url).ToList();
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         var url = request.RequestUri?.ToString() ?? string.Empty;
-        _requestUrls.Add(url);
+        _requestUrls.Enqueue((request.Method, url));
 
-        if (!_responses.TryGetValue(url, out var response))
+        // Try exact match first
+        if (_responses.TryGetValue(url, out var response))
         {
-            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            if (response.delayMs > 0)
             {
-                Content = new StringContent($"Mock not configured for: {url}")
+                await Task.Delay(response.delayMs, cancellationToken);
+            }
+
+            return new HttpResponseMessage(response.status)
+            {
+                Content = new ByteArrayContent(response.content)
             };
         }
 
-        if (response.delayMs > 0)
+        // Try prefix match
+        foreach (var (prefix, status, content, delayMs) in _prefixResponses)
         {
-            await Task.Delay(response.delayMs, cancellationToken);
+            if (url.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                if (delayMs > 0)
+                {
+                    await Task.Delay(delayMs, cancellationToken);
+                }
+
+                return new HttpResponseMessage(status)
+                {
+                    Content = new ByteArrayContent(content)
+                };
+            }
         }
 
-        return new HttpResponseMessage(response.status)
+        return new HttpResponseMessage(HttpStatusCode.NotFound)
         {
-            Content = new ByteArrayContent(response.content)
+            Content = new StringContent($"Mock not configured for: {url}")
         };
     }
 }

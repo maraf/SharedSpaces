@@ -714,3 +714,93 @@ var connection = new HubConnectionBuilder()
 - **Connection state events:** SignalR provides `Reconnecting`, `Reconnected`, and `Closed` — hook all three for complete observability
 - **Hub auto-join:** Server-side `OnConnectedAsync` auto-joins space groups, so CLI doesn't need explicit join method call
 
+
+## 2025-01-26 — Bidirectional Upload via FileSystemWatcher (Issue #120)
+
+### Implementation
+
+Extended `SyncService` with FileSystemWatcher-based upload to detect and upload locally-created files to the space in real-time.
+
+**Changes to `SyncService.cs`:**
+
+1. **Added filename-based loop prevention:**
+   - `ConcurrentDictionary<string, byte> _knownFiles` — Tracks filenames (case-insensitive) to distinguish downloaded vs user-created files
+   - `ScanExistingFiles()` — Scans local folder on startup to build initial manifest of pre-existing files
+   - `DownloadAndSaveFileAsync()` now adds filename to `_knownFiles` after saving
+
+2. **FileSystemWatcher integration:**
+   - `FileSystemWatcher? _watcher` field
+   - `StartFileWatcher(CancellationToken)` — Creates watcher on local folder, subscribes to `Created` events
+   - Filter: `*.*` (all files), `IncludeSubdirectories = false`
+   - Ignores temp files (`.*.tmp` pattern used by download process)
+
+3. **Upload flow:**
+   - `OnFileCreated(FileSystemEventArgs, CancellationToken)` — Handler for Created events:
+     - Checks if filename is in `_knownFiles` → skip if yes (downloaded or pre-existing)
+     - Adds filename to `_knownFiles` immediately (prevent double-upload)
+     - Fires async upload on background task (don't block FileSystemWatcher thread)
+   - `UploadLocalFileAsync(string, CancellationToken)` — Upload logic:
+     - Generates `Guid.NewGuid()` for item ID
+     - Waits 100ms for file to be fully written
+     - Retries file access up to 3 times (handles locked files)
+     - Calls `_apiClient.UploadFileAsync()`
+     - Adds item ID to `_downloadedItems` (prevents SignalR echo from triggering download)
+     - Removes from `_knownFiles` on failure (allows retry)
+
+4. **RunAsync flow updated:**
+   - `ScanExistingFiles()` called before `InitialSyncAsync()`
+   - `StartFileWatcher(ct)` called after `ConnectSignalRAsync(ct)`
+
+5. **Disposal:**
+   - `_watcher?.Dispose()` in `DisposeAsync()`
+
+### Thread Safety
+
+- `_knownFiles` is `ConcurrentDictionary` — FileSystemWatcher events fire on ThreadPool threads
+- Upload task runs on background thread via `Task.Run` to avoid blocking watcher
+- CancellationToken properly propagated to async operations
+
+### Loop Prevention Strategy
+
+**Two-level tracking:**
+1. **Guid-based** (`_downloadedItems`) — Tracks items by server-assigned IDs (prevents re-download of same item)
+2. **Filename-based** (`_knownFiles`) — Tracks filenames to distinguish:
+   - Files downloaded from space → in `_knownFiles` → ignore Created events
+   - Pre-existing files on startup → in `_knownFiles` → ignore Created events
+   - User-created files → NOT in `_knownFiles` → upload to space
+
+**Flow:**
+- Download: Add filename to `_knownFiles` → FileSystemWatcher ignores it
+- User creates file: Not in `_knownFiles` → upload → add to `_knownFiles` + add Guid to `_downloadedItems`
+- SignalR echo: Item ID in `_downloadedItems` → skip download
+
+### Build Verification
+✅ `dotnet build src/SharedSpaces.Cli.Core/SharedSpaces.Cli.Core.csproj` succeeded  
+✅ `dotnet build src/SharedSpaces.Cli/SharedSpaces.Cli.csproj` succeeded
+
+### Learnings
+
+- **FileSystemWatcher temp file handling:** Must explicitly ignore `.*.tmp` files created by download atomic write pattern
+- **File locking:** Need retry logic in upload — file may be locked briefly after creation (antivirus, indexing, etc.)
+- **Task.Run for FSW events:** FileSystemWatcher events fire synchronously on ThreadPool thread — must offload async work to avoid blocking watcher
+- **Case-insensitive filename tracking:** Use `StringComparer.OrdinalIgnoreCase` for cross-platform filename comparison
+- **100ms write delay:** Brief delay before reading new file ensures it's fully written (especially for large files or slow writes)
+- **NotifyFilters:** Setting `NotifyFilters.FileName | NotifyFilters.CreationTime` reduces spurious events
+
+### 2026-03-17 — PR #123 Review: SyncService Robustness Fixes
+
+Applied 6 targeted fixes to `SyncService.cs` from PR review feedback:
+
+1. **Case-insensitive temp-file filtering** — Changed `.EndsWith(".tmp")` to use `OrdinalIgnoreCase` comparison in both `ScanExistingFiles` (line 307) and `OnFileCreated` (line 339). Prevents `.TMP` variants from bypassing exclusion on Windows.
+
+2. **FileSystemWatcher filter** — Changed `Filter = "*.*"` to `Filter = "*"`. The `*.*` pattern misses extensionless files on some platforms (Linux/macOS).
+
+3. **FileSystemWatcher disposal guard** — Added `_watcher?.Dispose()` before creating a new watcher in `StartFileWatcher`. Prevents OS handle leaks if the method is called multiple times.
+
+4. **Atomic duplicate upload prevention** — Replaced `ContainsKey` check + `TryAdd` with a single `TryAdd` as gate. The `!_knownFiles.TryAdd(...)` pattern is atomic and prevents race conditions where multiple FileSystemWatcher events for the same file can trigger duplicate uploads.
+
+5. **Cleanup on file-not-found** — Added `_knownFiles.TryRemove(fileName, out _)` when `File.Exists(filePath)` returns false in `UploadLocalFileAsync`. Ensures vanished files don't block future uploads with the same name.
+
+**Pattern learned:** Always use `StringComparison.OrdinalIgnoreCase` for file extension checks in cross-platform code. Windows is case-insensitive but explicit comparison ensures consistent behavior.
+
+**Pattern learned:** `ConcurrentDictionary.TryAdd` as a gate is cleaner than separate `ContainsKey` checks — it's atomic and avoids TOCTOU bugs.
