@@ -405,9 +405,9 @@ public class SyncServiceTests : IDisposable
         await service.UploadLocalFileAsync(localFile, CancellationToken.None);
 
         // Verify PUT request was made
-        var requests = _mockHttp.GetRequestUrls();
-        requests.Should().Contain(r => r.Contains($"/v1/spaces/{spaceId}/items/") && r.Contains("/v1/spaces/"),
-            "upload PUT request should be made");
+        var requests = _mockHttp.GetRequests();
+        requests.Should().Contain(r => r.Method == HttpMethod.Put && r.Url.Contains($"/v1/spaces/{spaceId}/items/"),
+            "upload should use PUT method");
     }
 
     [Fact]
@@ -676,7 +676,7 @@ public class MockHttpMessageHandler : HttpMessageHandler
 {
     private readonly Dictionary<string, (HttpStatusCode status, byte[] content, int delayMs)> _responses = new();
     private readonly List<(string prefix, HttpStatusCode status, byte[] content, int delayMs)> _prefixResponses = new();
-    private readonly ConcurrentQueue<string> _requestUrls = new();
+    private readonly ConcurrentQueue<(HttpMethod Method, string Url)> _requestUrls = new();
 
     public void AddResponse(string url, HttpStatusCode status, string content, int delayMs = 0)
     {
@@ -698,14 +698,16 @@ public class MockHttpMessageHandler : HttpMessageHandler
         _prefixResponses.Add((urlPrefix, status, content, delayMs));
     }
 
-    public List<string> GetRequestUrls() => _requestUrls.ToList();
+    public List<(HttpMethod Method, string Url)> GetRequests() => _requestUrls.ToList();
+    // Keep backwards compat
+    public List<string> GetRequestUrls() => _requestUrls.Select(r => r.Url).ToList();
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         var url = request.RequestUri?.ToString() ?? string.Empty;
-        _requestUrls.Enqueue(url);
+        _requestUrls.Enqueue((request.Method, url));
 
         // Try exact match first
         if (_responses.TryGetValue(url, out var response))

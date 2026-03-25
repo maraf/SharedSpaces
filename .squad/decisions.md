@@ -3668,7 +3668,7 @@ Implemented FileSystemWatcher-based upload with **two-level loop prevention** to
 ### Implementation Details
 
 **FileSystemWatcher configuration:**
-- Filter: `*.*` (all files)
+- Filter: `*` (all files, including extensionless)
 - `IncludeSubdirectories = false`
 - `NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime`
 - Ignores `.*.tmp` files (used by download atomic write pattern)

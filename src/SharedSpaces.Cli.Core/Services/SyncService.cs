@@ -383,15 +383,29 @@ public sealed class SyncService : IAsyncDisposable
                 }
 
                 var itemId = Guid.NewGuid();
-                Console.WriteLine($"[Upload] Uploading {fileName} as {itemId}...");
-
-                var response = await _apiClient.UploadFileAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, filePath, ct);
-
-                // Mark as downloaded so we ignore the SignalR echo
+                // Pre-mark to prevent echo download race (server broadcasts ItemAdded before PUT returns)
                 _downloadedItems.TryAdd(itemId, 0);
 
-                Console.WriteLine($"[Upload] Successfully uploaded {fileName}");
-                return;
+                Console.WriteLine($"[Upload] Uploading {fileName} as {itemId}...");
+
+                try
+                {
+                    var response = await _apiClient.UploadFileAsync(_serverUrl, _spaceId, itemId.ToString(), _jwtToken, filePath, ct);
+
+                    // Use server-returned ID in case it differs
+                    if (response.Id != itemId)
+                    {
+                        _downloadedItems.TryAdd(response.Id, 0);
+                    }
+
+                    Console.WriteLine($"[Upload] Successfully uploaded {fileName} as {response.Id}");
+                    return;
+                }
+                catch
+                {
+                    _downloadedItems.TryRemove(itemId, out _);
+                    throw;
+                }
             }
             catch (IOException) when (attempt < 2)
             {
