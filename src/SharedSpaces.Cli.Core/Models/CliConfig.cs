@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Text.Json.Serialization;
 
 namespace SharedSpaces.Cli.Core.Models;
@@ -10,18 +11,29 @@ public sealed class CliConfig
 
 public sealed class SpaceEntry
 {
-    [JsonPropertyName("spaceId")]
-    public required string SpaceId { get; set; }
-
-    [JsonPropertyName("serverUrl")]
-    public required string ServerUrl { get; set; }
-
     [JsonPropertyName("jwtToken")]
     public required string JwtToken { get; set; }
 
-    [JsonPropertyName("displayName")]
-    public required string DisplayName { get; set; }
+    [JsonIgnore]
+    public string SpaceId => GetClaim("space_id");
 
-    [JsonPropertyName("joinedAt")]
-    public required DateTime JoinedAt { get; set; }
+    [JsonIgnore]
+    public string ServerUrl => GetClaim("server_url");
+
+    [JsonIgnore]
+    public string DisplayName => GetClaim("display_name");
+
+    [JsonIgnore]
+    public string SpaceName => GetClaim("space_name");
+
+    private string GetClaim(string claimType)
+    {
+        var handler = new JwtSecurityTokenHandler();
+        if (handler.CanReadToken(JwtToken))
+        {
+            var token = handler.ReadJwtToken(JwtToken);
+            return token.Claims.FirstOrDefault(c => c.Type == claimType)?.Value ?? string.Empty;
+        }
+        return string.Empty;
+    }
 }

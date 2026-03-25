@@ -37,3 +37,15 @@ sharedspaces upload myfile.txt --space-id 550e8400-e29b-41d4-a716-446655440000
 ```
 
 The access token for the space is read automatically from the local config stored during `join`.
+
+## Config
+
+Tokens are stored in `~/.sharedspaces/config.json`. Each entry contains only the JWT — all metadata (space ID, server URL, display name) is extracted from the token's claims at runtime.
+
+```json
+{
+  "spaces": [
+    { "jwtToken": "eyJ..." }
+  ]
+}
+```

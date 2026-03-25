@@ -499,3 +499,4 @@ All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug 
 - `src/AppHost.cs` — Environment variable uses index format
 - `tests/SharedSpaces.Server.Tests/AdminEndpointTests.cs` — In-memory config uses index format
 
+- CLI config (`SpaceEntry`) now stores only `JwtToken`; `SpaceId`, `ServerUrl`, `DisplayName`, and `SpaceName` are computed at runtime by decoding JWT claims via `JwtSecurityTokenHandler`. `JoinedAt` was dropped entirely per Marek's directive. Package `System.IdentityModel.Tokens.Jwt` (8.17.0) added to `SharedSpaces.Cli.Core`.

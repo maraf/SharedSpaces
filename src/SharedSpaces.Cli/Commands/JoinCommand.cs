@@ -64,11 +64,7 @@ public static class JoinCommand
 
             await configService.UpsertSpaceAsync(new SpaceEntry
             {
-                SpaceId = invitation.SpaceId,
-                ServerUrl = invitation.ServerUrl,
-                JwtToken = tokenResponse.Token,
-                DisplayName = displayName,
-                JoinedAt = DateTime.UtcNow
+                JwtToken = tokenResponse.Token
             }, ct);
 
             Console.WriteLine($"Joined as \"{displayName}\".");

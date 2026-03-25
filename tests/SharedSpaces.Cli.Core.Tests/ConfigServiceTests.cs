@@ -21,6 +21,24 @@ public class ConfigServiceTests : IDisposable
             Directory.Delete(_tempDir, recursive: true);
     }
 
+    private static string CreateTestJwt(string spaceId, string serverUrl, string displayName, string spaceName = "Test Space")
+    {
+        var header = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"alg\":\"HS256\",\"typ\":\"JWT\"}"))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var payload = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["space_id"] = spaceId,
+                ["server_url"] = serverUrl,
+                ["display_name"] = displayName,
+                ["space_name"] = spaceName
+            })))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var signature = Convert.ToBase64String(new byte[32])
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return $"{header}.{payload}.{signature}";
+    }
+
     [Fact]
     public async Task LoadAsync_NoFile_ReturnsEmptyConfig()
     {
@@ -32,16 +50,10 @@ public class ConfigServiceTests : IDisposable
     [Fact]
     public async Task SaveAsync_CreatesDirectoryAndFile()
     {
+        var jwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "TestUser");
         var config = new CliConfig
         {
-            Spaces = [new SpaceEntry
-            {
-                SpaceId = "550e8400-e29b-41d4-a716-446655440000",
-                ServerUrl = "https://server.example.com",
-                JwtToken = "eyJ...",
-                DisplayName = "TestUser",
-                JoinedAt = new DateTime(2025, 1, 15, 10, 30, 0, DateTimeKind.Utc)
-            }]
+            Spaces = [new SpaceEntry { JwtToken = jwt }]
         };
 
         await _service.SaveAsync(config);
@@ -52,63 +64,39 @@ public class ConfigServiceTests : IDisposable
     [Fact]
     public async Task SaveAndLoad_RoundTrips()
     {
-        var entry = new SpaceEntry
-        {
-            SpaceId = "550e8400-e29b-41d4-a716-446655440000",
-            ServerUrl = "https://server.example.com",
-            JwtToken = "eyJ...",
-            DisplayName = "TestUser",
-            JoinedAt = new DateTime(2025, 1, 15, 10, 30, 0, DateTimeKind.Utc)
-        };
+        var jwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "TestUser", "My Space");
+        var entry = new SpaceEntry { JwtToken = jwt };
 
         await _service.UpsertSpaceAsync(entry);
         var loaded = await _service.GetSpaceAsync("550e8400-e29b-41d4-a716-446655440000");
 
         loaded.Should().NotBeNull();
-        loaded!.ServerUrl.Should().Be("https://server.example.com");
-        loaded.JwtToken.Should().Be("eyJ...");
+        loaded!.JwtToken.Should().Be(jwt);
+        loaded.ServerUrl.Should().Be("https://server.example.com");
         loaded.DisplayName.Should().Be("TestUser");
+        loaded.SpaceName.Should().Be("My Space");
     }
 
     [Fact]
     public async Task UpsertSpaceAsync_ReplacesExistingEntry()
     {
-        var original = new SpaceEntry
-        {
-            SpaceId = "550e8400-e29b-41d4-a716-446655440000",
-            ServerUrl = "https://old.example.com",
-            JwtToken = "old-token",
-            DisplayName = "OldName",
-            JoinedAt = DateTime.UtcNow.AddDays(-1)
-        };
-        await _service.UpsertSpaceAsync(original);
+        var oldJwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://old.example.com", "OldName");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = oldJwt });
 
-        var updated = new SpaceEntry
-        {
-            SpaceId = "550e8400-e29b-41d4-a716-446655440000",
-            ServerUrl = "https://new.example.com",
-            JwtToken = "new-token",
-            DisplayName = "NewName",
-            JoinedAt = DateTime.UtcNow
-        };
-        await _service.UpsertSpaceAsync(updated);
+        var newJwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://new.example.com", "NewName");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = newJwt });
 
         var config = await _service.LoadAsync();
         config.Spaces.Should().HaveCount(1);
-        config.Spaces[0].JwtToken.Should().Be("new-token");
+        config.Spaces[0].JwtToken.Should().Be(newJwt);
+        config.Spaces[0].ServerUrl.Should().Be("https://new.example.com");
     }
 
     [Fact]
     public async Task GetSpaceAsync_CaseInsensitiveMatch()
     {
-        await _service.UpsertSpaceAsync(new SpaceEntry
-        {
-            SpaceId = "550e8400-e29b-41d4-a716-446655440000",
-            ServerUrl = "https://server.example.com",
-            JwtToken = "token",
-            DisplayName = "User",
-            JoinedAt = DateTime.UtcNow
-        });
+        var jwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "User");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = jwt });
 
         var result = await _service.GetSpaceAsync("550E8400-E29B-41D4-A716-446655440000");
         result.Should().NotBeNull();
@@ -122,22 +110,33 @@ public class ConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_UsesCamelCaseInJsonKeys()
+    public async Task SaveAsync_WritesOnlyJwtTokenToJson()
     {
-        await _service.UpsertSpaceAsync(new SpaceEntry
-        {
-            SpaceId = "550e8400-e29b-41d4-a716-446655440000",
-            ServerUrl = "https://server.example.com",
-            JwtToken = "token",
-            DisplayName = "User",
-            JoinedAt = DateTime.UtcNow
-        });
+        var jwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "User");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = jwt });
 
         var json = await File.ReadAllTextAsync(Path.Combine(_tempDir, "config.json"));
-        json.Should().Contain("\"spaceId\"");
-        json.Should().Contain("\"serverUrl\"");
         json.Should().Contain("\"jwtToken\"");
-        json.Should().Contain("\"displayName\"");
-        json.Should().Contain("\"joinedAt\"");
+        json.Should().NotContain("\"spaceId\"");
+        json.Should().NotContain("\"serverUrl\"");
+        json.Should().NotContain("\"displayName\"");
+        json.Should().NotContain("\"joinedAt\"");
+    }
+
+    [Fact]
+    public void SpaceEntry_ExtractsClaimsFromJwt()
+    {
+        var jwt = CreateTestJwt(
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "https://myserver.example.com",
+            "Alice",
+            "Project Alpha");
+
+        var entry = new SpaceEntry { JwtToken = jwt };
+
+        entry.SpaceId.Should().Be("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        entry.ServerUrl.Should().Be("https://myserver.example.com");
+        entry.DisplayName.Should().Be("Alice");
+        entry.SpaceName.Should().Be("Project Alpha");
     }
 }
