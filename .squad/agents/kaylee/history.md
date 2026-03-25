@@ -522,3 +522,41 @@ All 130 tests pass including Zoe's 13 auto-convert specific tests. One test bug 
 **Build & Test:** ✅ Clean build, ✅ 19/19 tests pass
 
 **Collaboration:** Zoe updated all test fixtures and added `SpaceEntry_ExtractsClaimsFromJwt` test. Both commits to cli-scaffold, PR #121 updated.
+
+---
+
+## Session: NuGet Trusted Publishing (2026-03-25)
+
+### CLI Workflow Enhanced with NuGet.org Trusted Publishing
+
+**What:** Added OIDC-based trusted publishing to `.github/workflows/cli-publish.yml` to enable automatic NuGet package publication without API key secrets.
+
+**Why:** Trusted publishing uses GitHub's OIDC tokens for authentication, eliminating the need to manage/rotate API keys. More secure and aligns with modern GitHub Actions best practices.
+
+**Changes Made:**
+1. **Permissions:** Added `id-token: write` to workflow permissions (required for OIDC token requests)
+2. **Environment:** Added `environment: nuget.org` to job config (maps to trusted publisher policy on nuget.org)
+3. **Push Step:** Added `dotnet nuget push` step that pushes to `https://api.nuget.org/v3/index.json` with `--skip-duplicate` flag
+4. **Documentation:** Included inline comments explaining the manual nuget.org setup:
+   - Navigate to nuget.org package management
+   - Configure trusted publisher for GitHub Actions
+   - Specify owner/repo, workflow file, and environment name
+
+**How OIDC Trusted Publishing Works:**
+- GitHub Actions requests an OIDC token when job runs
+- `dotnet nuget push` automatically uses this token for authentication
+- NuGet.org validates the token against the trusted publisher policy
+- No secrets stored in GitHub repository
+
+**Manual Configuration Required:**
+Owner must configure trusted publisher on nuget.org:
+- Package: `SharedSpaces.Cli`
+- Publisher: GitHub Actions
+- Repository: `{owner}/{repo}`
+- Workflow: `cli-publish.yml`
+- Environment: `nuget.org`
+
+**File Modified:** `.github/workflows/cli-publish.yml`
+
+**Commit:** `ci(cli): add NuGet trusted publishing to CLI workflow` (7e0e74b)
+
