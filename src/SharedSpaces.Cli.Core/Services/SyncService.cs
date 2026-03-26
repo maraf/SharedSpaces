@@ -134,7 +134,14 @@ public sealed class SyncService : IAsyncDisposable
             if (ct.IsCancellationRequested)
                 return;
 
-            Console.WriteLine($"[SignalR] Connection closed ({error?.Message ?? "normal closure"})");
+            // Do not restart polling on graceful/normal shutdown (e.g., DisposeAsync()).
+            if (error is null)
+            {
+                Console.WriteLine("[SignalR] Connection closed gracefully.");
+                return;
+            }
+
+            Console.WriteLine($"[SignalR] Connection closed ({error.Message})");
             _lastDisconnect = DateTime.UtcNow;
             StartPolling(ct);
 
