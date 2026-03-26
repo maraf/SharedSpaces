@@ -928,7 +928,7 @@ public class SyncServiceTests : IDisposable
         var localPath = Path.Combine(_tempDir, "timestamped.txt");
         var localFile = new FileInfo(localPath);
         localFile.Exists.Should().BeTrue();
-        Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds).Should().BeLessThan(2,
+        Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds).Should().BeLessOrEqualTo(2,
             "downloaded file should have LastWriteTimeUtc set to SharedAt from server");
     }
 }

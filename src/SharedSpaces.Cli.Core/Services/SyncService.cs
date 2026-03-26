@@ -11,6 +11,7 @@ public sealed class SyncService : IAsyncDisposable
     private readonly string _spaceId;
     private readonly string _jwtToken;
     private readonly string _localFolder;
+    private const double TimestampToleranceSeconds = 2;
     private readonly ConcurrentDictionary<Guid, string> _downloadedItems = new();
     private readonly ConcurrentDictionary<Guid, byte> _pendingUploads = new();
     private readonly ConcurrentDictionary<string, byte> _knownFiles = new(StringComparer.OrdinalIgnoreCase);
@@ -295,7 +296,7 @@ public sealed class SyncService : IAsyncDisposable
             {
                 var localFile = new FileInfo(localPath);
                 if (localFile.Length == fileSize
-                    && Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds) < 2)
+                    && Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds) <= TimestampToleranceSeconds)
                 {
                     Console.WriteLine($"[Download] Skipping unchanged file: {safeName}");
                     _knownFiles.TryAdd(safeName, 0);
