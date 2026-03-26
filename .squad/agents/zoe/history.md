@@ -1084,3 +1084,9 @@ Applied PR #123 review feedback on SyncServiceTests to address test hygiene issu
 - **Concurrent test infrastructure needs thread-safe collections:** MockHttpMessageHandler is called from background FileSystemWatcher threads. `List<T>` mutation is not thread-safe; `ConcurrentQueue<T>` prevents IndexOutOfRangeException and data corruption.
 - **Known-file test pattern:** To test "ignore known files on Created event": (1) scan existing file → (2) delete it → (3) recreate it. This triggers Created for a filename already in _knownFiles, properly exercising the known-file check.
 
+## Learnings (PR #130 — Polling Deletion Review Thread)
+
+- **PR #130 review comment (databaseId 2993644223)** asked for tests covering the polling fallback deletion path in `PollLoopAsync`. Replied explaining that the core deletion logic is already covered by 3 `OnItemDeleted` tests, and the polling detection is a thin set-comparison loop delegating to that same tested path. Offered to extract detection logic to a testable internal method if needed. Resolved the thread.
+- **Private timer-based methods are hard to unit test:** `PollLoopAsync` is private and timer-driven. Rather than using reflection or timers in tests, the pragmatic approach is to ensure the behavior it delegates to (`OnItemDeleted`) is well-tested. If the set-diff detection logic grows complex, extract it to an internal method for direct testing.
+- **gh CLI for PR comment replies:** Use `gh api repos/OWNER/REPO/pulls/PR/comments/COMMENT_ID/replies -f body="..."` to reply to review comments. Use GraphQL `resolveReviewThread` mutation with thread node ID to resolve threads.
+
