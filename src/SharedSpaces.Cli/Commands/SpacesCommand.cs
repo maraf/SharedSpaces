@@ -8,7 +8,7 @@ public static class SpacesCommand
 {
     public static Command Create()
     {
-        var jsonOption = new Option<bool>("--json", "Output as JSON");
+        var jsonOption = new Option<bool>("--json") { Description = "Output as JSON" };
 
         var command = new Command("spaces", "List all joined spaces");
         command.Aliases.Add("list");
