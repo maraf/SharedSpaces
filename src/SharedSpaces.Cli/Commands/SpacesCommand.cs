@@ -8,24 +8,41 @@ public static class SpacesCommand
 {
     public static Command Create()
     {
+        var jsonOption = new Option<bool>("--json", "Output as JSON");
+
         var command = new Command("spaces", "List all joined spaces");
         command.Aliases.Add("list");
+        command.Add(jsonOption);
 
         command.SetAction(async (parseResult, ct) =>
         {
-            await HandleAsync(ct);
+            var json = parseResult.GetValue(jsonOption);
+            await HandleAsync(json, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(CancellationToken ct)
+    private static async Task HandleAsync(bool json, CancellationToken ct)
     {
         var configService = new ConfigService();
 
         try
         {
             var config = await configService.LoadAsync(ct);
+
+            if (json)
+            {
+                var output = config.Spaces.Select(s => new
+                {
+                    spaceName = s.SpaceName,
+                    displayName = s.DisplayName,
+                    serverUrl = s.ServerUrl,
+                    spaceId = s.SpaceId,
+                });
+                Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
+                return;
+            }
 
             if (config.Spaces.Count == 0)
             {
