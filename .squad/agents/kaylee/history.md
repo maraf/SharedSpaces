@@ -804,3 +804,17 @@ Applied 6 targeted fixes to `SyncService.cs` from PR review feedback:
 **Pattern learned:** Always use `StringComparison.OrdinalIgnoreCase` for file extension checks in cross-platform code. Windows is case-insensitive but explicit comparison ensures consistent behavior.
 
 **Pattern learned:** `ConcurrentDictionary.TryAdd` as a gate is cleaner than separate `ContainsKey` checks — it's atomic and avoids TOCTOU bugs.
+
+---
+
+## 2026-03-26: PR #130 Race Condition Fix - Polling Deletion vs In-Flight Uploads
+
+**What:** Fixed a race condition in `SyncService.cs` where the polling-based deletion check could delete a user's local file mid-upload when SignalR was disconnected.
+
+**Why:** The polling loop compared `serverFileIds` against all `_downloadedItems` keys, but uploads pre-add `itemId` before the PUT completes. A slow upload during a SignalR disconnect made polling think the item was deleted on the server.
+
+**Fix:** Added `ConcurrentDictionary<Guid, byte> _pendingUploads` to track in-flight upload item IDs. The ID is added before the PUT starts and removed on completion or failure. The polling deletion loop skips any ID present in `_pendingUploads`.
+
+**Pattern learned:** When a ConcurrentDictionary serves dual purposes (echo-prevention AND state tracking), use a separate tracking collection to disambiguate in-flight vs confirmed entries.
+
+**Build:** Clean build after fix
