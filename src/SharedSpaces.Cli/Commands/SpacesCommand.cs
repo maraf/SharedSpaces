@@ -26,54 +26,40 @@ public static class SpacesCommand
     private static async Task HandleAsync(bool json, CancellationToken ct)
     {
         var configService = new ConfigService();
+        var config = await configService.LoadAsync(ct);
 
-        try
+        if (json)
         {
-            var config = await configService.LoadAsync(ct);
-
-            if (json)
+            var output = config.Spaces.Select(s => new
             {
-                var output = config.Spaces.Select(s => new
-                {
-                    spaceName = s.SpaceName,
-                    displayName = s.DisplayName,
-                    serverUrl = s.ServerUrl,
-                    spaceId = s.SpaceId,
-                });
-                Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
-                return;
-            }
-
-            if (config.Spaces.Count == 0)
-            {
-                Console.WriteLine("No spaces joined. Use 'join' to connect to a space.");
-                return;
-            }
-
-            const int nameWidth = -20;
-            const int displayWidth = -20;
-            const int serverWidth = -30;
-
-            Console.WriteLine(
-                $"{"Space Name",nameWidth}  {"Display Name",displayWidth}  {"Server",serverWidth}  Space ID");
-            Console.WriteLine(
-                $"{new string('-', -nameWidth)}  {new string('-', -displayWidth)}  {new string('-', -serverWidth)}  {new string('-', 36)}");
-
-            foreach (var space in config.Spaces)
-            {
-                Console.WriteLine(
-                    $"{space.SpaceName,nameWidth}  {space.DisplayName,displayWidth}  {space.ServerUrl,serverWidth}  {space.SpaceId}");
-            }
+                spaceName = s.SpaceName,
+                displayName = s.DisplayName,
+                serverUrl = s.ServerUrl,
+                spaceId = s.SpaceId,
+            });
+            Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
+            return;
         }
-        catch (IOException ex)
+
+        if (config.Spaces.Count == 0)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            Console.WriteLine("No spaces joined. Use 'join' to connect to a space.");
+            return;
         }
-        catch (JsonException ex)
+
+        const int nameWidth = -20;
+        const int displayWidth = -20;
+        const int serverWidth = -30;
+
+        Console.WriteLine(
+            $"{"Space Name",nameWidth}  {"Display Name",displayWidth}  {"Server",serverWidth}  Space ID");
+        Console.WriteLine(
+            $"{new string('-', -nameWidth)}  {new string('-', -displayWidth)}  {new string('-', -serverWidth)}  {new string('-', 36)}");
+
+        foreach (var space in config.Spaces)
         {
-            Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
+            Console.WriteLine(
+                $"{space.SpaceName,nameWidth}  {space.DisplayName,displayWidth}  {space.ServerUrl,serverWidth}  {space.SpaceId}");
         }
     }
 }
