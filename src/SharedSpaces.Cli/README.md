@@ -1,6 +1,6 @@
 # SharedSpaces CLI
 
-A command-line tool for interacting with [SharedSpaces](https://github.com/maraf/SharedSpaces) servers — join spaces and upload files from your terminal.
+A command-line tool for interacting with [SharedSpaces](https://github.com/maraf/SharedSpaces) servers — join spaces, list them, upload files, and sync folders from your terminal.
 
 ## Install
 
@@ -37,6 +37,37 @@ sharedspaces upload myfile.txt --space-id 550e8400-e29b-41d4-a716-446655440000
 ```
 
 The access token for the space is read automatically from the local config stored during `join`.
+
+### `sharedspaces spaces`
+
+List all joined spaces. Also available as `sharedspaces list`.
+
+```bash
+# Formatted table output
+sharedspaces spaces
+
+# Machine-readable JSON output
+sharedspaces spaces --json
+```
+
+### `sharedspaces sync`
+
+Sync files from a space to a local folder. Downloads existing files, then watches for changes in both directions in real-time.
+
+```bash
+sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/shared
+```
+
+Both `--space-id` and `--folder` are required. The folder is created if it doesn't exist.
+
+The sync engine:
+- **Downloads** all existing files on startup
+- **Streams** new files and deletions in real-time via SignalR
+- **Uploads** new files added to the local folder automatically
+- **Falls back** to HTTP polling when the WebSocket connection drops
+- **Reconnects** automatically with exponential backoff
+
+Press `Ctrl+C` to stop syncing.
 
 ## Config
 
