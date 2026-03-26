@@ -1,6 +1,6 @@
 # SharedSpaces CLI
 
-A command-line tool for interacting with [SharedSpaces](https://github.com/nicka-fi/SharedSpaces) servers — join spaces and upload files from your terminal.
+A command-line tool for interacting with [SharedSpaces](https://github.com/maraf/SharedSpaces) servers — join spaces and upload files from your terminal.
 
 ## Install
 

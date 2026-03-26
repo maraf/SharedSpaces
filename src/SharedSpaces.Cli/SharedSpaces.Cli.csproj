@@ -9,7 +9,12 @@
     <ToolCommandName>sharedspaces</ToolCommandName>
     <PackageId>SharedSpaces.Cli</PackageId>
     <VersionPrefix>0.0.0</VersionPrefix>
+    <Authors>maraf</Authors>
     <Description>SharedSpaces CLI — join spaces and sync files from the command line</Description>
+    <PackageProjectUrl>https://github.com/maraf/SharedSpaces</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/maraf/SharedSpaces</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>sharing;file-sync;cli;signalr</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
