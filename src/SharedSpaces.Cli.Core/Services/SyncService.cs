@@ -67,12 +67,12 @@ public sealed class SyncService : IAsyncDisposable
         var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
         var fileItems = items.Where(i => i.ContentType == "file").ToList();
 
-        Console.WriteLine($"Found {fileItems.Count} file(s) to download.");
+        Console.WriteLine($"Found {fileItems.Count} file(s) on server.");
 
         foreach (var item in fileItems)
         {
             ct.ThrowIfCancellationRequested();
-            await DownloadAndSaveFileAsync(item.Id, item.Content, ct);
+            await DownloadAndSaveFileAsync(item.Id, item.Content, item.FileSize, item.SharedAt, ct);
         }
 
         Console.WriteLine("Initial sync complete.");
@@ -84,7 +84,7 @@ public sealed class SyncService : IAsyncDisposable
 
         if (itemAdded.ContentType == "file")
         {
-            await DownloadAndSaveFileAsync(itemAdded.Id, itemAdded.Content, ct);
+            await DownloadAndSaveFileAsync(itemAdded.Id, itemAdded.Content, itemAdded.FileSize, itemAdded.SharedAt, ct);
         }
     }
 
@@ -241,7 +241,7 @@ public sealed class SyncService : IAsyncDisposable
                     Console.WriteLine($"[Polling] Found {newFileItems.Count} new file(s).");
                     foreach (var item in newFileItems)
                     {
-                        await DownloadAndSaveFileAsync(item.Id, item.Content, ct);
+                        await DownloadAndSaveFileAsync(item.Id, item.Content, item.FileSize, item.SharedAt, ct);
                     }
                 }
 
@@ -275,7 +275,7 @@ public sealed class SyncService : IAsyncDisposable
         _pollingTimer = null;
     }
 
-    private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, CancellationToken ct)
+    private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, long fileSize, DateTime sharedAt, CancellationToken ct)
     {
         var safeName = SanitizeFileName(filename, itemId);
 
@@ -289,6 +289,20 @@ public sealed class SyncService : IAsyncDisposable
         try
         {
             var localPath = Path.Combine(_localFolder, safeName);
+
+            // Skip download if local file matches server metadata
+            if (File.Exists(localPath))
+            {
+                var localFile = new FileInfo(localPath);
+                if (localFile.Length == fileSize
+                    && Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds) < 2)
+                {
+                    Console.WriteLine($"[Download] Skipping unchanged file: {safeName}");
+                    _knownFiles.TryAdd(safeName, 0);
+                    return;
+                }
+            }
+
             // Fix 6: Temp file
             var tempPath = Path.Combine(_localFolder, $".{itemId}.tmp");
 
@@ -304,6 +318,7 @@ public sealed class SyncService : IAsyncDisposable
                 }
 
                 File.Move(tempPath, localPath, overwrite: true);
+                File.SetLastWriteTimeUtc(localPath, sharedAt);
                 Console.WriteLine($"[Download] Saved to {localPath}");
 
                 // Track downloaded file to prevent upload loop

@@ -762,6 +762,175 @@ public class SyncServiceTests : IDisposable
         service.IsKnownFile("reupload.txt").Should().BeFalse(
             "deleted file should be removed from known files so FileWatcher can re-upload if re-created");
     }
+
+    // ===== Incremental Sync / Skip Unchanged Files Tests =====
+
+    [Fact]
+    public async Task InitialSync_SkipsFileWhenLocalMatchesServerMetadata()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+        var sharedAt = new DateTime(2026, 1, 15, 10, 30, 0, DateTimeKind.Utc);
+        var fileContent = Encoding.UTF8.GetBytes("existing-content");
+
+        // Create a local file that matches server metadata
+        var localPath = Path.Combine(_tempDir, "cached.txt");
+        File.WriteAllBytes(localPath, fileContent);
+        File.SetLastWriteTimeUtc(localPath, sharedAt);
+
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "cached.txt",
+            FileSize: fileContent.Length,
+            SharedAt: sharedAt);
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        service.ScanExistingFiles();
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        // Verify no download request was made
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().NotContain(r => r.Contains($"/items/{itemId}/download"),
+            "file matching server metadata should not be re-downloaded");
+
+        // But item should still be tracked
+        service.IsDownloaded(itemId).Should().BeTrue(
+            "skipped file should still be registered in downloaded manifest");
+        service.IsKnownFile("cached.txt").Should().BeTrue(
+            "skipped file should be in known files");
+    }
+
+    [Fact]
+    public async Task InitialSync_RedownloadsWhenFileSizeDiffers()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+        var sharedAt = new DateTime(2026, 1, 15, 10, 30, 0, DateTimeKind.Utc);
+
+        // Create a local file with different size
+        var localPath = Path.Combine(_tempDir, "changed.txt");
+        File.WriteAllText(localPath, "short");
+        File.SetLastWriteTimeUtc(localPath, sharedAt);
+
+        var serverContent = Encoding.UTF8.GetBytes("much longer server content");
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "changed.txt",
+            FileSize: serverContent.Length,
+            SharedAt: sharedAt);
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
+            HttpStatusCode.OK,
+            serverContent);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        service.ScanExistingFiles();
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        // Verify download was triggered
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().Contain(r => r.Contains($"/items/{itemId}/download"),
+            "file with different size should be re-downloaded");
+    }
+
+    [Fact]
+    public async Task InitialSync_RedownloadsWhenTimestampDiffers()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+        var fileContent = Encoding.UTF8.GetBytes("same-content");
+
+        // Create a local file with different timestamp
+        var localPath = Path.Combine(_tempDir, "stale.txt");
+        File.WriteAllBytes(localPath, fileContent);
+        File.SetLastWriteTimeUtc(localPath, new DateTime(2025, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "stale.txt",
+            FileSize: fileContent.Length,
+            SharedAt: new DateTime(2026, 1, 15, 10, 30, 0, DateTimeKind.Utc));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
+            HttpStatusCode.OK,
+            fileContent);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        service.ScanExistingFiles();
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        // Verify download was triggered
+        var requests = _mockHttp.GetRequestUrls();
+        requests.Should().Contain(r => r.Contains($"/items/{itemId}/download"),
+            "file with different timestamp should be re-downloaded");
+    }
+
+    [Fact]
+    public async Task Download_SetsFileTimestampToSharedAt()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+        var sharedAt = new DateTime(2026, 3, 10, 14, 0, 0, DateTimeKind.Utc);
+
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "timestamped.txt",
+            FileSize: 11,
+            SharedAt: sharedAt);
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
+            HttpStatusCode.OK,
+            Encoding.UTF8.GetBytes("hello world"));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        var localPath = Path.Combine(_tempDir, "timestamped.txt");
+        var localFile = new FileInfo(localPath);
+        localFile.Exists.Should().BeTrue();
+        Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds).Should().BeLessThan(2,
+            "downloaded file should have LastWriteTimeUtc set to SharedAt from server");
+    }
 }
 
 public class MockHttpMessageHandler : HttpMessageHandler
