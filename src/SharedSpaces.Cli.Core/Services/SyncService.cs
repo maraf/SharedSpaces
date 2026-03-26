@@ -12,6 +12,7 @@ public sealed class SyncService : IAsyncDisposable
     private readonly string _jwtToken;
     private readonly string _localFolder;
     private readonly ConcurrentDictionary<Guid, string> _downloadedItems = new();
+    private readonly ConcurrentDictionary<Guid, byte> _pendingUploads = new();
     private readonly ConcurrentDictionary<string, byte> _knownFiles = new(StringComparer.OrdinalIgnoreCase);
     private HubConnection? _hubConnection;
     private FileSystemWatcher? _watcher;
@@ -235,6 +236,9 @@ public sealed class SyncService : IAsyncDisposable
                 var serverFileIds = new HashSet<Guid>(fileItems.Select(i => i.Id));
                 foreach (var localId in _downloadedItems.Keys)
                 {
+                    if (_pendingUploads.ContainsKey(localId))
+                        continue;
+
                     if (!serverFileIds.Contains(localId))
                     {
                         OnItemDeleted(new ItemDeletedEvent(localId, Guid.Parse(_spaceId)));
@@ -419,6 +423,7 @@ public sealed class SyncService : IAsyncDisposable
                 var itemId = Guid.NewGuid();
                 // Pre-mark to prevent echo download race (server broadcasts ItemAdded before PUT returns)
                 _downloadedItems.TryAdd(itemId, fileName);
+                _pendingUploads.TryAdd(itemId, 0);
 
                 Console.WriteLine($"[Upload] Uploading {fileName} as {itemId}...");
 
@@ -433,10 +438,12 @@ public sealed class SyncService : IAsyncDisposable
                     }
 
                     Console.WriteLine($"[Upload] Successfully uploaded {fileName} as {response.Id}");
+                    _pendingUploads.TryRemove(itemId, out _);
                     return;
                 }
                 catch
                 {
+                    _pendingUploads.TryRemove(itemId, out _);
                     _downloadedItems.TryRemove(itemId, out _);
                     throw;
                 }
