@@ -41,6 +41,12 @@ docs(client,server): update API and component docs
 refactor(cli): extract quota logic into service
 ```
 
+## PR Descriptions
+
+- Use backticks for inline code in PR/issue bodies
+- PowerShell treats `` ` `` as an escape character — backticks in strings get swallowed
+- Always write PR body to a **temp file** and pass it via `--body-file`, never inline with `--body`
+
 ## Issue Titles
 
 - Don't include scope tags, instead use labels
