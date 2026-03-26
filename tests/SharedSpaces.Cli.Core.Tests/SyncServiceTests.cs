@@ -670,6 +670,98 @@ public class SyncServiceTests : IDisposable
         requests.Should().Contain(r => r.Contains($"/v1/spaces/{spaceId}/items/"),
             "unknown file should trigger upload");
     }
+
+    [Fact]
+    public async Task OnItemDeleted_DeletesLocalFile()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "to-delete.txt",
+            FileSize: 1024,
+            SharedAt: DateTime.UtcNow);
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
+            HttpStatusCode.OK,
+            Encoding.UTF8.GetBytes("file-to-delete"));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        var localPath = Path.Combine(_tempDir, "to-delete.txt");
+        File.Exists(localPath).Should().BeTrue("file should exist after initial sync");
+
+        service.OnItemDeleted(new ItemDeletedEvent(itemId, spaceId));
+
+        File.Exists(localPath).Should().BeFalse("file should be deleted after ItemDeleted event");
+        service.IsDownloaded(itemId).Should().BeFalse("item should be removed from downloaded manifest");
+        service.IsKnownFile("to-delete.txt").Should().BeFalse("file should be removed from known files");
+    }
+
+    [Fact]
+    public void OnItemDeleted_IgnoresUnknownItem()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+
+        // Should not throw for an unknown item
+        service.OnItemDeleted(new ItemDeletedEvent(Guid.NewGuid(), spaceId));
+
+        Directory.GetFiles(_tempDir).Should().BeEmpty("no files should be affected");
+    }
+
+    [Fact]
+    public async Task OnItemDeleted_RemovesFromKnownFilesAllowingReUpload()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+        var itemId = Guid.NewGuid();
+
+        var fileItem = new SpaceItemResponse(
+            Id: itemId,
+            SpaceId: spaceId,
+            MemberId: Guid.NewGuid(),
+            ContentType: "file",
+            Content: "reupload.txt",
+            FileSize: 100,
+            SharedAt: DateTime.UtcNow);
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
+
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
+            HttpStatusCode.OK,
+            Encoding.UTF8.GetBytes("content"));
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        await service.InitialSyncAsync(CancellationToken.None);
+
+        service.IsKnownFile("reupload.txt").Should().BeTrue("file should be in known files after download");
+
+        service.OnItemDeleted(new ItemDeletedEvent(itemId, spaceId));
+
+        service.IsKnownFile("reupload.txt").Should().BeFalse(
+            "deleted file should be removed from known files so FileWatcher can re-upload if re-created");
+    }
 }
 
 public class MockHttpMessageHandler : HttpMessageHandler

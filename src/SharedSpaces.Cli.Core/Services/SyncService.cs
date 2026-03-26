@@ -11,7 +11,8 @@ public sealed class SyncService : IAsyncDisposable
     private readonly string _spaceId;
     private readonly string _jwtToken;
     private readonly string _localFolder;
-    private readonly ConcurrentDictionary<Guid, byte> _downloadedItems = new();
+    private readonly ConcurrentDictionary<Guid, string> _downloadedItems = new();
+    private readonly ConcurrentDictionary<Guid, byte> _pendingUploads = new();
     private readonly ConcurrentDictionary<string, byte> _knownFiles = new(StringComparer.OrdinalIgnoreCase);
     private HubConnection? _hubConnection;
     private FileSystemWatcher? _watcher;
@@ -35,7 +36,7 @@ public sealed class SyncService : IAsyncDisposable
 
     public bool IsDownloaded(Guid itemId) => _downloadedItems.ContainsKey(itemId);
 
-    public void MarkAsDownloaded(Guid itemId) => _downloadedItems.TryAdd(itemId, 0);
+    public void MarkAsDownloaded(Guid itemId) => _downloadedItems.TryAdd(itemId, string.Empty);
 
     public bool IsKnownFile(string filename) => _knownFiles.ContainsKey(filename);
 
@@ -87,6 +88,30 @@ public sealed class SyncService : IAsyncDisposable
         }
     }
 
+    public void OnItemDeleted(ItemDeletedEvent itemDeleted)
+    {
+        Console.WriteLine($"[Event] ItemDeleted: {itemDeleted.Id}");
+
+        if (_downloadedItems.TryRemove(itemDeleted.Id, out var filename) && !string.IsNullOrEmpty(filename))
+        {
+            var localPath = Path.Combine(_localFolder, filename);
+            try
+            {
+                if (File.Exists(localPath))
+                {
+                    File.Delete(localPath);
+                    Console.WriteLine($"[Delete] Deleted local file: {filename}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Delete] Failed to delete {filename}: {ex.Message}");
+            }
+
+            _knownFiles.TryRemove(filename, out _);
+        }
+    }
+
     private async Task ConnectSignalRAsync(CancellationToken ct)
     {
         var hubUrl = $"{_serverUrl}/v1/spaces/{_spaceId}/hub";
@@ -107,7 +132,7 @@ public sealed class SyncService : IAsyncDisposable
 
         _hubConnection.On<ItemDeletedEvent>("ItemDeleted", itemDeleted =>
         {
-            Console.WriteLine($"[Event] ItemDeleted: {itemDeleted.Id}");
+            OnItemDeleted(itemDeleted);
         });
 
         _hubConnection.Reconnecting += error =>
@@ -202,21 +227,34 @@ public sealed class SyncService : IAsyncDisposable
             if ((DateTime.UtcNow - _lastDisconnect).TotalSeconds < 30)
                 continue;
 
-            Console.WriteLine("[Polling] Checking for new items...");
+            Console.WriteLine("[Polling] Checking for changes...");
 
             try
             {
                 var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
-                var newFileItems = items
-                    .Where(i => i.ContentType == "file" && !_downloadedItems.ContainsKey(i.Id))
-                    .ToList();
+                var fileItems = items.Where(i => i.ContentType == "file").ToList();
 
+                // Download new files
+                var newFileItems = fileItems.Where(i => !_downloadedItems.ContainsKey(i.Id)).ToList();
                 if (newFileItems.Count > 0)
                 {
                     Console.WriteLine($"[Polling] Found {newFileItems.Count} new file(s).");
                     foreach (var item in newFileItems)
                     {
                         await DownloadAndSaveFileAsync(item.Id, item.Content, ct);
+                    }
+                }
+
+                // Delete files removed from server
+                var serverFileIds = new HashSet<Guid>(fileItems.Select(i => i.Id));
+                foreach (var localId in _downloadedItems.Keys)
+                {
+                    if (_pendingUploads.ContainsKey(localId))
+                        continue;
+
+                    if (!serverFileIds.Contains(localId))
+                    {
+                        OnItemDeleted(new ItemDeletedEvent(localId, Guid.Parse(_spaceId)));
                     }
                 }
             }
@@ -239,8 +277,10 @@ public sealed class SyncService : IAsyncDisposable
 
     private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, CancellationToken ct)
     {
-        // Fix 3: Atomic claim
-        if (!_downloadedItems.TryAdd(itemId, 0))
+        var safeName = SanitizeFileName(filename, itemId);
+
+        // Atomic claim — stores filename so deletion can map itemId → file
+        if (!_downloadedItems.TryAdd(itemId, safeName))
         {
             Console.WriteLine($"[Download] Skipping already claimed item: {itemId}");
             return;
@@ -248,8 +288,6 @@ public sealed class SyncService : IAsyncDisposable
 
         try
         {
-            // Fix 4: Sanitize filename
-            var safeName = SanitizeFileName(filename, itemId);
             var localPath = Path.Combine(_localFolder, safeName);
             // Fix 6: Temp file
             var tempPath = Path.Combine(_localFolder, $".{itemId}.tmp");
@@ -397,7 +435,8 @@ public sealed class SyncService : IAsyncDisposable
 
                 var itemId = Guid.NewGuid();
                 // Pre-mark to prevent echo download race (server broadcasts ItemAdded before PUT returns)
-                _downloadedItems.TryAdd(itemId, 0);
+                _downloadedItems.TryAdd(itemId, fileName);
+                _pendingUploads.TryAdd(itemId, 0);
 
                 Console.WriteLine($"[Upload] Uploading {fileName} as {itemId}...");
 
@@ -408,14 +447,16 @@ public sealed class SyncService : IAsyncDisposable
                     // Use server-returned ID in case it differs
                     if (response.Id != itemId)
                     {
-                        _downloadedItems.TryAdd(response.Id, 0);
+                        _downloadedItems.TryAdd(response.Id, fileName);
                     }
 
                     Console.WriteLine($"[Upload] Successfully uploaded {fileName} as {response.Id}");
+                    _pendingUploads.TryRemove(itemId, out _);
                     return;
                 }
                 catch
                 {
+                    _pendingUploads.TryRemove(itemId, out _);
                     _downloadedItems.TryRemove(itemId, out _);
                     throw;
                 }
