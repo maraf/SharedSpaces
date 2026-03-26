@@ -20,6 +20,7 @@ Anonymous by design: users pick a display name when joining a space. No email, n
 - **JWT-based access** — Secure, token-based authentication with no expiration
 - **File + text sharing** — Upload files or post text snippets; quota enforced per space
 - **Admin controls** — Create spaces, generate invitations, manage content
+- **CLI tool** — Join spaces, upload files, and sync folders from the terminal
 
 ## Screenshots
 
@@ -35,6 +36,7 @@ Anonymous by design: users pick a display name when joining a space. No email, n
 
 - **Server:** .NET 10 (ASP.NET Core Web API)
 - **Client:** Lit HTML + Web Components, TypeScript, Vite, Tailwind CSS v4
+- **CLI:** .NET global tool (`System.CommandLine`) with SignalR real-time sync
 - **Real-time:** SignalR (WebSocket)
 - **Database:** SQLite with EF Core (swappable to PostgreSQL)
 - **Auth:** JWT (no expiration; validity = member existence)
@@ -76,6 +78,66 @@ Anonymous by design: users pick a display name when joining a space. No email, n
    - Use the client UI to add/connect to your server by entering its URL (e.g., `https://localhost:7218`).
    - No environment variables are required for API routing; the server URL is chosen at runtime in the client.
 
+## Command-Line Interface (CLI)
+
+The **SharedSpaces CLI** lets you join spaces, upload files, list spaces, and sync files — all from the terminal, no browser needed.
+
+### Install
+
+```bash
+dotnet tool install --global SharedSpaces.Cli
+```
+
+### Quick Start
+
+**Join a space** with an invitation link or PIN:
+```bash
+sharedspaces join "https://server.example.com|550e8400-e29b-41d4-a716-446655440000|123456"
+```
+
+**List your spaces:**
+```bash
+sharedspaces spaces
+sharedspaces spaces --json   # machine-readable output
+```
+
+**Upload a file:**
+```bash
+sharedspaces upload myfile.txt --space-id 550e8400-e29b-41d4-a716-446655440000
+```
+
+**Sync a folder in real-time** (two-way: downloads from the server and uploads local changes):
+```bash
+sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/shared
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `join <url>` | Exchange an invitation PIN for an access token and store it locally |
+| `spaces` | List all joined spaces (supports `--json` for machine-readable output) |
+| `upload <file>` | Upload a file to a space (`--space-id` required) |
+| `sync` | Two-way real-time file sync between a space and a local folder (`--space-id`, `--folder` required) |
+
+### How sync works
+
+The `sync` command keeps a local folder in sync with a space:
+
+- **Initial download** — Fetches all existing files from the space
+- **Real-time updates** — Receives new files and deletions via SignalR (WebSocket)
+- **Local file watching** — Automatically uploads new files added to the folder
+- **Fallback polling** — Falls back to HTTP polling if the WebSocket connection drops
+- **Resilience** — Automatic reconnection with exponential backoff, atomic file writes, deduplication to prevent upload loops
+
+Press `Ctrl+C` to stop syncing gracefully.
+
+### Configuration
+
+Tokens are stored in `~/.sharedspaces/config.json`. Each entry contains only the JWT — all metadata (space ID, server URL, display name, space name) is extracted from claims at runtime.
+
+For full CLI documentation, see [`src/SharedSpaces.Cli/README.md`](src/SharedSpaces.Cli/README.md).
+
 ### Building for production
 
 **Server:**
@@ -102,15 +164,21 @@ SharedSpaces/
 │   │   ├── Features/                 # Vertical slice: Spaces, Invitations, Tokens, Items, Admin
 │   │   ├── Infrastructure/           # EF Core, file storage, SignalR hub
 │   │   └── Program.cs
-│   └── SharedSpaces.Client/          # Lit HTML + Web Components SPA
-│       ├── e2e/                      # Playwright tests
-│       └── src/
-│           ├── features/             # join, space-view, admin
-│           ├── components/           # Reusable UI components
-│           ├── lib/                  # SignalR client, API client, utilities
-│           └── index.ts
+│   ├── SharedSpaces.Client/          # Lit HTML + Web Components SPA
+│   │   ├── e2e/                      # Playwright tests
+│   │   └── src/
+│   │       ├── features/             # join, space-view, admin
+│   │       ├── components/           # Reusable UI components
+│   │       ├── lib/                  # SignalR client, API client, utilities
+│   │       └── index.ts
+│   ├── SharedSpaces.Cli/             # .NET global tool (CLI entry point)
+│   │   └── Commands/                 # join, spaces, upload, sync
+│   └── SharedSpaces.Cli.Core/        # Shared CLI library
+│       ├── Services/                 # API client, config, sync engine
+│       └── Models/                   # Config model, JWT-backed space entry
 ├── tests/
-│   └── SharedSpaces.Server.Tests/
+│   ├── SharedSpaces.Server.Tests/
+│   └── SharedSpaces.Cli.Core.Tests/
 ├── docs/
 │   └── screenshots/                  # UI screenshots
 └── SharedSpaces.sln
