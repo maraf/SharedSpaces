@@ -28,7 +28,8 @@ After recapturing, inspect mobile screenshots (`390 × 844`) and call out:
 - Append a scope tag indicating what was changed:
   - `(server)` — server-only changes
   - `(client)` — client-only changes
-  - `(client,server)` — touches both
+  - `(cli)` — command-line interface changes
+  - `(client,server)` — touches both, similar with CLI and other scopes
 - Never include an issue number in the PR title (e.g., don't write `(#88)`)
 - Issue references belong in the PR body or commit body, not the title
 
@@ -37,5 +38,9 @@ Examples:
 feat(client): add dark mode toggle
 fix(server): handle null quota on space creation
 docs(client,server): update API and component docs
-refactor(server): extract quota logic into service
+refactor(cli): extract quota logic into service
 ```
+
+## Issue Titles
+
+- Don't include scope tags, instead use labels
