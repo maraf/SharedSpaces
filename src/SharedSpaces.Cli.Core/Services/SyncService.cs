@@ -112,6 +112,9 @@ public sealed class SyncService : IAsyncDisposable
 
         _hubConnection.Reconnecting += error =>
         {
+            if (ct.IsCancellationRequested)
+                return Task.CompletedTask;
+
             Console.WriteLine($"[SignalR] Reconnecting... ({error?.Message ?? "unknown error"})");
             _lastDisconnect = DateTime.UtcNow;
             StartPolling(ct);
@@ -128,7 +131,17 @@ public sealed class SyncService : IAsyncDisposable
 
         _hubConnection.Closed += async error =>
         {
-            Console.WriteLine($"[SignalR] Connection closed ({error?.Message ?? "normal closure"})");
+            if (ct.IsCancellationRequested)
+                return;
+
+            // Do not restart polling on graceful/normal shutdown (e.g., DisposeAsync()).
+            if (error is null)
+            {
+                Console.WriteLine("[SignalR] Connection closed gracefully.");
+                return;
+            }
+
+            Console.WriteLine($"[SignalR] Connection closed ({error.Message})");
             _lastDisconnect = DateTime.UtcNow;
             StartPolling(ct);
 
