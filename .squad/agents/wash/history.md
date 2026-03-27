@@ -49,6 +49,20 @@
 - Success feedback: uses existing `syncMessage` pattern (emerald banner, 3s timeout)
 - SignalR handles real-time updates: destination receives `ItemAdded`, source receives `ItemDeleted` on move
 
+### Transfer UI Testing & Screenshots (2026-03-27)
+
+**Added 4 Playwright screenshot tests:**
+- Transfer button visibility and interaction (desktop + mobile viewports)
+- Transfer modal display, space list, and buttons (desktop + mobile viewports)
+- All 36 Playwright tests pass
+- Mobile layout verified: no text overflow (UUIDs/URLs), buttons stay within viewport, labels not truncated
+
+**Key verification points:**
+- Button appears only when multiple spaces available
+- Modal centers and respects viewport bounds
+- Copy/Move buttons clear and actionable
+- Loading and error states display correctly
+
 ## Team Updates (2026-03-27)
 
 **Issue #135 completed (Copy and move items between spaces):**

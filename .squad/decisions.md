@@ -2946,6 +2946,54 @@ Content-Type: application/json
 
 #### Button placement
 - "Send to…" button placed before Delete to follow least-to-most destructive order:
+
+---
+
+### Client-Side Transfer Feature Test Strategy
+
+**Decision Date:** 2026-03-27  
+**Decided By:** Zoe (Tester)  
+**Status:** Active
+
+#### Context
+
+Issue #135 introduced the client-side transfer feature (copy/move items to other spaces). Tests needed to cover both API integration (`transferItem()` function) and UI state management/rendering (`space-view` component).
+
+#### Decision
+
+Added 35 new Vitest tests across two files:
+
+**11 API Tests** in `src/SharedSpaces.Client/src/features/space-view/space-api.test.ts`:
+- `transferItem()` function coverage:
+  - Copy and move success paths (HTTP 204 No Content)
+  - Request body shape: JSON with `destinationSpaceId`, `destinationToken`, `action` ("copy" | "move")
+  - URL construction from `transferUrl` parameter
+  - Content-Type: application/json and Authorization headers present
+  - Error handling: 401 Unauthorized, 403 Forbidden, 413 Payload Too Large, 500 Internal Server Error
+  - Network errors (TypeError, timeout simulation)
+
+**24 Component Tests** in `src/SharedSpaces.Client/src/features/space-view/space-view.test.ts`:
+- `getAvailableTransferSpaces()` filtering logic (excludes current space, includes others)
+- `openTransferModal()` / `closeTransferModal()` state transitions
+- `handleTransfer()` success path: calls API, updates item list, shows success message, closes modal
+- `handleTransfer()` failure path: calls API, displays error banner, keeps modal open, no item list changes
+- `handleTransfer()` with loading state: button text updates during request
+- `renderSendToButton()` visibility: shown only when `availableTransferSpaces.length > 0`
+- `renderTransferModal()` content: space cards rendered, buttons present, empty-state message when no spaces
+- 3 integration flow tests: open→copy→success, open→attempt→fail→error displayed, open→fail→close→reopen
+
+#### Rationale
+
+- Tests follow established patterns: `mockFetch()` helpers, `(element as any)` for private state access, `isLoading = false` for DOM render tests
+- DOM-mounted assertions used for nested Lit template content (dynamic values inside `.map()` / ternary not in static `strings` array)
+- Lit's `nothing` sentinel compared via import rather than `undefined`
+- All 447 Vitest tests pass; no production code modified
+
+#### Impact
+
+- Transfer feature coverage: 100% of critical paths (API, state, UI)
+- Future refactoring safe behind comprehensive test suite
+- Integration tests catch cross-layer bugs (API failures, modal state, DOM updates)
   - Copy (non-destructive)
   - Download (non-destructive, file only)
   - Send to… (non-destructive copy/semi-destructive move)
