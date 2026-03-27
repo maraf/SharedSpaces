@@ -208,3 +208,36 @@ export async function shareFile(
     wrapNetworkError(error);
   }
 }
+
+export async function transferItem(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  destinationSpaceId: string,
+  destinationToken: string,
+  action: 'copy' | 'move',
+  token: string,
+): Promise<SpaceItemResponse> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}/transfer`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          destinationSpaceId,
+          destinationToken,
+          action,
+        }),
+      },
+    );
+    await throwForFailed(response);
+    return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}

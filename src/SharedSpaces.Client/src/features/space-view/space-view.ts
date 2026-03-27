@@ -17,6 +17,7 @@ import {
   shareFile,
   downloadFile,
   deleteItem,
+  transferItem,
   SpaceApiError,
   type SpaceItemResponse,
 } from './space-api';
@@ -36,6 +37,13 @@ import {
   processOfflineQueue,
 } from '../../lib/offline-sync';
 
+export interface JoinedSpace {
+  serverUrl: string;
+  spaceId: string;
+  spaceName: string;
+  token: string;
+}
+
 @customElement('space-view')
 export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'api-base-url' })
@@ -46,6 +54,9 @@ export class SpaceView extends BaseElement {
 
   @property({ type: String, attribute: 'server-url' })
   serverUrl?: string;
+
+  @property({ type: Array })
+  spaces: JoinedSpace[] = [];
 
   @state() private items: SpaceItemResponse[] = [];
   @state() private isLoading = true;
@@ -64,6 +75,9 @@ export class SpaceView extends BaseElement {
   @state() private offlineQueueItems: OfflineQueueItem[] = [];
   @state() private syncMessage = '';
   @state() private deleteConfirmItemId: string | null = null;
+  @state() private transferModalItem: SpaceItemResponse | null = null;
+  @state() private transferInProgress = false;
+  @state() private transferError = '';
 
   private token?: string;
   private lastLoadedKey = '';
@@ -759,6 +773,64 @@ export class SpaceView extends BaseElement {
     this.modalItem = null;
   };
 
+  private openTransferModal(item: SpaceItemResponse) {
+    this.transferModalItem = item;
+    this.transferError = '';
+  }
+
+  private closeTransferModal = () => {
+    this.transferModalItem = null;
+    this.transferError = '';
+    this.transferInProgress = false;
+  };
+
+  private getAvailableTransferSpaces(): JoinedSpace[] {
+    // Filter out current space
+    return this.spaces.filter(
+      (space) => space.spaceId !== this.spaceId
+    );
+  }
+
+  private async handleTransfer(
+    destinationSpace: JoinedSpace,
+    action: 'copy' | 'move',
+  ) {
+    if (!this.transferModalItem || !this.serverUrl || !this.spaceId || !this.token) {
+      return;
+    }
+
+    this.transferInProgress = true;
+    this.transferError = '';
+
+    try {
+      await transferItem(
+        this.serverUrl,
+        this.spaceId,
+        this.transferModalItem.id,
+        destinationSpace.spaceId,
+        destinationSpace.token,
+        action,
+        this.token,
+      );
+
+      // Show success feedback
+      this.syncMessage = `Item ${action === 'copy' ? 'copied' : 'moved'} to ${destinationSpace.spaceName}`;
+      setTimeout(() => {
+        this.syncMessage = '';
+      }, 3000);
+
+      this.closeTransferModal();
+    } catch (error) {
+      if (error instanceof SpaceApiError) {
+        this.transferError = error.message;
+      } else {
+        this.transferError = 'Failed to transfer item. Please try again.';
+      }
+    } finally {
+      this.transferInProgress = false;
+    }
+  }
+
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
@@ -843,6 +915,7 @@ export class SpaceView extends BaseElement {
         ${this.renderPendingUploadsSection()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
+        ${this.transferModalItem ? this.renderTransferModal() : nothing}
       </div>
     `;
   }
@@ -1255,6 +1328,24 @@ export class SpaceView extends BaseElement {
     `;
   }
 
+  private renderSendToButton(item: SpaceItemResponse) {
+    const availableSpaces = this.getAvailableTransferSpaces();
+    if (availableSpaces.length === 0) {
+      return nothing;
+    }
+
+    return html`
+      <button
+        @click=${() => this.openTransferModal(item)}
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-sky-400"
+        title="Send to another space"
+        aria-label="Send to another space"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
+    `;
+  }
+
   private renderTextContent(item: SpaceItemResponse) {
     const icon = getTextItemIcon();
     return html`
@@ -1278,6 +1369,7 @@ export class SpaceView extends BaseElement {
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderCopyButton(item)}
+        ${this.renderSendToButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
     `;
@@ -1305,6 +1397,7 @@ export class SpaceView extends BaseElement {
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderDownloadButton(item)}
+        ${this.renderSendToButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
     `;
@@ -1373,6 +1466,85 @@ export class SpaceView extends BaseElement {
             </button>
           </div>
           <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">${this.modalItem.content}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderTransferModal() {
+    if (!this.transferModalItem) return nothing;
+
+    const availableSpaces = this.getAvailableTransferSpaces();
+    const itemPreview = this.getItemPreviewLabel(this.transferModalItem);
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        @click=${this.closeTransferModal}
+      >
+        <div
+          class="relative w-full max-w-md max-h-[80vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <div class="min-w-0 flex-1">
+              <h3 class="text-lg font-semibold text-white mb-1">Send to…</h3>
+              <p class="text-sm text-slate-400 truncate">${itemPreview}</p>
+            </div>
+            <button
+              @click=${this.closeTransferModal}
+              class="shrink-0 rounded p-1 text-slate-400 transition hover:text-white"
+              aria-label="Close modal"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+
+          ${this.transferError
+            ? html`
+                <div class="mb-4 rounded-lg border border-red-500/50 bg-red-950/40 p-3">
+                  <p class="text-sm text-red-300">${this.transferError}</p>
+                </div>
+              `
+            : nothing}
+
+          ${availableSpaces.length === 0
+            ? html`
+                <p class="text-sm text-slate-400">
+                  You need to join at least one more space to transfer items.
+                </p>
+              `
+            : html`
+                <div class="space-y-2">
+                  ${availableSpaces.map(
+                    (space) => html`
+                      <div
+                        class="rounded-lg border border-slate-700 bg-slate-800/40 p-4"
+                      >
+                        <p class="mb-3 font-medium text-slate-200">
+                          ${space.spaceName}
+                        </p>
+                        <div class="flex gap-2">
+                          <button
+                            @click=${() => this.handleTransfer(space, 'copy')}
+                            ?disabled=${this.transferInProgress}
+                            class="flex-1 cursor-pointer rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            ${this.transferInProgress ? 'Copying…' : 'Copy here'}
+                          </button>
+                          <button
+                            @click=${() => this.handleTransfer(space, 'move')}
+                            ?disabled=${this.transferInProgress}
+                            class="flex-1 cursor-pointer rounded-md border border-slate-600 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            ${this.transferInProgress ? 'Moving…' : 'Move here'}
+                          </button>
+                        </div>
+                      </div>
+                    `,
+                  )}
+                </div>
+              `}
         </div>
       </div>
     `;
