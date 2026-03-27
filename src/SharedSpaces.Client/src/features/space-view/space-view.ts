@@ -807,7 +807,6 @@ export class SpaceView extends BaseElement {
         this.serverUrl,
         this.spaceId,
         this.transferModalItem.id,
-        destinationSpace.spaceId,
         destinationSpace.token,
         action,
         this.token,
@@ -1519,7 +1518,7 @@ export class SpaceView extends BaseElement {
                   ${availableSpaces.map(
                     (space) => html`
                       <div
-                        class="rounded-lg border border-slate-700 bg-slate-800/40 p-4"
+                        class="rounded-lg bg-slate-800/40 p-4"
                       >
                         <p class="mb-3 font-medium text-slate-200">
                           ${space.spaceName}

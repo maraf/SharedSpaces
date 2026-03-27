@@ -23,7 +23,6 @@ public sealed record SpaceItemResponse(
 
 public sealed class TransferItemRequest
 {
-    public Guid DestinationSpaceId { get; init; }
     public string DestinationToken { get; init; } = string.Empty;
     public string Action { get; init; } = string.Empty;
 }

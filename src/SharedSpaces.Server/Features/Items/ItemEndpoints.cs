@@ -517,12 +517,6 @@ public static class ItemEndpoints
             return Results.BadRequest(new { Error = "Action must be either 'copy' or 'move'" });
         }
 
-        // Reject same-space transfer
-        if (spaceId == request.DestinationSpaceId)
-        {
-            return Results.BadRequest(new { Error = "Cannot transfer item to the same space" });
-        }
-
         // Validate destination token
         var tokenHandler = new JwtSecurityTokenHandler
         {
@@ -565,11 +559,17 @@ public static class ItemEndpoints
             return Results.BadRequest(new { Error = "Destination member is invalid or revoked" });
         }
 
-        // Verify destination space_id claim matches request
+        // Extract destination space ID from token
         var destSpaceClaim = destinationPrincipal.FindFirst(SpaceMemberClaimTypes.SpaceId)?.Value;
-        if (!Guid.TryParse(destSpaceClaim, out var claimedDestSpaceId) || claimedDestSpaceId != request.DestinationSpaceId)
+        if (!Guid.TryParse(destSpaceClaim, out var destinationSpaceId) || destinationSpaceId == Guid.Empty)
         {
-            return Results.BadRequest(new { Error = "Destination token space_id does not match destinationSpaceId" });
+            return Results.BadRequest(new { Error = "Invalid destination token: missing or invalid space_id" });
+        }
+
+        // Reject same-space transfer
+        if (spaceId == destinationSpaceId)
+        {
+            return Results.BadRequest(new { Error = "Cannot transfer item to the same space" });
         }
 
         // Load source item
@@ -593,7 +593,7 @@ public static class ItemEndpoints
             // Acquire destination space quota lock (always lock for file items)
             if (isFile)
             {
-                quotaLock = await AcquireQuotaLockAsync(request.DestinationSpaceId, cancellationToken);
+                quotaLock = await AcquireQuotaLockAsync(destinationSpaceId, cancellationToken);
                 if (db.Database.IsRelational())
                 {
                     transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
@@ -605,7 +605,7 @@ public static class ItemEndpoints
             {
                 var destinationSpace = await db.Spaces
                     .AsNoTracking()
-                    .SingleOrDefaultAsync(s => s.Id == request.DestinationSpaceId, cancellationToken);
+                    .SingleOrDefaultAsync(s => s.Id == destinationSpaceId, cancellationToken);
 
                 if (destinationSpace is null)
                 {
@@ -613,7 +613,7 @@ public static class ItemEndpoints
                 }
 
                 var currentUsage = await db.SpaceItems
-                    .Where(item => item.SpaceId == request.DestinationSpaceId)
+                    .Where(item => item.SpaceId == destinationSpaceId)
                     .SumAsync(item => (long?)item.FileSize, cancellationToken) ?? 0L;
 
                 var quota = destinationSpace.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes;
@@ -628,7 +628,7 @@ public static class ItemEndpoints
             // Create new item in destination
             var destinationItem = new SpaceItem(newItemId)
             {
-                SpaceId = request.DestinationSpaceId,
+                SpaceId = destinationSpaceId,
                 MemberId = destinationMemberId,
                 ContentType = sourceItem.ContentType,
                 Content = sourceItem.Content,
@@ -642,7 +642,7 @@ public static class ItemEndpoints
             if (isFile)
             {
                 await using var sourceStream = await fileStorage.ReadAsync(spaceId, itemId, cancellationToken);
-                await fileStorage.SaveAsync(request.DestinationSpaceId, newItemId, sourceStream, cancellationToken);
+                await fileStorage.SaveAsync(destinationSpaceId, newItemId, sourceStream, cancellationToken);
                 
                 // Update content to reference new item ID
                 destinationItem.Content = sourceItem.Content.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
@@ -712,7 +712,7 @@ public static class ItemEndpoints
                 destinationItem.FileSize,
                 destinationItem.SharedAt);
 
-            return Results.Created($"/v1/spaces/{request.DestinationSpaceId}/items/{newItemId}", response);
+            return Results.Created($"/v1/spaces/{destinationSpaceId}/items/{newItemId}", response);
         }
         catch (Exception exception)
         {
@@ -726,7 +726,7 @@ public static class ItemEndpoints
             {
                 try
                 {
-                    await fileStorage.DeleteAsync(request.DestinationSpaceId, newItemId, cancellationToken);
+                    await fileStorage.DeleteAsync(destinationSpaceId, newItemId, cancellationToken);
                 }
                 catch
                 {

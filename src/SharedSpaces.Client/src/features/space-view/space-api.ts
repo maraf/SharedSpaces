@@ -213,7 +213,6 @@ export async function transferItem(
   serverUrl: string,
   spaceId: string,
   itemId: string,
-  destinationSpaceId: string,
   destinationToken: string,
   action: 'copy' | 'move',
   token: string,
@@ -229,7 +228,6 @@ export async function transferItem(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          destinationSpaceId,
           destinationToken,
           action,
         }),

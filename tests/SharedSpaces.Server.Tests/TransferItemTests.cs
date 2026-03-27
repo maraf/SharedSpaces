@@ -51,7 +51,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "copy"
             },
@@ -99,7 +98,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "copy"
             },
@@ -156,7 +154,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "move"
             },
@@ -202,7 +199,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "move"
             },
@@ -258,7 +254,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "copy"
             },
@@ -300,7 +295,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = "invalid.malformed.token",
                 Action = "copy"
             },
@@ -343,7 +337,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "copy"
             },
@@ -376,7 +369,6 @@ public class TransferItemTests
             nonExistentItemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "copy"
             },
@@ -411,7 +403,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = space.Id,
                 DestinationToken = token,
                 Action = "copy"
             },
@@ -452,7 +443,6 @@ public class TransferItemTests
             itemId,
             new TransferItemRequest
             {
-                DestinationSpaceId = destSpace.Id,
                 DestinationToken = destToken,
                 Action = "invalid-action"
             },
@@ -463,47 +453,6 @@ public class TransferItemTests
         error.Error.Should().Contain("Action must be either 'copy' or 'move'");
     }
 
-    [Fact]
-    public async Task TransferItem_DestinationSpaceIdMismatch_Returns400()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        using var client = factory.CreateClient();
-
-        var sourceSpace = await factory.CreateSpaceAsync("Source Space");
-        var destSpace = await factory.CreateSpaceAsync("Dest Space");
-        var wrongSpace = await factory.CreateSpaceAsync("Wrong Space");
-        var sourceMember = await factory.CreateMemberAsync(sourceSpace.Id, "Alice");
-        var destMember = await factory.CreateMemberAsync(destSpace.Id, "Bob");
-
-        var sourceToken = GenerateTestJwt(sourceMember.Id, sourceSpace.Id, sourceMember.DisplayName);
-        var destToken = GenerateTestJwt(destMember.Id, destSpace.Id, destMember.DisplayName);
-
-        var itemId = Guid.NewGuid();
-        await factory.CreateItemAsync(
-            sourceSpace.Id,
-            sourceMember.Id,
-            contentType: "text",
-            content: "Test",
-            sharedAt: DateTime.UtcNow,
-            fileSize: 0,
-            itemId: itemId);
-
-        var response = await TransferItemAsync(
-            client,
-            sourceSpace.Id,
-            itemId,
-            new TransferItemRequest
-            {
-                DestinationSpaceId = wrongSpace.Id,
-                DestinationToken = destToken,
-                Action = "copy"
-            },
-            sourceToken);
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var error = await ReadJsonAsync<ErrorResponse>(response);
-        error.Error.Should().Contain("space_id does not match");
-    }
 
     private static string GenerateTestJwt(Guid memberId, Guid spaceId, string displayName = "TestUser")
     {
@@ -564,7 +513,6 @@ public class TransferItemTests
 
     private sealed record TransferItemRequest
     {
-        public Guid DestinationSpaceId { get; init; }
         public string DestinationToken { get; init; } = string.Empty;
         public string Action { get; init; } = string.Empty;
     }

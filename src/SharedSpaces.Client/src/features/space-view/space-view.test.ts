@@ -2722,9 +2722,9 @@ describe('SpaceView - Transfer Feature', () => {
       );
       expect(call).toBeDefined();
       const body = JSON.parse(call![1].body);
-      expect(body.destinationSpaceId).toBe(otherSpace.spaceId);
       expect(body.destinationToken).toBe(otherSpace.token);
       expect(body.action).toBe('copy');
+      expect(body.destinationSpaceId).toBeUndefined();
     });
 
     it('shows error on SpaceApiError and keeps modal open', async () => {

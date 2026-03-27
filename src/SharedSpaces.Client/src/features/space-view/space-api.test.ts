@@ -238,7 +238,7 @@ describe('space-api', () => {
       mockFetch({ json: async () => item });
 
       const result = await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN,
       );
 
       expect(result).toEqual(item);
@@ -257,7 +257,7 @@ describe('space-api', () => {
       mockFetch({ json: async () => item });
 
       const result = await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'move', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'move', TOKEN,
       );
 
       expect(result).toEqual(item);
@@ -267,7 +267,7 @@ describe('space-api', () => {
       mockFetch({ json: async () => ({}) });
 
       await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN,
       );
 
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -278,7 +278,6 @@ describe('space-api', () => {
 
       const body = JSON.parse(call[1].body);
       expect(body).toEqual({
-        destinationSpaceId: DEST_SPACE,
         destinationToken: DEST_TOKEN,
         action: 'copy',
       });
@@ -288,7 +287,7 @@ describe('space-api', () => {
       mockFetch({ json: async () => ({}) });
 
       await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'move', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'move', TOKEN,
       );
 
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -300,7 +299,7 @@ describe('space-api', () => {
       mockFetch({ json: async () => ({}) });
 
       await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN,
       );
 
       const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -313,7 +312,7 @@ describe('space-api', () => {
     it('strips trailing slash from server URL', async () => {
       mockFetch({ json: async () => ({}) });
       await transferItem(
-        `${SERVER}/`, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+        `${SERVER}/`, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN,
       );
       expect(globalThis.fetch).toHaveBeenCalledWith(
         `${SERVER}/v1/spaces/${SPACE}/items/${ITEM_ID}/transfer`,
@@ -324,21 +323,21 @@ describe('space-api', () => {
     it('throws SpaceApiError on 401', async () => {
       mockFetch({ ok: false, status: 401 });
       await expect(
-        transferItem(SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN),
+        transferItem(SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN),
       ).rejects.toThrow(/Authentication failed/);
     });
 
     it('throws SpaceApiError on 403', async () => {
       mockFetch({ ok: false, status: 403 });
       await expect(
-        transferItem(SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN),
+        transferItem(SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN),
       ).rejects.toThrow(/Access denied/);
     });
 
     it('throws SpaceApiError on 413 quota exceeded', async () => {
       mockFetch({ ok: false, status: 413 });
       await expect(
-        transferItem(SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'move', TOKEN),
+        transferItem(SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'move', TOKEN),
       ).rejects.toThrow(/quota exceeded/i);
     });
 
@@ -350,7 +349,7 @@ describe('space-api', () => {
         json: async () => ({ Error: 'Transfer failed' }),
       });
       const err = await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN,
       ).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(SpaceApiError);
       expect((err as SpaceApiError).message).toMatch(/Transfer failed/);
@@ -360,7 +359,7 @@ describe('space-api', () => {
     it('throws on network error', async () => {
       mockFetchReject(new TypeError('Failed to fetch'));
       const err = await transferItem(
-        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+        SERVER, SPACE, ITEM_ID, DEST_TOKEN, 'copy', TOKEN,
       ).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(SpaceApiError);
       expect((err as SpaceApiError).message).toMatch(/Network error/);
