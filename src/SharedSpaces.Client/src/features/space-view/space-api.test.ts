@@ -4,6 +4,7 @@ import {
   getItems,
   shareText,
   shareFile,
+  transferItem,
   SpaceApiError,
 } from './space-api';
 
@@ -213,6 +214,154 @@ describe('space-api', () => {
       const err = await shareFile(SERVER, SPACE, ITEM_ID, file, TOKEN).catch(
         (e: unknown) => e,
       );
+      expect(err).toBeInstanceOf(SpaceApiError);
+      expect((err as SpaceApiError).message).toMatch(/Network error/);
+    });
+  });
+
+  // --- transferItem ---
+
+  const DEST_SPACE = '770e8400-e29b-41d4-a716-446655440002';
+  const DEST_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.dest';
+
+  describe('transferItem', () => {
+    it('returns transferred item on successful copy', async () => {
+      const item = {
+        id: 'new-item-in-dest',
+        spaceId: DEST_SPACE,
+        memberId: '00000000-0000-0000-0000-000000000002',
+        contentType: 'text',
+        content: 'Hello world',
+        fileSize: 0,
+        sharedAt: '2024-01-01T00:00:00Z',
+      };
+      mockFetch({ json: async () => item });
+
+      const result = await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+      );
+
+      expect(result).toEqual(item);
+    });
+
+    it('returns transferred item on successful move', async () => {
+      const item = {
+        id: 'moved-item-id',
+        spaceId: DEST_SPACE,
+        memberId: '00000000-0000-0000-0000-000000000002',
+        contentType: 'file',
+        content: 'photo.png',
+        fileSize: 12345,
+        sharedAt: '2024-01-01T00:00:00Z',
+      };
+      mockFetch({ json: async () => item });
+
+      const result = await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'move', TOKEN,
+      );
+
+      expect(result).toEqual(item);
+    });
+
+    it('sends POST with correct URL and JSON body', async () => {
+      mockFetch({ json: async () => ({}) });
+
+      await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+      );
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe(
+        `${SERVER}/v1/spaces/${SPACE}/items/${ITEM_ID}/transfer`,
+      );
+      expect(call[1].method).toBe('POST');
+
+      const body = JSON.parse(call[1].body);
+      expect(body).toEqual({
+        destinationSpaceId: DEST_SPACE,
+        destinationToken: DEST_TOKEN,
+        action: 'copy',
+      });
+    });
+
+    it('sends move action in request body', async () => {
+      mockFetch({ json: async () => ({}) });
+
+      await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'move', TOKEN,
+      );
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const body = JSON.parse(call[1].body);
+      expect(body.action).toBe('move');
+    });
+
+    it('includes Content-Type and Authorization headers', async () => {
+      mockFetch({ json: async () => ({}) });
+
+      await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+      );
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[1].headers).toEqual({
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+      });
+    });
+
+    it('strips trailing slash from server URL', async () => {
+      mockFetch({ json: async () => ({}) });
+      await transferItem(
+        `${SERVER}/`, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+      );
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${SERVER}/v1/spaces/${SPACE}/items/${ITEM_ID}/transfer`,
+        expect.anything(),
+      );
+    });
+
+    it('throws SpaceApiError on 401', async () => {
+      mockFetch({ ok: false, status: 401 });
+      await expect(
+        transferItem(SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN),
+      ).rejects.toThrow(/Authentication failed/);
+    });
+
+    it('throws SpaceApiError on 403', async () => {
+      mockFetch({ ok: false, status: 403 });
+      await expect(
+        transferItem(SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN),
+      ).rejects.toThrow(/Access denied/);
+    });
+
+    it('throws SpaceApiError on 413 quota exceeded', async () => {
+      mockFetch({ ok: false, status: 413 });
+      await expect(
+        transferItem(SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'move', TOKEN),
+      ).rejects.toThrow(/quota exceeded/i);
+    });
+
+    it('throws on server error with detail', async () => {
+      mockFetch({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => ({ Error: 'Transfer failed' }),
+      });
+      const err = await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+      ).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SpaceApiError);
+      expect((err as SpaceApiError).message).toMatch(/Transfer failed/);
+      expect((err as SpaceApiError).status).toBe(500);
+    });
+
+    it('throws on network error', async () => {
+      mockFetchReject(new TypeError('Failed to fetch'));
+      const err = await transferItem(
+        SERVER, SPACE, ITEM_ID, DEST_SPACE, DEST_TOKEN, 'copy', TOKEN,
+      ).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(SpaceApiError);
       expect((err as SpaceApiError).message).toMatch(/Network error/);
     });
