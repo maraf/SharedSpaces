@@ -2685,6 +2685,363 @@ After researching 4 variants (horizontal scroll, two-row, admin-in-title, compac
 - Body scroll lock when sheet is open
 - Backdrop with opacity transition closes sheet on tap
 
+---
+
+# Decision: Separate `_pendingUploads` tracking for in-flight uploads
+
+**Date:** 2026-03-26  
+**Author:** Kaylee (Backend Dev)  
+**PR:** #130 (`fix/cli-sync-delete`)
+
+## Context
+
+`SyncService.cs` uses `_downloadedItems` (ConcurrentDictionary) for two purposes:
+1. Echo-prevention — pre-adding an item ID before PUT so the SignalR ItemAdded broadcast doesn't trigger a re-download
+2. State tracking — the polling deletion loop uses it to determine which items exist locally
+
+When SignalR disconnects and polling takes over, a slow upload means the item ID is in `_downloadedItems` but not yet on the server. The polling loop interprets this as "server deleted the item" and removes the local file mid-upload.
+
+## Decision
+
+Added a separate `ConcurrentDictionary<Guid, byte> _pendingUploads` field that tracks item IDs with in-flight uploads. The polling deletion loop skips any ID in `_pendingUploads`.
+
+## Why not tag entries in `_downloadedItems`?
+
+Changing the value type (e.g., to a struct with a `pending` flag) would complicate all other consumers of `_downloadedItems` and break the clean `TryAdd`/`TryRemove` semantics. A separate collection is simpler and keeps concerns decoupled.
+
+## Team impact
+
+- **Zoe:** A test covering this scenario (polling doesn't delete during in-flight upload) would be valuable
+- **All:** Pattern to follow — when a concurrent collection serves multiple roles, prefer a separate tracking collection over overloading the value type
+
+---
+
+# Transfer Endpoint Implementation (Issue #135)
+
+**Date:** 2026-03-26  
+**Implemented by:** Kaylee (Backend Dev)  
+**Status:** Completed
+
+## Summary
+
+Implemented `POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer` endpoint to support copying and moving items between spaces. This enables cross-space collaboration without requiring manual re-upload of content.
+
+## Key Design Decisions
+
+### 1. Dual Token Authorization Pattern
+- Source space authorization via standard Bearer token in Authorization header
+- Destination space authorization via explicit `destinationToken` in request body
+- Both tokens validated using the same JWT signing key and `TokenValidationParameters`
+- Destination member existence and revocation checked against database
+- Destination `space_id` claim must match `destinationSpaceId` in request body
+
+**Rationale:** This dual-token approach ensures the user has legitimate access to both spaces. A user cannot transfer items to a space they're not a member of, even if they know the space ID.
+
+### 2. Server-Generated Destination Item IDs
+- Contrary to typical client-generated item IDs in SharedSpaces, transfer creates **server-generated** GUIDs for destination items
+- Source item ID is not reused in destination
+- For auto-converted text files (`.txt` suffix), the content field is updated to reference the new item ID
+
+**Rationale:** Transfer is a server-side operation with no client interaction. The source item ID belongs to the source space context. Generating a new ID for the destination maintains proper separation and prevents ID collision if the same item is copied to multiple spaces.
+
+### 3. Quota Enforcement Strategy for Move Operations
+- Move operations check **only destination quota**, not source
+- If destination is full, move fails even though source space would shrink
+- Quota lock acquired on destination space, not source
+
+**Rationale:** Consistent with atomic transaction semantics — the entire operation succeeds or fails as a unit. Checking destination quota ensures the move won't create an over-quota state. Source space quota is irrelevant since deletion always succeeds.
+
+### 4. File Copy Implementation
+- Files copied via `IFileStorage.ReadAsync()` → `IFileStorage.SaveAsync()` stream pattern
+- Stream not materialized in memory (suitable for large files)
+- Destination file uses new item ID as storage key
+- Source file deleted only after successful commit (for move operations)
+
+**Rationale:** Stream-based copying avoids memory pressure. Using the new item ID for destination storage prevents any risk of overwriting source files if storage is shared.
+
+### 5. Transaction Isolation Level
+- Serializable isolation for file transfers (same as quota-sensitive operations)
+- Ensures no race conditions on destination quota calculation
+- Rollback on failure cleans up database; best-effort file cleanup on exception
+
+**Rationale:** Consistency with existing quota lock + serializable transaction pattern used in `UpsertItem`. Prevents TOCTOU bugs on quota enforcement.
+
+### 6. SignalR Broadcasting Order
+- `ItemAdded` broadcast to destination space after DB commit
+- `ItemDeleted` broadcast to source space (move only) after `ItemAdded`
+- Source file cleanup happens after broadcasts
+
+**Rationale:** Destination space sees new item immediately. Source space sees deletion after. Ordering ensures clients see addition before deletion for move operations, reducing flicker/confusion in UIs.
+
+### 7. Same-Space Transfer Rejection
+- `sourceSpaceId == destinationSpaceId` returns `400 Bad Request`
+
+**Rationale:** Same-space copy/move is semantically redundant. The client should use update/duplicate endpoints if they want to clone an item within a space. This avoids ambiguity.
+
+## Implementation Notes
+
+### New Files/Changes
+- **`Models.cs`:** Added `TransferItemRequest` class with `DestinationSpaceId`, `DestinationToken`, and `Action` properties
+- **`ItemEndpoints.cs`:** Added `TransferItem` endpoint method (~250 lines)
+- Added `using Microsoft.IdentityModel.Tokens;` for `TokenValidationParameters`
+
+### Pattern Reuse
+- Quota locking: `AcquireQuotaLockAsync(destinationSpaceId)`
+- JWT validation: `JwtTokenSigningKeyFactory.Create(configuration)` + `TokenValidationParameters` (mirrored from `JwtAuthenticationExtensions.cs`)
+- SignalR broadcasts: `ISpaceHubNotifier.NotifyItemAddedAsync()` / `NotifyItemDeletedAsync()`
+- Transaction handling: Same serializable isolation + rollback pattern as `UpsertItem`
+
+### Error Handling
+- Invalid action → 400 Bad Request
+- Same-space transfer → 400 Bad Request  
+- Invalid/missing destination token → 400 Bad Request
+- Destination member revoked/missing → 400 Bad Request
+- Space ID claim mismatch → 400 Bad Request
+- Source item not found → 404 Not Found
+- Destination space not found → 400 Bad Request (not 404, since it's a parameter validation error)
+- Destination quota exceeded → 413 Payload Too Large
+- File read/write failures → Exception propagated, transaction rolled back, file cleanup attempted
+
+### Future Considerations
+- **Batch transfers:** V1 is single-item only. Future version could accept `itemIds: Guid[]` and return `TransferItemResponse[]` with per-item status.
+- **Copy-on-write optimization:** For large files, future storage backends (e.g., S3) could use server-side copy APIs instead of streaming.
+- **Audit trail:** Currently no audit log for cross-space transfers. Future admin features may want to track who transferred what between which spaces.
+- **Rate limiting:** No rate limiting on transfer endpoint. A malicious user could spam transfer requests to exhaust quota or storage I/O.
+
+## Testing Notes (for Zoe)
+- Test dual-token validation (invalid source, invalid destination, mismatched space IDs)
+- Test quota enforcement (destination full, large file transfer)
+- Test copy vs move semantics (source item exists after copy, deleted after move)
+- Test SignalR broadcasts (destination clients see ItemAdded, source clients see ItemDeleted on move)
+- Test file content integrity (copied file matches source byte-for-byte)
+- Test auto-converted text file transfers (`.txt` content field updated correctly)
+- Test same-space transfer rejection
+- Test transaction rollback on DB failure (destination item not persisted, file not created)
+- Test concurrency (multiple transfers to same destination space under quota lock)
+
+## Build Verification
+✅ `dotnet build src/SharedSpaces.Server/SharedSpaces.Server.csproj` succeeded
+
+---
+
+# Decision: Issue #100 Hotfix — App-Shell Pending Share Cards
+
+**Date:** 2026-03-23  
+**Author:** Wash (Frontend Dev)  
+**Status:** Complete  
+
+## Problem
+
+PR #102 created a unified item card layout in `space-view.ts` but missed a second rendering path in `app-shell.ts`. The share_target pending shares view still used the OLD vertical layout with emoji icons instead of the NEW horizontal layout with color-coded SVG icons.
+
+## Decision
+
+Rewrote `renderPendingShareCard()` in `app-shell.ts` to match the new horizontal layout from `space-view.ts`:
+
+1. **Import file-icons utility** — use `getFileTypeIcon()` and `getTextItemIcon()` for consistent iconography
+2. **Horizontal flex layout** — `flex items-center gap-3` instead of `space-y-1` vertical stack
+3. **Three-column structure:** Icon (left) | Content+time (center, flex-1) | Actions (right)
+4. **Icon size uniformity** — 20×20 for all icons (file type icons + action buttons)
+5. **Content formatting:** Files show `{filename}` + `{size} · {time}`, text shows `{content}` + `{time}`
+
+## Implementation
+
+**Files Changed:**
+- `src/SharedSpaces.Client/src/app-shell.ts`
+
+**Key Changes:**
+- Added imports: `getFileTypeIcon`, `getTextItemIcon` from `./lib/file-icons.ts`
+- Rewrote `renderPendingShareCard()` to use horizontal layout
+- Removed `renderPendingFileContent()` and `renderPendingTextContent()` helper methods
+- Updated all button icons from 16×16 to 20×20
+- Added `cursor-pointer` class to action buttons for consistency
+
+## Rationale
+
+**Why horizontal layout?**
+- Better visual density on mobile — all info visible in one row
+- Consistent with space-view.ts item cards (unified UX)
+- Color-coded icons improve file type recognition at a glance
+
+**Why remove helper methods?**
+- Content is now inline in the card (simpler)
+- Reduced code duplication
+- Easier to maintain single rendering path
+
+## Alternatives Considered
+
+1. **Keep separate layouts** — rejected because inconsistent UX confuses users
+2. **Extract shared component** — considered but overkill for this fix (only 2 rendering contexts)
+3. **Make space-view match app-shell** — rejected because new layout is objectively better
+
+## Validation
+
+- ✅ `npx vite build` — build passed
+- ✅ `npx vitest run` — all 344 tests passed
+- 🎯 Visual inspection pending (no Playwright screenshots for share_target flow yet)
+
+## Pattern for Future
+
+When rendering similar UI in multiple places:
+1. **Use shared utilities** (like `file-icons.ts`) for iconography
+2. **Regular code review** should catch divergent rendering paths
+3. **Playwright screenshots** should cover all user-facing views (including share_target)
+
+## Related
+
+- Issue #100 — Item card layout unification
+- PR #102 — Initial unified layout (missed app-shell.ts)
+- `src/lib/file-icons.ts` — Shared icon utility
+
+---
+
+# Decision: Transfer UI Implementation (Issue #135)
+
+**Date:** 2026-03-21  
+**Author:** Wash (Frontend Dev)  
+**Context:** Copy and move items between spaces
+
+## Implementation
+
+### 1. Transfer API (`space-api.ts`)
+Added `transferItem()` function that calls:
+```
+POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer
+Authorization: Bearer <sourceSpaceToken>
+Content-Type: application/json
+
+{
+  "destinationSpaceId": "<guid>",
+  "destinationToken": "<jwt>",
+  "action": "copy" | "move"
+}
+```
+
+### 2. Spaces Context
+- Added `JoinedSpace` interface exported from `space-view.ts`
+- Added `spaces: JoinedSpace[]` property to `space-view` component
+- `app-shell` passes `this.spaces` to `space-view` via `.spaces=${this.spaces}`
+- Component filters out current space via `getAvailableTransferSpaces()`
+
+### 3. Transfer UI
+- **"Send to…" button** added to each item card (text and file)
+  - Hidden when user is in only 1 space
+  - Uses "send" icon (arrow/paper plane)
+  - Appears between Copy/Download and Delete buttons
+- **Transfer modal** lists available destination spaces
+  - Shows item preview (truncated)
+  - Each space card has "Copy here" / "Move here" buttons
+  - Loading state during transfer (button text changes to "Copying…" / "Moving…")
+  - Error display in red banner within modal
+  - Success feedback via `syncMessage` (emerald banner, 3s timeout)
+- Modal follows existing pattern: full-screen backdrop, centered card, ESC to close
+- Mobile-friendly: max-width constraint, touch-friendly buttons
+
+### Pattern Decisions
+
+#### Why not a context API for spaces?
+- `app-shell` already tracks `spaces[]` in state
+- Property passing is simpler and explicit for a single parent-child relationship
+- No need for context when data flows one level down
+
+#### Button placement
+- "Send to…" button placed before Delete to follow least-to-most destructive order:
+  - Copy (non-destructive)
+  - Download (non-destructive, file only)
+  - Send to… (non-destructive copy/semi-destructive move)
+  - Delete (destructive)
+
+#### Success feedback location
+- Used existing `syncMessage` banner instead of modal confirmation
+- User can immediately see the result in the main UI
+- Consistent with existing upload feedback pattern
+
+## Files Changed
+- `src/SharedSpaces.Client/src/features/space-view/space-api.ts` — Added `transferItem()` function
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — Added:
+  - `JoinedSpace` interface (exported)
+  - `spaces` property
+  - `transferModalItem`, `transferInProgress`, `transferError` state
+  - `openTransferModal()`, `closeTransferModal()`, `handleTransfer()`, `getAvailableTransferSpaces()` methods
+  - `renderSendToButton()`, `renderTransferModal()` methods
+  - Updated `renderTextContent()` and `renderFileContent()` to include "Send to…" button
+- `src/SharedSpaces.Client/src/app-shell.ts` — Pass `spaces` array to `space-view`
+
+## Edge Cases Handled
+- User in only 1 space: "Send to…" button hidden
+- Transfer in progress: buttons disabled with loading text
+- Transfer error: displayed in modal, user can retry
+- Success feedback: 3-second emerald banner with action confirmation
+
+## Not Implemented
+- Undo for moves (would require server-side support)
+- Multi-select transfer (out of scope)
+- Transfer history/audit (out of scope)
+
+## Verification
+- Build succeeded: `npx vite build` in `src/SharedSpaces.Client`
+- No TypeScript errors
+- Mobile layout: modal is responsive with `max-w-md` and padding
+
+---
+
+# Decision: Transfer Endpoint JWT Claim Mapping Bug Fix
+
+**Date:** 2026-03-20  
+**Author:** Zoe (Tester)  
+**Context:** Writing integration tests for transfer endpoint (Issue #135)
+
+## Problem
+
+While writing integration tests for the transfer endpoint (`POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer`), I discovered that the endpoint always returned 400 Bad Request with error "Invalid destination token: missing or invalid member ID", even with valid JWT tokens.
+
+Root cause: The `TransferItem` endpoint manually validates the destination JWT token using `JwtSecurityTokenHandler.ValidateToken()`. However, the handler was created with default settings, which includes `MapInboundClaims = true`. This means JWT standard claim names like "sub" get mapped to .NET claim types like `ClaimTypes.NameIdentifier` ("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier").
+
+The endpoint then tried to read `JwtRegisteredClaimNames.Sub` ("sub"), which didn't exist in the principal after mapping, causing the member ID extraction to fail.
+
+## Decision
+
+Fixed the JWT token handler instantiation in `ItemEndpoints.cs` line 527:
+
+```csharp
+var tokenHandler = new JwtSecurityTokenHandler
+{
+    MapInboundClaims = false  // Preserve original JWT claim names
+};
+```
+
+This matches the configuration used in `JwtAuthenticationExtensions.cs` line 19 for the main JWT Bearer authentication, ensuring consistent claim handling across the application.
+
+## Why This Was Appropriate
+
+According to task instructions: "Don't fix pre-existing issues unrelated to your task. However, if you discover bugs directly caused by or tightly coupled to the code you're changing, fix those too."
+
+The transfer endpoint was just implemented (Issue #135) and this bug prevents it from working at all. This is NOT a pre-existing bug in unrelated code - it's a bug in the new feature I'm supposed to test. The endpoint literally cannot function without this fix.
+
+## Impact
+
+- ✅ Transfer endpoint now correctly validates destination JWT tokens
+- ✅ All 11 integration tests pass, covering copy/move for text/file items
+- ✅ Quota enforcement, token validation, revoked member rejection all work correctly
+- ✅ Consistent JWT claim handling across authentication and manual validation
+
+## Test Coverage
+
+Created `TransferItemTests.cs` with 11 integration tests:
+1. Copy text item - source unchanged
+2. Copy file item - file duplicated, source unchanged
+3. Move text item - deleted from source
+4. Move file item - file moved, deleted from source
+5. Quota exceeded rejection (413)
+6. Invalid/malformed destination token (400)
+7. Revoked destination member rejection (400)
+8. Item not found (404)
+9. Same-space transfer rejection (400)
+10. Invalid action value rejection (400)
+11. Destination space_id mismatch rejection (400)
+
+All tests follow existing patterns from `ItemEndpointTests.cs`, using `TestWebApplicationFactory` with EF Core InMemory database and `InMemoryFileStorage`.
+
 ## Status
 
 Implementation on branch `squad/99-pill-wrapping-research`. Screenshots posted to issue #99. Awaiting Marek's review before merge.
