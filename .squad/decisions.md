@@ -4226,7 +4226,7 @@ Added 6 new `@state()` properties to `SpaceView` rather than creating a sub-comp
 
 ---
 
-# Decision: File preview type  API contract and extension setsdetection 
+# Decision: File preview type API contract and extension sets detection 
 
 **Date:** 2026-03-28  
 **Author:** Zoe (Tester)  

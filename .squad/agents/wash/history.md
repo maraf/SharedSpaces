@@ -907,29 +907,29 @@ Finalized auto-select implementation with storage persistence and intentional de
 
 ---
 
-### 2025-07- File Preview Modal (Issue #134)17 
+### 2026-03-28: File Preview Modal (Issue #134)
 
 **Branch:** `squad/134-file-preview`
 
 **What was built:**
-- Created `src/SharedSpaces.Client/src/features/space-view/file-preview. standalone module for preview type detection and size limitsts` 
+- Created `src/SharedSpaces.Client/src/features/space-view/file-preview.ts` — standalone module for preview type detection and size limits
 - Updated `space-view.ts` to add file preview click handling, loading/error states, and a multi-type preview modal
 
 **Key files:**
-- `file-preview. `getFilePreviewType()` returns `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`; `isPreviewable()`, `isFileTooLargeForPreview()` helpers; `PREVIEW_SIZE_LIMITS` constantsts` 
-- `space-view. new state: `filePreviewItem`, `filePreviewType`, `filePreviewUrl`, `filePreviewText`, `filePreviewLoading`, `filePreviewError`; new methods: `handleFilePreviewClick`, `closeFilePreview`, `renderFilePreviewContent`, `renderFilePreviewModal`ts` 
+- `file-preview.ts` — `getFilePreviewType()` returns `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`; `isPreviewable()`, `isFileTooLargeForPreview()` helpers; `PREVIEW_SIZE_LIMITS` constants
+- `space-view.ts` — new state: `filePreviewItem`, `filePreviewType`, `filePreviewUrl`, `filePreviewText`, `filePreviewLoading`, `filePreviewError`; new methods: `handleFilePreviewClick`, `closeFilePreview`, `renderFilePreviewContent`, `renderFilePreviewModal`
 
 **Patterns followed:**
 - Reused existing modal pattern (backdrop click to close, stopPropagation on inner div, close button, z-50)
-- Used `downloadFile()` from space-api.ts to fetch blobs, created object URLs for media, read as text for text-like files
+- Used `downloadFile()` from `space-api.ts` to fetch blobs, created object URLs for media, read as text for text-like files
 - Object URLs revoked in `closeFilePreview()` to prevent memory leaks
 - Loading spinner + error-with-download-fallback pattern for async preview loading
 - File items get `cursor-pointer hover:text-slate-100` only when previewable (non-previewable files unchanged)
 
 **Learnings:**
 - `file-icons.ts` lives in `src/lib/file-icons.ts` (not in space-view directory as originally thought)
-- The download endpoint returns `application/octet- use `blob.text()` for text previews, `URL.createObjectURL(blob)` for mediastream` 
-- Pre-existing test file TS errors exist in the  only source file errors matter for validationrepo 
+- The download endpoint returns `application/octet-stream` — use `blob.text()` for text previews, `URL.createObjectURL(blob)` for media
+- Pre-existing test file TS errors exist in the repo; only source file errors matter for validation 
 
 ---
 
