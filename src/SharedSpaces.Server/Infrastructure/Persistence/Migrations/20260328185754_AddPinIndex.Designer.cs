@@ -56,7 +56,8 @@ namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Pin");
+                    b.HasIndex("Pin")
+                        .IsUnique();
 
                     b.HasIndex("SpaceId");
 
