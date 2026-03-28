@@ -108,7 +108,7 @@ async function seedSpace(name: string) {
     });
   }
 
-  // Add sample file items
+  // Add sample file items (text-like)
   for (const file of [
     { name: 'meeting-notes.txt', content: '# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM' },
     { name: 'architecture.md', content: '# System Architecture\n\nClient → API Gateway → Services → Database' },
@@ -124,6 +124,43 @@ async function seedSpace(name: string) {
       body: fileForm,
     });
   }
+
+  // Add a JSON file item (for text preview screenshot)
+  const jsonContent = JSON.stringify({ greeting: 'Hello', items: [1, 2, 3], nested: { key: 'value' } }, null, 2);
+  const jsonItemId = crypto.randomUUID();
+  const jsonForm = new FormData();
+  jsonForm.append('id', jsonItemId);
+  jsonForm.append('contentType', 'file');
+  jsonForm.append('file', new Blob([jsonContent], { type: 'application/json' }), 'data.json');
+  await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/items/${jsonItemId}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${aliceToken.token}` },
+    body: jsonForm,
+  });
+
+  // Add a PNG image file item (for image preview screenshot)
+  // Minimal 1×1 red PNG
+  const pngBytes = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+    0x44, 0xae, 0x42, 0x60, 0x82,
+  ]);
+  const pngItemId = crypto.randomUUID();
+  const pngForm = new FormData();
+  pngForm.append('id', pngItemId);
+  pngForm.append('contentType', 'file');
+  pngForm.append('file', new Blob([pngBytes], { type: 'image/png' }), 'photo.png');
+  await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/items/${pngItemId}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${aliceToken.token}` },
+    body: pngForm,
+  });
 
   return { space, invitation, token: aliceToken.token };
 }
@@ -224,6 +261,44 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
       await capture(page, 'space', vp);
+    });
+
+    test(`space view - file preview image - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      // Click the image file item to open preview
+      await page.locator('p.cursor-pointer:has-text("photo.png")').click();
+      await page.waitForSelector('button[aria-label="Close preview"]', { timeout: 5_000 });
+      await page.waitForTimeout(500);
+      await capture(page, 'space-file-preview-image', vp, { fullPage: false });
+
+      // Close preview
+      await page.locator('button[aria-label="Close preview"]').click();
+    });
+
+    test(`space view - file preview text - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      // Click the JSON file item to open text preview
+      await page.locator('p.cursor-pointer:has-text("data.json")').click();
+      await page.waitForSelector('button[aria-label="Close preview"]', { timeout: 5_000 });
+      await page.waitForTimeout(500);
+      await capture(page, 'space-file-preview-text', vp, { fullPage: false });
+
+      // Close preview
+      await page.locator('button[aria-label="Close preview"]').click();
     });
 
     test(`space view - dead space (auth) - ${vp.name}`, async ({ page }) => {
