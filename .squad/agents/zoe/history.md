@@ -11,7 +11,7 @@
 ## Team Updates (2026-03-28)
 
 **Issue #134 in progress (File preview support):**
-- **Zoe:** Created `getPreviewType()` helper in `src/SharedSpaces.Client/src/lib/file-preview.ts` and 80 Vitest tests in `file-preview.test.ts`. Helper maps filename extensions to preview types: image (8 exts), video (mp4/webm only — browser-native), audio (6 exts), pdf, text (20+ code/data/plain extensions), none (everything else). Tests cover all categories, case insensitivity, edge cases (empty, no extension, double extensions, hidden files, dot-only, trailing dots), non-browser-native video exclusion, and previewable/non-previewable boundaries. All 527 Vitest tests passing (80 new + 447 existing).
+- **Zoe:** Created `getPreviewType()` helper in `src/SharedSpaces.Client/src/features/space-view/file-preview.ts` and 80 Vitest tests in `file-preview.test.ts`. Helper maps filename extensions to preview types: image (8 exts), video (mp4/webm only — browser-native), audio (6 exts), pdf, text (20+ code/data/plain extensions), none (everything else). Tests cover all categories, case insensitivity, edge cases (empty, no extension, double extensions, hidden files, dot-only, trailing dots), non-browser-native video exclusion, and previewable/non-previewable boundaries. All 527 Vitest tests passing (80 new + 447 existing).
 - **Wash:** Implementation pending — UI tests to follow once component work lands.
 
 ## Learnings
@@ -26,7 +26,7 @@
   - Playwright screenshots for transfer UI verify button placement, modal layout, loading states, and responsive design (390×844 mobile, 1280×720 desktop). Mobile layout checked for text overflow, button wrapping, truncation.
 
 - **File preview helper design (2026-03-28):**
-  - Created `getPreviewType()` as a pure function in `src/SharedSpaces.Client/src/lib/file-preview.ts` — returns `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`.
+  - Created `getPreviewType()` as a pure function in `src/SharedSpaces.Client/src/features/space-view/file-preview.ts` — returns `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`.
   - Only browser-native video formats (mp4, webm) are previewable — mov, avi, mkv etc. return 'none'. Same approach as audio (mp3, wav, ogg, m4a, flac, aac).
   - Uses `Set` for extension lookups — O(1) per check, cleaner than `includes()` on arrays.
   - Edge case: `filename.toLowerCase().split('.').pop()` gets last extension, so `archive.tar.gz` → `'gz'` → `'none'`. Also handles no-extension files by checking if extracted "extension" equals the full lowered filename.

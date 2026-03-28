@@ -4210,9 +4210,9 @@ File items in space view only had a filename + download button. We needed click-
 
 Created a separate `file-preview.ts` module (in space-view feature directory) for preview type detection rather than adding to the existing `lib/file-icons.ts`. Reasons:
 
-1. **Separation of  file-icons.ts handles icon rendering (visual); file-preview.ts handles preview capability detection (behavioral)concerns** 
-2. **Co- preview logic is only used by space-view, so it lives in the feature directorylocation** 
-3. **Size  preview has file size guards (10MB images, 1MB text, etc.) which are preview-specific, not icon-relatedlimits** 
+1. **Separation of concerns:** file-icons.ts handles icon rendering (visual); file-preview.ts handles preview capability detection (behavioral)
+2. **Co-location:** preview logic is only used by space-view, so it lives in the feature directory
+3. **Size limits:** preview has file size guards (10MB images, 1MB text, etc.) which are preview-specific, not icon-related 
 
 ## Preview type rendering
 
@@ -4238,16 +4238,16 @@ The file preview feature needs a function that maps filename extensions to previ
 
 ## Decision
 
-Created `getPreviewType(filename: string): PreviewType` in `src/SharedSpaces.Client/src/lib/file-preview.ts`.
+Created `getFilePreviewType(filename: string): PreviewType` (exported as `getPreviewType`) in `src/SharedSpaces.Client/src/features/space-view/file-preview.ts`.
 
 **Return type:** `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`
 
 **Key choices:**
-- **Video:** Only `mp4` and ` these are the only formats with reliable cross-browser `<video>` support. Non-native formats (avi, mkv, mov, wmv, flv) return `'none'`.webm` 
-- **Audio:** `mp3`, `wav`, `ogg`, `m4a`, `flac`, ` broad browser `<audio>` support.aac` 
+- **Video:** Only `mp4` and `webm` — these are the only formats with reliable cross-browser `<video>` support. Non-native formats (avi, mkv, mov, wmv, flv) return `'none'`.
+- **Audio:** `mp3`, `wav`, `ogg`, `m4a`, `flac`, `aac` — broad browser `<audio>` support.
 - **Text:** Includes code files (20+ languages), structured data (json/xml/yaml/toml), plain text, markdown, HTML/CSS (shown as source, not rendered).
-- **None:** Archives, Office docs, executables,  download only.databases 
+- **None:** Archives, Office docs, executables, databases — download only.
 
 ## Impact
 
-Wash should import this function for the preview modal logic. The 80 tests lock the API  any extension reclassification will surface as a test failure.contract 
+Wash should import this function for the preview modal logic. The 80 tests lock the API contract — any extension reclassification will surface as a test failure. 

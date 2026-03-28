@@ -942,8 +942,8 @@ Finalized auto-select implementation with storage persistence and intentional de
 **Summary:** Your file preview modal implementation (commit 43a53e1) was integrated with Zoe's 80 test cases (commit a8f01d9) and the Coordinator consolidated duplicate file-preview.ts modules (commit 58c33fc). All decisions merged into squad decisions.md.
 
 **Impact on your work:**
-- `getPreviewType()` API is now locked by 80  use `src/SharedSpaces.Client/src/lib/file-preview.ts` for preview type detectiontests 
-- Module consolidation complete: single authoritative location at `features/space-view/file-preview.ts`
+- `getPreviewType()` API is now locked by 80 tests
+- Module consolidation complete: single authoritative location at `src/SharedSpaces.Client/src/features/space-view/file-preview.ts`
 - Next: Cross-browser video/audio codec testing, mobile viewport testing for modal overflow
 
 **Decisions documented:** File Preview Architecture, File Preview Type Detection API contract
