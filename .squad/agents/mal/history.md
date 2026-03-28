@@ -315,3 +315,93 @@ All 6 architecture decisions listed above require user input before implementati
 - JWT generation: `src/SharedSpaces.Server/Features/Tokens/TokenEndpoints.cs` (CreateToken method)
 - Claim type constants: `src/SharedSpaces.Server/Features/Tokens/JwtAuthenticationExtensions.cs` (SpaceMemberClaimTypes)
 - CLI config model: `src/SharedSpaces.Cli.Core/Models/CliConfig.cs`
+
+### Issue #138 Anonymous Access Analysis (2026-03-19)
+
+**Status:** ✅ Architectural proposal complete — queuing for Marek decision
+
+**Task:** Analyze GitHub issue #138 "Anonymous access to item" and provide architectural guidance on how to implement shareable links for individual items without requiring recipient to join the space.
+
+**Recommendation:** Add `ItemShareLink` entity with GUID-based tokens. Create new public endpoints under `/v1/public/items/{token}` that bypass JWT auth entirely. Rate limit by IP to prevent enumeration. Revocation = soft delete (set `IsRevoked = true`). Pure additive feature, zero changes to existing auth/JWT/SignalR.
+
+**Key Architectural Decisions:**
+
+1. **Domain Model:** New `ItemShareLink` entity with `Id` (the share token), `ItemId`, `CreatedByMemberId`, `CreatedAt`, `IsRevoked`. Share token is a 128-bit GUID = 2^128 possibilities = effectively unguessable with rate limiting.
+
+2. **API Contract:** 5 new endpoints:
+   - `POST /v1/spaces/{spaceId}/items/{itemId}/shares` (protected) — create link
+   - `GET /v1/public/items/{token}` (public) — view item metadata
+   - `GET /v1/public/items/{token}/download` (public) — download file
+   - `GET /v1/spaces/{spaceId}/items/{itemId}/shares` (protected) — list links
+   - `DELETE /v1/spaces/{spaceId}/items/{itemId}/shares/{token}` (protected) — revoke
+
+3. **Security Approach:**
+   - Public endpoints bypass JWT middleware entirely (new route group)
+   - Rate limiting: 60 req/min per IP via `AspNetCoreRateLimit` middleware
+   - No JWT changes, no SpaceMember changes, no existing endpoint changes
+   - Token enumeration: 2^128 / 3600/hour = infeasible attack surface
+
+4. **Revocation Model:** Soft delete (set `IsRevoked = true`) preserves audit trail. Any space member can revoke any link in v1 (no admin role exists yet).
+
+5. **v1 Scope Boundaries (explicitly NOT included):**
+   - Auto-expiry after N days (manual revocation only)
+   - Password-protected links (all links public)
+   - View count analytics
+   - Custom permissions (view-only vs. download)
+   - Bulk revocation
+   - Email notifications on access
+
+**Why This Approach:**
+- Zero JWT changes — public endpoints are a parallel access path
+- Reuses existing file storage abstraction (`IFileStorage`)
+- No SignalR changes (share links don't broadcast)
+- Database-backed tokens enable revocation (vs. stateless signed URLs)
+- Pure additive — all existing endpoints/auth stay unchanged
+- Simple enough to ship in ~1 day backend work
+
+**Alternatives Rejected:**
+1. **JWT with anonymous claims** — Too complex (hybrid auth path, no revocation)
+2. **Time-limited signed URLs (S3-style)** — No revocation, expiry required, clock skew
+3. **OAuth2 Client Credentials** — Massive overkill
+
+**Open Questions for Marek:**
+1. Soft delete vs. hard delete for revocation? (Recommend: soft delete)
+2. Who can revoke? Any member, creator only, or admin? (Recommend: any member in v1)
+3. Include creator name in public response? (Recommend: no, minimize PII)
+4. Multiple links per item? (Recommend: yes, more flexible)
+5. Rate limit threshold? (Recommend: 60 req/min per IP)
+
+**Implementation Estimate:** ~1 day (backend only) — domain model, migration, 5 endpoints, rate limiting, tests.
+
+**Key Files Referenced:**
+- Existing auth patterns: `src/SharedSpaces.Server/Features/Tokens/JwtAuthenticationExtensions.cs`
+- Existing authorization helper: `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs` (`TryAuthorizeSpaceRequest`)
+- File storage abstraction: `src/SharedSpaces.Server/Infrastructure/FileStorage/IFileStorage.cs`
+- Domain entities: `src/SharedSpaces.Server/Domain/` (SpaceItem, SpaceMember)
+
+**Decision Document:** Full analysis documented in `.squad/decisions/inbox/mal-anonymous-access-analysis.md` with detailed API contract, security analysis, trade-offs, and v2 feature candidates.
+
+---
+
+## Session 2026-03-28: Cross-Agent Coordination (Orchestration)
+
+**Completed:** Analysis merge + orchestration logging
+
+Your architectural analysis has been merged into shared decision log. Key findings from peer analysis:
+
+**From Kaylee (Backend):**
+- Proposes crypto-random tokens (192-bit base64url) as alternative to your GUID approach
+- Both approaches are feasible; Kaylee's requires extra RNG complexity but is harder to guess
+- Estimated 3 days backend implementation time2
+- Vertical slice architecture aligns perfectly with existing patterns
+
+**From Wash (Frontend):**
+- Anonymous viewer route `/shared/{token}` assumes your public endpoints
+- Plans to extract `item-display` component for both authenticated and anonymous modes
+ Delete order on item cards
+- Mobile testing at 390844 to verify button wrapping on narrow viewports
+
+**Team decision pending:** Token strategy (GUID vs. crypto-random). Your GUID approach is simpler and unguessable; Kaylee's crypto-random is theoretically harder to guess but adds complexity. Both are feasible.
+
+**Next:** User/team decision on token strategy, revocation scope, and PII handling.
+
