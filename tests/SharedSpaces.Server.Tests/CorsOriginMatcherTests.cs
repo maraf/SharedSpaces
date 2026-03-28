@@ -35,7 +35,7 @@ public class CorsOriginMatcherTests
         CorsOriginMatcher.IsWildcardMatch(origin, pattern).Should().Be(expected);
 
     [Theory]
-    [InlineData("https://example.com/", "https://example.com*", true)]
+    [InlineData("https://example.com.ar", "https://example.com*", true)]
     [InlineData("https://example.com", "https://example.com*", true)]
     [InlineData("https://example.com:8080", "https://example.com*", true)]
     public void TrailingWildcard_MatchesSuffix(string origin, string pattern, bool expected) =>

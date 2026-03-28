@@ -34,10 +34,15 @@ builder.Services.AddCors(options =>
         var allowedOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
             ?? new[] { "http://localhost:5173", "https://localhost:5173" };
 
+        var normalizedOrigins = allowedOrigins
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .Select(o => o.Trim())
+            .ToArray();
+
         var exactOrigins = new HashSet<string>(
-            allowedOrigins.Where(o => !o.Contains('*')),
+            normalizedOrigins.Where(o => !o.Contains('*')),
             StringComparer.OrdinalIgnoreCase);
-        var wildcardPatterns = allowedOrigins.Where(o => o.Contains('*')).ToArray();
+        var wildcardPatterns = normalizedOrigins.Where(o => o.Contains('*')).ToArray();
 
         policy.SetIsOriginAllowed(origin =>
                 exactOrigins.Contains(origin) ||

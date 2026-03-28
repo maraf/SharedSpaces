@@ -9,6 +9,9 @@ public static class CorsOriginMatcher
     /// </summary>
     public static bool IsWildcardMatch(string origin, string pattern)
     {
+        if (string.IsNullOrEmpty(origin) || string.IsNullOrEmpty(pattern))
+            return false;
+
         if (!pattern.Contains('*'))
             return string.Equals(origin, pattern, StringComparison.OrdinalIgnoreCase);
 
