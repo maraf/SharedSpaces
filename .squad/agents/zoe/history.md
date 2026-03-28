@@ -33,6 +33,16 @@
   - Test file uses `it.each` for parametric tests — clean coverage of 80+ extension/filename combinations in compact form.
   - Key design decision: HTML/CSS are 'text' preview (source code view), not rendered — matches the "text modal" requirement from spec.
 
+- **File preview modal UI tests (2026-03-28):**
+  - Wrote 29 Vitest tests in `space-view.test.ts` covering handleFilePreviewClick, per-type rendering, loading state, error handling, too-large guard, closeFilePreview cleanup, and integration flows.
+  - For DOM rendering tests: set `isLoading = false` + set all `filePreview*` state fields before `appendChild` + `requestUpdate` + `await updateComplete`. Query elements directly (light DOM).
+  - Mock `fetch` to return `{ ok, status, blob: async () => blob }` for download endpoint calls. Text preview reads `blob.text()`, binary types use `URL.createObjectURL(blob)`.
+  - Mock `URL.createObjectURL` / `URL.revokeObjectURL` via `vi.spyOn(URL, ...)` — verified createObjectURL is called for binary types but NOT for text, and revokeObjectURL is called on close.
+  - Error paths: 401/404 from SpaceApiError close the preview and set `connectionErrorType = 'auth'`; other errors set `filePreviewError` and keep the modal open with a "Download instead" fallback button.
+  - Too-large guard: `isFileTooLargeForPreview()` is checked before fetch — sets error immediately without network call. Tested with image >10MB and text >1MB limits from `PREVIEW_SIZE_LIMITS`.
+  - Integration tests follow the open→verify→close→verify pattern matching the transfer feature tests. Also tested fail→close→reopen to verify clean state.
+  - All 556 Vitest tests passing (29 new + 527 existing).
+
 ---
 
 ## Team Update: File Preview Session (2026-03-28)
