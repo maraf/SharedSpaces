@@ -4193,3 +4193,61 @@ The handler now tries exact match first, then falls back to prefix matching, all
 ## Validation
 
 All 37 tests pass, including 10 new FileSystemWatcher upload tests that rely on prefix matching.
+
+---
+
+# Decision: File Preview Architecture
+
+**Date:** 2025-07-17
+**Author:** Wash
+**Issue:** #134
+
+## Context
+
+File items in space view only had a filename + download button. We needed click-to-preview for common file types.
+
+## Decision
+
+Created a separate `file-preview.ts` module (in space-view feature directory) for preview type detection rather than adding to the existing `lib/file-icons.ts`. Reasons:
+
+1. **Separation of  file-icons.ts handles icon rendering (visual); file-preview.ts handles preview capability detection (behavioral)concerns** 
+2. **Co- preview logic is only used by space-view, so it lives in the feature directorylocation** 
+3. **Size  preview has file size guards (10MB images, 1MB text, etc.) which are preview-specific, not icon-relatedlimits** 
+
+## Preview type rendering
+
+- Tier 1 (browser-native): `<img>`, `<video controls>`, `<audio controls>`, `<iframe>` for PDF
+- Tier 2 (text-like): fetched as text via `blob.text()`, rendered in same `whitespace-pre-wrap` style as text items
+- Object URLs created from blobs (since download endpoint returns `application/octet-stream`) and revoked on close
+
+## State approach
+
+Added 6 new `@state()` properties to `SpaceView` rather than creating a sub-component, since the preview modal follows the same pattern as the existing text modal and transfer modal. If the component grows further, extracting a `<file-preview-modal>` sub-component would be the next step.
+
+---
+
+# Decision: File preview type  API contract and extension setsdetection 
+
+**Date:** 2026-03-28  
+**Author:** Zoe (Tester)  
+**Issue:** #134
+
+## Context
+
+The file preview feature needs a function that maps filename extensions to preview categories so the UI knows which HTML element to render (`<img>`, `<video>`, `<audio>`, `<iframe>`, or text `<pre>`).
+
+## Decision
+
+Created `getPreviewType(filename: string): PreviewType` in `src/SharedSpaces.Client/src/lib/file-preview.ts`.
+
+**Return type:** `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`
+
+**Key choices:**
+- **Video:** Only `mp4` and ` these are the only formats with reliable cross-browser `<video>` support. Non-native formats (avi, mkv, mov, wmv, flv) return `'none'`.webm` 
+- **Audio:** `mp3`, `wav`, `ogg`, `m4a`, `flac`, ` broad browser `<audio>` support.aac` 
+- **Text:** Includes code files (20+ languages), structured data (json/xml/yaml/toml), plain text, markdown, HTML/CSS (shown as source, not rendered).
+- **None:** Archives, Office docs, executables,  download only.databases 
+
+## Impact
+
+Wash should import this function for the preview modal logic. The 80 tests lock the API  any extension reclassification will surface as a test failure.contract 

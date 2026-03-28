@@ -32,3 +32,19 @@
   - Edge case: `filename.toLowerCase().split('.').pop()` gets last extension, so `archive.tar.gz` → `'gz'` → `'none'`. Also handles no-extension files by checking if extracted "extension" equals the full lowered filename.
   - Test file uses `it.each` for parametric tests — clean coverage of 80+ extension/filename combinations in compact form.
   - Key design decision: HTML/CSS are 'text' preview (source code view), not rendered — matches the "text modal" requirement from spec.
+
+---
+
+## Team Update: File Preview Session (2026-03-28)
+
+**Session:** 2026-03-28T09:38:17Z  
+**Topic:** File Preview Implementation (Issue #134)  
+**Coordinated with:** Wash (Frontend Dev), Coordinator (Integration Agent)
+
+**Summary:** Your 80 test cases for getPreviewType() (commit a8f01d9) locked the API contract and were integrated with Wash's file preview modal (commit 43a53e1). The Coordinator consolidated duplicate modules (commit 58c33fc). All decisions merged into squad decisions.md.
+
+**Impact on your work:**
+- API contract fully documented in decisions.md: video (mp4, webm only), audio (broad support), text (20+ languages + structured data), 'none' for archives/Office/executables
+- Next test areas: Cross-browser codec compatibility, edge case validation, performance testing for large files
+
+**Decisions documented:** File Preview Type Detection API contract (your decision locked by tests)
