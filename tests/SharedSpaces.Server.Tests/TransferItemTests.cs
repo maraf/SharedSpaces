@@ -414,6 +414,48 @@ public class TransferItemTests
     }
 
     [Fact]
+    public async Task TransferItem_SpaceIdMismatch_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var sourceSpace = await factory.CreateSpaceAsync("Source Space");
+        var destSpace = await factory.CreateSpaceAsync("Dest Space");
+        var otherSpace = await factory.CreateSpaceAsync("Other Space");
+        var sourceMember = await factory.CreateMemberAsync(sourceSpace.Id, "Alice");
+        var destMember = await factory.CreateMemberAsync(destSpace.Id, "Bob");
+
+        var sourceToken = GenerateTestJwt(sourceMember.Id, sourceSpace.Id, sourceMember.DisplayName);
+        // Token claims otherSpace but member belongs to destSpace — space mismatch
+        var mismatchedToken = GenerateTestJwt(destMember.Id, otherSpace.Id, destMember.DisplayName);
+
+        var itemId = Guid.NewGuid();
+        await factory.CreateItemAsync(
+            sourceSpace.Id,
+            sourceMember.Id,
+            contentType: "text",
+            content: "Test",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0,
+            itemId: itemId);
+
+        var response = await TransferItemAsync(
+            client,
+            sourceSpace.Id,
+            itemId,
+            new TransferItemRequest
+            {
+                DestinationToken = mismatchedToken,
+                Action = "copy"
+            },
+            sourceToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var error = await ReadJsonAsync<ErrorResponse>(response);
+        error.Error.Should().Contain("space");
+    }
+
+    [Fact]
     public async Task TransferItem_InvalidAction_Returns400()
     {
         await using var factory = new TestWebApplicationFactory();

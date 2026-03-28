@@ -2781,7 +2781,7 @@ Implemented `POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer` endpoint t
 ## Implementation Notes
 
 ### New Files/Changes
-- **`Models.cs`:** Added `TransferItemRequest` class with `DestinationSpaceId`, `DestinationToken`, and `Action` properties
+- **`Models.cs`:** Added `TransferItemRequest` class with `DestinationToken` and `Action` properties (destination space ID is extracted from the token's `space_id` claim)
 - **`ItemEndpoints.cs`:** Added `TransferItem` endpoint method (~250 lines)
 - Added `using Microsoft.IdentityModel.Tokens;` for `TokenValidationParameters`
 
@@ -2796,7 +2796,7 @@ Implemented `POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer` endpoint t
 - Same-space transfer → 400 Bad Request  
 - Invalid/missing destination token → 400 Bad Request
 - Destination member revoked/missing → 400 Bad Request
-- Space ID claim mismatch → 400 Bad Request
+- Destination member/token space mismatch → 400 Bad Request (member's SpaceId must match token's space_id claim)
 - Source item not found → 404 Not Found
 - Destination space not found → 400 Bad Request (not 404, since it's a parameter validation error)
 - Destination quota exceeded → 413 Payload Too Large

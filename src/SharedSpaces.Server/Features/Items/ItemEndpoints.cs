@@ -502,15 +502,18 @@ public static class ItemEndpoints
         CancellationToken cancellationToken)
     {
         // Authorize source space
-        var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var sourceMemberId);
+        var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
         if (authorizationResult is not null)
         {
             return authorizationResult;
         }
 
-        var sourceDisplayName = httpContext.User.FindFirst(SpaceMemberClaimTypes.DisplayName)?.Value ?? string.Empty;
-
         // Validate action
+        if (string.IsNullOrWhiteSpace(request.Action))
+        {
+            return Results.BadRequest(new { Error = "Action must be either 'copy' or 'move'" });
+        }
+
         var action = request.Action.Trim().ToLowerInvariant();
         if (action is not ("copy" or "move"))
         {
@@ -537,7 +540,7 @@ public static class ItemEndpoints
                 RequireExpirationTime = false
             }, out _);
         }
-        catch
+        catch (Exception ex) when (ex is SecurityTokenException or ArgumentException)
         {
             return Results.BadRequest(new { Error = "Invalid destination token" });
         }
@@ -564,6 +567,12 @@ public static class ItemEndpoints
         if (!Guid.TryParse(destSpaceClaim, out var destinationSpaceId) || destinationSpaceId == Guid.Empty)
         {
             return Results.BadRequest(new { Error = "Invalid destination token: missing or invalid space_id" });
+        }
+
+        // Validate destination member belongs to the claimed space
+        if (destinationMember.SpaceId != destinationSpaceId)
+        {
+            return Results.BadRequest(new { Error = "Destination token space does not match member's space" });
         }
 
         // Reject same-space transfer
@@ -645,7 +654,9 @@ public static class ItemEndpoints
                 await fileStorage.SaveAsync(destinationSpaceId, newItemId, sourceStream, cancellationToken);
                 
                 // Update content to reference new item ID
-                destinationItem.Content = sourceItem.Content.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
+                // Only rename auto-converted text files (Content == "{sourceItemId:N}.txt")
+                var isAutoConvertedText = string.Equals(sourceItem.Content, $"{sourceItem.Id:N}.txt", StringComparison.OrdinalIgnoreCase);
+                destinationItem.Content = isAutoConvertedText
                     ? $"{newItemId:N}.txt"
                     : sourceItem.Content;
             }
