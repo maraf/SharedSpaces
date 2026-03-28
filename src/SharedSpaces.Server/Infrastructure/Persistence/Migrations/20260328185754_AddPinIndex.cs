@@ -13,7 +13,8 @@ namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_SpaceInvitations_Pin",
                 table: "SpaceInvitations",
-                column: "Pin");
+                column: "Pin",
+                unique: true);
         }
 
         /// <inheritdoc />

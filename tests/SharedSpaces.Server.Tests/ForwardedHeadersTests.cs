@@ -229,8 +229,8 @@ public class ForwardedHeadersTests
         string? forwardedProto = null,
         string? forwardedHost = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/tokens");
-        request.Content = JsonContent.Create(new ExchangeTokenRequest(pin, displayName));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/tokens");
+        request.Content = JsonContent.Create(new ExchangeTokenRequest(pin, displayName, spaceId));
 
         if (forwardedProto is not null)
             request.Headers.Add("X-Forwarded-Proto", forwardedProto);
@@ -288,7 +288,7 @@ public class ForwardedHeadersTests
 
     private sealed record CreateInvitationRequest(string? ClientAppUrl);
 
-    private sealed record ExchangeTokenRequest(string Pin, string DisplayName);
+    private sealed record ExchangeTokenRequest(string Pin, string DisplayName, Guid? SpaceId = null);
 
     private sealed record InvitationResponse(string InvitationString, string? QrCodeBase64);
 
