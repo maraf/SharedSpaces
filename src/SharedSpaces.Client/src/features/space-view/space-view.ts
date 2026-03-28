@@ -1661,10 +1661,10 @@ export class SpaceView extends BaseElement {
         @click=${this.closeFilePreview}
       >
         <div
-          class="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          class="relative w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col rounded-lg border border-slate-700 bg-slate-900"
           @click=${(e: Event) => e.stopPropagation()}
         >
-          <div class="mb-4 flex items-start justify-between gap-4">
+          <div class="shrink-0 flex items-start justify-between gap-4 p-6 pb-0 mb-4">
             <h3 class="min-w-0 flex-1 truncate text-lg font-semibold text-white" title=${this.filePreviewItem.content}>
               ${this.filePreviewItem.content}
             </h3>
@@ -1686,7 +1686,9 @@ export class SpaceView extends BaseElement {
               </button>
             </div>
           </div>
-          ${this.renderFilePreviewContent()}
+          <div class="overflow-y-auto flex-1 min-h-0 px-6 pb-6">
+            ${this.renderFilePreviewContent()}
+          </div>
         </div>
       </div>
     `;
