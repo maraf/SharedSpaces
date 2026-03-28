@@ -5,6 +5,7 @@ using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Features.Items;
 using SharedSpaces.Server.Features.Spaces;
 using SharedSpaces.Server.Features.Tokens;
+using SharedSpaces.Server.Infrastructure;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -32,7 +33,15 @@ builder.Services.AddCors(options =>
     {
         var allowedOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() 
             ?? new[] { "http://localhost:5173", "https://localhost:5173" };
-        policy.WithOrigins(allowedOrigins)
+
+        var exactOrigins = new HashSet<string>(
+            allowedOrigins.Where(o => !o.Contains('*')),
+            StringComparer.OrdinalIgnoreCase);
+        var wildcardPatterns = allowedOrigins.Where(o => o.Contains('*')).ToArray();
+
+        policy.SetIsOriginAllowed(origin =>
+                exactOrigins.Contains(origin) ||
+                wildcardPatterns.Any(p => CorsOriginMatcher.IsWildcardMatch(origin, p)))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

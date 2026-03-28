@@ -224,6 +224,116 @@ public class CorsConfigurationTests
         response.Headers.GetValues("Access-Control-Allow-Credentials").Should().Contain("true");
     }
 
+    [Fact]
+    public async Task WildcardOrigin_AllowsMatchingOrigin()
+    {
+        // Arrange
+        var wildcardPattern = "https://pr-*.azurewebapps.net";
+        var matchingOrigin = "https://pr-42.azurewebapps.net";
+        await using var factory = new TestWebApplicationFactory(new[] { wildcardPattern });
+        using var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("Origin", matchingOrigin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
+        response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(matchingOrigin);
+    }
+
+    [Fact]
+    public async Task WildcardOrigin_RejectsNonMatchingOrigin()
+    {
+        // Arrange
+        var wildcardPattern = "https://pr-*.azurewebapps.net";
+        var nonMatchingOrigin = "https://evil.com";
+        await using var factory = new TestWebApplicationFactory(new[] { wildcardPattern });
+        using var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("Origin", nonMatchingOrigin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Should().NotContainKey("Access-Control-Allow-Origin");
+    }
+
+    [Fact]
+    public async Task MixedExactAndWildcard_AllowsExactOrigin()
+    {
+        // Arrange
+        var exactOrigin = "https://example.com";
+        var wildcardPattern = "https://pr-*.azurewebapps.net";
+        await using var factory = new TestWebApplicationFactory(new[] { exactOrigin, wildcardPattern });
+        using var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("Origin", exactOrigin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
+        response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(exactOrigin);
+    }
+
+    [Fact]
+    public async Task MixedExactAndWildcard_AllowsWildcardMatchedOrigin()
+    {
+        // Arrange
+        var exactOrigin = "https://example.com";
+        var wildcardPattern = "https://pr-*.azurewebapps.net";
+        var matchingOrigin = "https://pr-99.azurewebapps.net";
+        await using var factory = new TestWebApplicationFactory(new[] { exactOrigin, wildcardPattern });
+        using var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Add("Origin", matchingOrigin);
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
+        response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(matchingOrigin);
+    }
+
+    [Fact]
+    public async Task WildcardOrigin_PreflightRequest_ReturnsCorrectHeaders()
+    {
+        // Arrange
+        var wildcardPattern = "https://pr-*.azurewebapps.net";
+        var matchingOrigin = "https://pr-123.azurewebapps.net";
+        await using var factory = new TestWebApplicationFactory(new[] { wildcardPattern });
+        using var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Options, "/");
+        request.Headers.Add("Origin", matchingOrigin);
+        request.Headers.Add("Access-Control-Request-Method", "POST");
+        request.Headers.Add("Access-Control-Request-Headers", "content-type");
+
+        // Act
+        var response = await client.SendAsync(request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        response.Headers.Should().ContainKey("Access-Control-Allow-Origin");
+        response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain(matchingOrigin);
+        response.Headers.Should().ContainKey("Access-Control-Allow-Methods");
+        response.Headers.Should().ContainKey("Access-Control-Allow-Headers");
+        response.Headers.Should().ContainKey("Access-Control-Allow-Credentials");
+    }
+
     private sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
     {
         private const string AdminSecret = "test-admin-secret";
