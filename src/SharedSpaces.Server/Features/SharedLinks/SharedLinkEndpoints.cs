@@ -157,7 +157,7 @@ public static class SharedLinkEndpoints
             item.ContentType,
             displayContent,
             item.FileSize,
-            link.CreatedAt);
+            item.SharedAt);
 
         return Results.Ok(response);
     }
