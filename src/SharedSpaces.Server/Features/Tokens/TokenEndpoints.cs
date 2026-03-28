@@ -13,14 +13,34 @@ public static class TokenEndpoints
     public static IEndpointRouteBuilder MapTokenEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/v1/spaces/{spaceId:guid}/tokens");
-
         group.MapPost("/", ExchangePinForToken);
+
+        app.MapPost("/v1/tokens", ExchangePinForTokenSimplified);
 
         return app;
     }
 
     private static async Task<IResult> ExchangePinForToken(
         Guid spaceId,
+        CreateTokenRequest request,
+        AppDbContext db,
+        IConfiguration configuration,
+        HttpRequest httpRequest)
+    {
+        return await ExchangePinForTokenCore(spaceId, request, db, configuration, httpRequest);
+    }
+
+    private static async Task<IResult> ExchangePinForTokenSimplified(
+        CreateTokenRequest request,
+        AppDbContext db,
+        IConfiguration configuration,
+        HttpRequest httpRequest)
+    {
+        return await ExchangePinForTokenCore(request.SpaceId, request, db, configuration, httpRequest);
+    }
+
+    private static async Task<IResult> ExchangePinForTokenCore(
+        Guid? spaceId,
         CreateTokenRequest request,
         AppDbContext db,
         IConfiguration configuration,
@@ -42,29 +62,58 @@ public static class TokenEndpoints
             return Results.BadRequest(new { Error = "Display name must not exceed 100 characters" });
         }
 
-        var space = await db.Spaces
-            .AsNoTracking()
-            .SingleOrDefaultAsync(existingSpace => existingSpace.Id == spaceId);
-
-        if (space == null)
-        {
-            return Results.NotFound(new { Error = "Space not found" });
-        }
-
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
         var hashedPin = InvitationPinHasher.HashPin(request.Pin.Trim(), adminSecret);
 
-        var invitation = await db.SpaceInvitations
-            .FirstOrDefaultAsync(existingInvitation => existingInvitation.SpaceId == spaceId && existingInvitation.Pin == hashedPin);
+        SpaceInvitation? invitation;
+
+        if (spaceId.HasValue)
+        {
+            var space = await db.Spaces
+                .AsNoTracking()
+                .SingleOrDefaultAsync(existingSpace => existingSpace.Id == spaceId.Value);
+
+            if (space == null)
+            {
+                return Results.NotFound(new { Error = "Space not found" });
+            }
+
+            invitation = await db.SpaceInvitations
+                .FirstOrDefaultAsync(i => i.SpaceId == spaceId.Value && i.Pin == hashedPin);
+        }
+        else
+        {
+            var matchingInvitations = await db.SpaceInvitations
+                .Where(i => i.Pin == hashedPin)
+                .Take(2)
+                .ToListAsync();
+
+            if (matchingInvitations.Count > 1)
+            {
+                return Results.Conflict(new { Error = "Multiple invitations match this PIN. Please provide the space ID." });
+            }
+
+            invitation = matchingInvitations.SingleOrDefault();
+        }
 
         if (invitation == null)
         {
             return Results.Unauthorized();
         }
 
+        var resolvedSpaceId = invitation.SpaceId;
+        var resolvedSpace = await db.Spaces
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == resolvedSpaceId);
+
+        if (resolvedSpace == null)
+        {
+            return Results.NotFound(new { Error = "Space not found" });
+        }
+
         var member = new SpaceMember
         {
-            SpaceId = spaceId,
+            SpaceId = resolvedSpaceId,
             DisplayName = displayName,
             JoinedAt = DateTime.UtcNow,
             IsRevoked = false
@@ -83,7 +132,7 @@ public static class TokenEndpoints
         }
 
         var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
-        var token = CreateToken(member, serverUrl, space.Name, configuration);
+        var token = CreateToken(member, serverUrl, resolvedSpace.Name, configuration);
         return Results.Ok(new TokenResponse(token));
     }
 

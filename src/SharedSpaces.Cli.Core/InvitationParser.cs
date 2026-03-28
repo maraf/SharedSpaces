@@ -13,8 +13,8 @@ public static partial class InvitationParser
     private static partial Regex PinPattern();
 
     /// <summary>
-    /// Parses a raw invitation string in the format "serverUrl|spaceId[|pin]".
-    /// The optional PIN segment, if present, must be a 6-digit code.
+    /// Parses a raw invitation string in the format "serverUrl|pin" (new) or "serverUrl|spaceId[|pin]" (legacy).
+    /// Discrimination: if part[1] is a GUID → legacy format; if part[1] is a 6-digit PIN → new format.
     /// </summary>
     public static InvitationData? ParseInvitationString(string invitation)
     {
@@ -23,15 +23,30 @@ public static partial class InvitationParser
             return null;
 
         var serverUrl = parts[0].Trim();
-        var spaceId = parts[1].Trim();
-        var pin = parts.Length == 3 ? parts[2].Trim() : null;
 
         if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var uri)
             || (uri.Scheme != "http" && uri.Scheme != "https"))
             return null;
 
-        if (!GuidPattern().IsMatch(spaceId))
+        var secondPart = parts[1].Trim();
+
+        // New format: serverUrl|pin
+        if (parts.Length == 2 && PinPattern().IsMatch(secondPart))
+        {
+            return new InvitationData
+            {
+                ServerUrl = serverUrl,
+                SpaceId = null,
+                Pin = secondPart
+            };
+        }
+
+        // Legacy format: serverUrl|spaceId[|pin]
+        if (!GuidPattern().IsMatch(secondPart))
             return null;
+
+        var spaceId = secondPart;
+        var pin = parts.Length == 3 ? parts[2].Trim() : null;
 
         if (pin is not null && !PinPattern().IsMatch(pin))
             return null;

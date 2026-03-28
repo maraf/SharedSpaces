@@ -61,9 +61,15 @@ public static class InvitationEndpoints
             return Results.NotFound(new { Error = "Space not found" });
         }
 
-        var pin = GeneratePin();
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
-        var hashedPin = InvitationPinHasher.HashPin(pin, adminSecret);
+
+        string pin;
+        string hashedPin;
+        do
+        {
+            pin = GeneratePin();
+            hashedPin = InvitationPinHasher.HashPin(pin, adminSecret);
+        } while (await db.SpaceInvitations.AnyAsync(i => i.Pin == hashedPin));
 
         var invitation = new SpaceInvitation
         {
@@ -75,7 +81,7 @@ public static class InvitationEndpoints
         await db.SaveChangesAsync();
 
         var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
-        var invitationString = $"{serverUrl}|{spaceId}|{pin}";
+        var invitationString = $"{serverUrl}|{pin}";
 
         string? qrCodeBase64 = null;
         var clientAppUrl = request.ClientAppUrl;
