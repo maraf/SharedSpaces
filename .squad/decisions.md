@@ -4811,3 +4811,56 @@ The "Enter manually" mode still shows the Space ID input but labels it "(optiona
 - **No client force-update  old invitations remain validrequired** 
 - **QR code size  new 2-part format is 52% smallerwin** 
 
+
+---
+
+# Decision: Backend  Simplify Join (Issue #139)Implementation 
+
+**Issue:** #139  
+**Author:** Kaylee (Backend Dev)  
+**Date:** 2026-03-28  
+**Status:** Decided
+
+## Context
+
+Users currently join with `serverUrl|spaceId|pin`. The spaceId (a GUID) makes invitation strings long and unfriendly. Since PINs are only 6 digits and scoped per-space, different spaces can have identical PINs.
+
+## Decision
+
+Make PINs globally unique via retry-on-collision, allowing `serverUrl|pin` as the join format.
+
+### Server Implementation
+
+1. **PIN  Retry loop: generate PIN, hash, check if hash already exists in `SpaceInvitations`. Regenerate on collision. Collision probability: ~0.14% at 50 active invitations.generation** 
+
+2. **Pin  Added non-unique index on `SpaceInvitations.Pin` for O(1) hash lookup (EF Core migration `AddPinIndex`).index** 
+
+3. **New token  `POST /v1/tokens` accepts optional `spaceId` in request body. When omitted, looks up invitation by PIN hash only. If multiple matches (extremely rare), returns `409 Conflict` with message asking for spaceId. Original route `/v1/spaces/{spaceId}/tokens` preserved for backward compatibility.endpoint** 
+
+4. **Invitation string  Changed from `serverUrl|spaceId|pin` to `serverUrl|pin` (52% smaller, QR codes significantly more compact).format** 
+
+### CLI Changes
+
+5. ** Discriminates format by checking if part[1] is a GUID (legacy) or 6-digit PIN (new). InvitationParser** 
+
+6. **InvitationData. Now nullable (`string?`).SpaceId** 
+
+7. ** Routes to `/v1/tokens` when spaceId is null.SharedSpacesApiClient** 
+
+## Backward Compatibility
+
+- Legacy 3-part format (`serverUrl|spaceId|pin`) still works
+- Original endpoint `/v1/spaces/{spaceId}/tokens` unchanged
+- No force-update required for clients
+
+## Impact
+
+- **Wash (Frontend):** Client parser needs 2-part format support
+- **Zoe (Tests):** Update `InvitationParserTests`, add PIN-only lookup + 409 conflict test cases
+- **Coordination:** Aligns with Wash's Issue #139 frontend decision
+
+## Alternatives Considered
+
+- **Unique constraint on  Rejected: DB-level errors on collision instead of graceful retryPin** 
+- **Longer  Rejected: 6 digits is user-friendly; collision negligible at scalePINs** 
+
