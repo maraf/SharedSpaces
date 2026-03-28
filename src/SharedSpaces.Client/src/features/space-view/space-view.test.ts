@@ -3015,3 +3015,651 @@ describe('SpaceView - Transfer Feature', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// File Preview Modal
+// ---------------------------------------------------------------------------
+
+describe('SpaceView - File Preview Modal', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+
+  let element: SpaceView;
+  let mockFetchFn: ReturnType<typeof vi.fn>;
+
+  function makeItem(overrides: Partial<SpaceItemResponse> = {}): SpaceItemResponse {
+    return {
+      id: 'item-1',
+      spaceId,
+      memberId: 'member-1',
+      contentType: 'file',
+      content: 'photo.png',
+      fileSize: 1024,
+      sharedAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === `${serverUrl}:${spaceId}`) return token;
+      return null;
+    });
+
+    mockFetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    globalThis.fetch = mockFetchFn;
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  // --- handleFilePreviewClick ---
+
+  describe('handleFilePreviewClick', () => {
+    it('opens preview for a previewable image file', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      const blob = new Blob(['fake-image-data'], { type: 'image/png' });
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () => blob,
+      });
+
+      const fakeUrl = 'blob:http://localhost/fake-image';
+      const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue(fakeUrl);
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBe(item);
+      expect((element as any).filePreviewType).toBe('image');
+      expect((element as any).filePreviewUrl).toBe(fakeUrl);
+      expect((element as any).filePreviewLoading).toBe(false);
+      expect((element as any).filePreviewError).toBe('');
+      expect(createObjectURLSpy).toHaveBeenCalledWith(blob);
+    });
+
+    it('does nothing for a non-previewable file (.zip)', async () => {
+      const item = makeItem({ content: 'archive.zip', fileSize: 5000 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBeNull();
+      expect((element as any).filePreviewType).toBe('none');
+      expect(mockFetchFn).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when serverUrl is missing', async () => {
+      const item = makeItem();
+      (element as any).serverUrl = '';
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBeNull();
+    });
+
+    it('does nothing when token is missing', async () => {
+      const item = makeItem();
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = undefined;
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBeNull();
+    });
+  });
+
+  // --- Preview content by type ---
+
+  describe('preview content by type', () => {
+    it('image preview renders an <img> element', async () => {
+      const item = makeItem({ content: 'photo.jpg', fileSize: 500 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-img';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const img = element.querySelector('img');
+      expect(img).not.toBeNull();
+      expect(img!.getAttribute('src')).toBe('blob:http://localhost/fake-img');
+      expect(img!.getAttribute('alt')).toBe('photo.jpg');
+    });
+
+    it('video preview renders a <video> element with controls', async () => {
+      const item = makeItem({ content: 'clip.mp4', fileSize: 5000 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'video';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-video';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const video = element.querySelector('video');
+      expect(video).not.toBeNull();
+      expect(video!.getAttribute('src')).toBe('blob:http://localhost/fake-video');
+      expect(video!.hasAttribute('controls')).toBe(true);
+    });
+
+    it('audio preview renders an <audio> element with controls', async () => {
+      const item = makeItem({ content: 'song.mp3', fileSize: 3000 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'audio';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-audio';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const audio = element.querySelector('audio');
+      expect(audio).not.toBeNull();
+      expect(audio!.getAttribute('src')).toBe('blob:http://localhost/fake-audio');
+      expect(audio!.hasAttribute('controls')).toBe(true);
+    });
+
+    it('PDF preview renders an <iframe> element', async () => {
+      const item = makeItem({ content: 'document.pdf', fileSize: 8000 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'pdf';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-pdf';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const iframe = element.querySelector('iframe');
+      expect(iframe).not.toBeNull();
+      expect(iframe!.getAttribute('src')).toBe('blob:http://localhost/fake-pdf');
+      expect(iframe!.getAttribute('title')).toBe('document.pdf');
+    });
+
+    it('text preview renders text content with pre-wrap styling', async () => {
+      const item = makeItem({ content: 'readme.txt', fileSize: 100 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'text';
+      (element as any).filePreviewText = 'Hello, world!\nLine two.';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const pre = element.querySelector('.whitespace-pre-wrap');
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toContain('Hello, world!');
+      expect(pre!.textContent).toContain('Line two.');
+    });
+  });
+
+  // --- Loading state ---
+
+  describe('loading state', () => {
+    it('shows loading indicator while file is being fetched', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewLoading = true;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const html = element.innerHTML;
+      expect(html).toContain('Loading preview');
+      // Spinner SVG should be present
+      expect(element.querySelector('.animate-spin')).not.toBeNull();
+    });
+
+    it('sets loading=true during fetch then loading=false after success', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      let resolveBlob!: (value: any) => void;
+      const blobPromise = new Promise((resolve) => { resolveBlob = resolve; });
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: () => blobPromise,
+      });
+
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:fake');
+
+      const previewPromise = (element as any).handleFilePreviewClick(item);
+
+      // During fetch, loading should be true
+      expect((element as any).filePreviewLoading).toBe(true);
+      expect((element as any).filePreviewItem).toBe(item);
+
+      // Resolve the blob
+      resolveBlob(new Blob(['data']));
+      await previewPromise;
+
+      // After fetch, loading should be false
+      expect((element as any).filePreviewLoading).toBe(false);
+      expect((element as any).filePreviewUrl).toBe('blob:fake');
+    });
+  });
+
+  // --- Error handling ---
+
+  describe('error handling', () => {
+    it('shows error message with download fallback when fetch fails', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => ({ Error: 'Server exploded' }),
+      });
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewError).toBe('Failed to load preview.');
+      expect((element as any).filePreviewLoading).toBe(false);
+      expect((element as any).filePreviewItem).toBe(item);
+    });
+
+    it('renders error text and download fallback button in DOM', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewError = 'Failed to load preview.';
+      (element as any).filePreviewLoading = false;
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const html = element.innerHTML;
+      expect(html).toContain('Failed to load preview.');
+      expect(html).toContain('Download instead');
+    });
+
+    it('closes preview and sets auth error on 401', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      });
+
+      await (element as any).handleFilePreviewClick(item);
+
+      // 401 closes the preview entirely and shows auth error
+      expect((element as any).filePreviewItem).toBeNull();
+      expect((element as any).connectionErrorType).toBe('auth');
+      expect((element as any).errorMessage).toContain('Authentication failed');
+    });
+
+    it('closes preview and sets auth error on 404', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      });
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBeNull();
+      expect((element as any).connectionErrorType).toBe('auth');
+    });
+  });
+
+  // --- File too large ---
+
+  describe('file too large for preview', () => {
+    it('shows "too large to preview" error without fetching', async () => {
+      // Image limit is 10 MB — use a file bigger than that
+      const item = makeItem({ content: 'huge.png', fileSize: 11 * 1024 * 1024 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBe(item);
+      expect((element as any).filePreviewType).toBe('image');
+      expect((element as any).filePreviewError).toBe('File is too large to preview.');
+      expect((element as any).filePreviewLoading).toBe(false);
+      expect((element as any).filePreviewUrl).toBeNull();
+      expect((element as any).filePreviewText).toBeNull();
+      // Should NOT have made a download call
+      expect(mockFetchFn).not.toHaveBeenCalled();
+    });
+
+    it('text file exceeding 1 MB limit shows too-large error', async () => {
+      const item = makeItem({ content: 'huge.txt', fileSize: 2 * 1024 * 1024 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewError).toBe('File is too large to preview.');
+      expect(mockFetchFn).not.toHaveBeenCalled();
+    });
+
+    it('renders too-large error with download fallback in DOM', async () => {
+      const item = makeItem({ content: 'huge.png', fileSize: 11 * 1024 * 1024 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewError = 'File is too large to preview.';
+      (element as any).filePreviewLoading = false;
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const html = element.innerHTML;
+      expect(html).toContain('File is too large to preview.');
+      expect(html).toContain('Download instead');
+    });
+  });
+
+  // --- Modal close / cleanup ---
+
+  describe('closeFilePreview', () => {
+    it('resets all preview state', () => {
+      (element as any).filePreviewItem = makeItem();
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake';
+      (element as any).filePreviewText = 'some text';
+      (element as any).filePreviewLoading = true;
+      (element as any).filePreviewError = 'some error';
+
+      const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+      (element as any).closeFilePreview();
+
+      expect((element as any).filePreviewItem).toBeNull();
+      expect((element as any).filePreviewType).toBe('none');
+      expect((element as any).filePreviewUrl).toBeNull();
+      expect((element as any).filePreviewText).toBeNull();
+      expect((element as any).filePreviewLoading).toBe(false);
+      expect((element as any).filePreviewError).toBe('');
+      expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:http://localhost/fake');
+    });
+
+    it('does not call revokeObjectURL when no blob URL exists', () => {
+      (element as any).filePreviewItem = makeItem();
+      (element as any).filePreviewUrl = null;
+
+      const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+      (element as any).closeFilePreview();
+
+      expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+      expect((element as any).filePreviewItem).toBeNull();
+    });
+
+    it('modal disappears from DOM after close', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // Modal should be visible (Close preview button)
+      expect(element.querySelector('[aria-label="Close preview"]')).not.toBeNull();
+
+      // Close
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      (element as any).closeFilePreview();
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // Modal should be gone
+      expect(element.querySelector('[aria-label="Close preview"]')).toBeNull();
+    });
+  });
+
+  // --- Text preview fetches text, not blob URL ---
+
+  describe('text preview flow', () => {
+    it('fetches blob and reads as text for text files', async () => {
+      const item = makeItem({ content: 'notes.txt', fileSize: 50 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      const textContent = 'Line 1\nLine 2\nLine 3';
+      const blob = new Blob([textContent], { type: 'text/plain' });
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () => blob,
+      });
+
+      const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:unused');
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewType).toBe('text');
+      expect((element as any).filePreviewText).toBe(textContent);
+      // Text files should NOT create an object URL
+      expect(createObjectURLSpy).not.toHaveBeenCalled();
+      expect((element as any).filePreviewUrl).toBeNull();
+      expect((element as any).filePreviewLoading).toBe(false);
+    });
+  });
+
+  // --- renderFilePreviewModal ---
+
+  describe('renderFilePreviewModal', () => {
+    it('returns nothing when filePreviewItem is null', () => {
+      (element as any).filePreviewItem = null;
+      const result = (element as any).renderFilePreviewModal();
+      expect(result).toBe(nothing);
+    });
+
+    it('renders modal with filename as heading', async () => {
+      const item = makeItem({ content: 'vacation.jpg', fileSize: 500 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-img';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const heading = element.querySelector('h3');
+      expect(heading).not.toBeNull();
+      expect(heading!.textContent).toContain('vacation.jpg');
+    });
+
+    it('renders download and close buttons in the modal header', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-img';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      expect(element.querySelector('[aria-label="Download file"]')).not.toBeNull();
+      expect(element.querySelector('[aria-label="Close preview"]')).not.toBeNull();
+    });
+  });
+
+  // --- Integration: click → preview → close ---
+
+  describe('file preview integration', () => {
+    it('full flow: click image → preview opens → close → state clean', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      const blob = new Blob(['image-data'], { type: 'image/png' });
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () => blob,
+      });
+
+      const fakeUrl = 'blob:http://localhost/integration-test';
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue(fakeUrl);
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+      // Step 1: Open preview
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewItem).toBe(item);
+      expect((element as any).filePreviewUrl).toBe(fakeUrl);
+      expect((element as any).filePreviewLoading).toBe(false);
+
+      // Step 2: Close preview
+      (element as any).closeFilePreview();
+
+      expect((element as any).filePreviewItem).toBeNull();
+      expect((element as any).filePreviewUrl).toBeNull();
+      expect((element as any).filePreviewType).toBe('none');
+      expect(revokeSpy).toHaveBeenCalledWith(fakeUrl);
+    });
+
+    it('full flow: click text file → text content loaded', async () => {
+      const item = makeItem({ content: 'script.js', fileSize: 200 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      const textContent = 'console.log("hello");';
+      const blob = new Blob([textContent], { type: 'text/javascript' });
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () => blob,
+      });
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewType).toBe('text');
+      expect((element as any).filePreviewText).toBe(textContent);
+      expect((element as any).filePreviewUrl).toBeNull();
+    });
+
+    it('full flow: click too-large file → error shown → close → clean state', async () => {
+      const item = makeItem({ content: 'massive.mp4', fileSize: 200 * 1024 * 1024 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      await (element as any).handleFilePreviewClick(item);
+
+      expect((element as any).filePreviewError).toBe('File is too large to preview.');
+      expect((element as any).filePreviewItem).toBe(item);
+
+      // Close
+      (element as any).closeFilePreview();
+      expect((element as any).filePreviewItem).toBeNull();
+      expect((element as any).filePreviewError).toBe('');
+    });
+
+    it('full flow: click file → fetch fails → error shown → close → reopen clean', async () => {
+      const item = makeItem({ content: 'photo.png', fileSize: 500 });
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).token = token;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: async () => ({ Error: 'Boom' }),
+      });
+
+      await (element as any).handleFilePreviewClick(item);
+      expect((element as any).filePreviewError).toBe('Failed to load preview.');
+
+      // Close
+      (element as any).closeFilePreview();
+      expect((element as any).filePreviewError).toBe('');
+      expect((element as any).filePreviewItem).toBeNull();
+
+      // Reopen with success
+      const blob = new Blob(['ok'], { type: 'image/png' });
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () => blob,
+      });
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:ok');
+
+      await (element as any).handleFilePreviewClick(item);
+      expect((element as any).filePreviewError).toBe('');
+      expect((element as any).filePreviewUrl).toBe('blob:ok');
+    });
+  });
+});

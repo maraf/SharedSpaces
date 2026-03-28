@@ -904,3 +904,46 @@ Prevents layout drift when one card context is updated but not the other. Single
 **Test Results:** 408/408 pass (389 existing + 19 new from Zoe)
 
 Finalized auto-select implementation with storage persistence and intentional de-select logic. Integrated with Zoe's comprehensive test coverage. Ready for code review and merge.
+
+---
+
+### 2026-03-28: File Preview Modal (Issue #134)
+
+**Branch:** `squad/134-file-preview`
+
+**What was built:**
+- Created `src/SharedSpaces.Client/src/features/space-view/file-preview.ts` — standalone module for preview type detection and size limits
+- Updated `space-view.ts` to add file preview click handling, loading/error states, and a multi-type preview modal
+
+**Key files:**
+- `file-preview.ts` — `getFilePreviewType()` returns `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`; `isPreviewable()`, `isFileTooLargeForPreview()` helpers; `PREVIEW_SIZE_LIMITS` constants
+- `space-view.ts` — new state: `filePreviewItem`, `filePreviewType`, `filePreviewUrl`, `filePreviewText`, `filePreviewLoading`, `filePreviewError`; new methods: `handleFilePreviewClick`, `closeFilePreview`, `renderFilePreviewContent`, `renderFilePreviewModal`
+
+**Patterns followed:**
+- Reused existing modal pattern (backdrop click to close, stopPropagation on inner div, close button, z-50)
+- Used `downloadFile()` from `space-api.ts` to fetch blobs, created object URLs for media, read as text for text-like files
+- Object URLs revoked in `closeFilePreview()` to prevent memory leaks
+- Loading spinner + error-with-download-fallback pattern for async preview loading
+- File items get `cursor-pointer hover:text-slate-100` only when previewable (non-previewable files unchanged)
+
+**Learnings:**
+- `file-icons.ts` lives in `src/lib/file-icons.ts` (not in space-view directory as originally thought)
+- The download endpoint returns `application/octet-stream` — use `blob.text()` for text previews, `URL.createObjectURL(blob)` for media
+- Pre-existing test file TS errors exist in the repo; only source file errors matter for validation 
+
+---
+
+## Team Update: File Preview Session (2026-03-28)
+
+**Session:** 2026-03-28T09:38:17Z  
+**Topic:** File Preview Implementation (Issue #134)  
+**Coordinated with:** Zoe (Tester), Coordinator (Integration Agent)
+
+**Summary:** Your file preview modal implementation (commit 43a53e1) was integrated with Zoe's 80 test cases (commit a8f01d9) and the Coordinator consolidated duplicate file-preview.ts modules (commit 58c33fc). All decisions merged into squad decisions.md.
+
+**Impact on your work:**
+- `getPreviewType()` API is now locked by 80 tests
+- Module consolidation complete: single authoritative location at `src/SharedSpaces.Client/src/features/space-view/file-preview.ts`
+- Next: Cross-browser video/audio codec testing, mobile viewport testing for modal overflow
+
+**Decisions documented:** File Preview Architecture, File Preview Type Detection API contract
