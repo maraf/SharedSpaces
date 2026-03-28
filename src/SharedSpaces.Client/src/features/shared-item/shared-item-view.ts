@@ -44,6 +44,12 @@ export class SharedItemView extends BaseElement {
   }
 
   private async loadItem() {
+    if (this.previewUrl) {
+      URL.revokeObjectURL(this.previewUrl);
+    }
+    this.previewUrl = null;
+    this.previewText = null;
+    this.previewLoading = false;
     this.isLoading = true;
     this.errorMessage = '';
     this.item = null;

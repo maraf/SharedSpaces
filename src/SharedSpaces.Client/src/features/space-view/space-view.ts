@@ -954,11 +954,9 @@ export class SpaceView extends BaseElement {
             title: item.contentType === 'file' ? item.content : 'Shared text',
             url: shareUrl,
           });
-        } catch (shareError) {
-          // User cancelled native share — still copy to clipboard
-          if ((shareError as DOMException).name !== 'AbortError') {
-            await this.copyToClipboard(shareUrl);
-          }
+        } catch {
+          // Native share failed or user cancelled — always copy to clipboard as fallback
+          await this.copyToClipboard(shareUrl);
         }
       } else {
         await this.copyToClipboard(shareUrl);
