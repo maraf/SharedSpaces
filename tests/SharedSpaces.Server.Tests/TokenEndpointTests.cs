@@ -396,27 +396,9 @@ public class TokenEndpointTests
         payload["space_id"].GetString().Should().Be(space1.Id.ToString());
     }
 
-    [Fact]
-    public async Task LegacyJoin_WithSpaceIdInRoute_StillWorks()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        using var client = factory.CreateClient();
-
-        var pin = "123456";
-        var displayName = "Zoe";
-        var space = await factory.CreateSpaceAsync();
-        await factory.CreateInvitationAsync(space.Id, pin);
-
-        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var token = await ReadTokenAsync(response);
-        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
-    }
-
     private static Task<HttpResponseMessage> ExchangeTokenAsync(HttpClient client, Guid spaceId, string pin, string displayName)
     {
-        return client.PostAsJsonAsync($"/v1/spaces/{spaceId}/tokens", new ExchangeTokenRequest(pin, displayName));
+        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName, spaceId));
     }
 
     private static Task<HttpResponseMessage> ExchangeTokenSimplifiedAsync(HttpClient client, string pin, string displayName)
@@ -496,8 +478,6 @@ public class TokenEndpointTests
         padded += new string('=', (4 - padded.Length % 4) % 4);
         return Convert.FromBase64String(padded);
     }
-
-    private sealed record ExchangeTokenRequest(string Pin, string DisplayName);
 
     private sealed record ExchangeTokenSimplifiedRequest(string Pin, string DisplayName, Guid? SpaceId);
 

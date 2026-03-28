@@ -113,8 +113,8 @@ function isValidGuid(guid: string): boolean {
 }
 
 /**
- * Validate PIN format (numeric)
+ * Validate PIN format (exactly 6 digits, matching server's ^\d{6}$ pattern)
  */
 function isValidPin(pin: string): boolean {
-  return /^\d+$/.test(pin);
+  return /^\d{6}$/.test(pin);
 }

@@ -42,13 +42,14 @@ describe('api-client', () => {
       );
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:5000/v1/spaces/550e8400-e29b-41d4-a716-446655440000/tokens',
+        'http://localhost:5000/v1/tokens',
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            spaceId: '550e8400-e29b-41d4-a716-446655440000',
             pin: '123456',
             displayName: 'Alice',
           }),
