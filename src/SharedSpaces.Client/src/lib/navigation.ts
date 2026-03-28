@@ -1,4 +1,4 @@
-export type AppView = 'home' | 'join' | 'space' | 'pending-shares' | 'admin';
+export type AppView = 'home' | 'join' | 'space' | 'pending-shares' | 'admin' | 'shared-item';
 
 export interface AppViewChangeDetail {
   view: AppView;

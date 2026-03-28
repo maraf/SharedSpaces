@@ -3,6 +3,7 @@ using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Features.Items;
+using SharedSpaces.Server.Features.SharedLinks;
 using SharedSpaces.Server.Features.Spaces;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure;
@@ -73,6 +74,7 @@ app.MapSpaceEndpoints();
 app.MapInvitationEndpoints();
 app.MapTokenEndpoints();
 app.MapItemEndpoints();
+app.MapSharedLinkEndpoints();
 app.MapHubEndpoints();
 
 if (app.Environment.IsEnvironment("Testing"))

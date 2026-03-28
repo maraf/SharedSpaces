@@ -209,6 +209,77 @@ export async function shareFile(
   }
 }
 
+// --- Shared link management ---
+
+export interface SharedLinkResponse {
+  id: string;
+  token: string;
+  spaceId: string;
+  itemId: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export async function createSharedLink(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  token: string,
+): Promise<SharedLinkResponse> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}/share/`,
+      {
+        method: 'POST',
+        headers: authHeaders(token),
+      },
+    );
+    await throwForFailed(response);
+    return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function getSharedLinks(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  token: string,
+): Promise<SharedLinkResponse[]> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}/share/`,
+      { headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+    return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function deleteSharedLink(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  linkId: string,
+  token: string,
+): Promise<void> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}/share/${encodeURIComponent(linkId)}`,
+      { method: 'DELETE', headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
 export async function transferItem(
   serverUrl: string,
   spaceId: string,
