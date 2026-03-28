@@ -273,7 +273,7 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(1000);
 
       // Click the image file item to open preview
-      await page.locator('p.cursor-pointer:has-text("photo.png")').click();
+      await page.getByRole('button', { name: 'photo.png' }).click();
       await page.waitForSelector('button[aria-label="Close preview"]', { timeout: 5_000 });
       await page.waitForTimeout(500);
       await capture(page, 'space-file-preview-image', vp, { fullPage: false });
@@ -292,7 +292,7 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(1000);
 
       // Click the JSON file item to open text preview
-      await page.locator('p.cursor-pointer:has-text("data.json")').click();
+      await page.getByRole('button', { name: 'data.json' }).click();
       await page.waitForSelector('button[aria-label="Close preview"]', { timeout: 5_000 });
       await page.waitForTimeout(500);
       await capture(page, 'space-file-preview-text', vp, { fullPage: false });

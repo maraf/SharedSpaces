@@ -852,6 +852,7 @@ export class SpaceView extends BaseElement {
   };
 
   private closeFilePreview = () => {
+    this._previewRequestId++;
     if (this.filePreviewUrl) {
       URL.revokeObjectURL(this.filePreviewUrl);
     }
@@ -1643,9 +1644,7 @@ export class SpaceView extends BaseElement {
 
       case 'text':
         return html`
-          <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">
-            ${this.filePreviewText}
-          </p>
+          <p class="whitespace-pre-wrap break-words text-start font-mono text-sm text-slate-200">${this.filePreviewText}</p>
         `;
 
       default:
