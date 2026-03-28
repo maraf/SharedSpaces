@@ -5,6 +5,9 @@
 
 export type FilePreviewType = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none';
 
+/** @deprecated Use FilePreviewType */
+export type PreviewType = FilePreviewType;
+
 const IMAGE_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico',
 ]);
@@ -21,8 +24,8 @@ const TEXT_EXTENSIONS = new Set([
   // Markdown
   'md',
   // Code
-  'js', 'ts', 'py', 'java', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt',
-  'c', 'cpp', 'h', 'hpp', 'css', 'scss', 'html',
+  'js', 'ts', 'jsx', 'tsx', 'py', 'java', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt',
+  'c', 'cpp', 'h', 'hpp', 'css', 'scss', 'sass', 'less', 'html', 'sh', 'bash', 'zsh', 'sql',
 ]);
 
 /** Max file sizes for preview (bytes) */
@@ -42,6 +45,8 @@ function getExtension(filename: string): string {
 export function getFilePreviewType(filename: string): FilePreviewType {
   const ext = getExtension(filename);
 
+  if (!ext || ext === filename.toLowerCase()) return 'none';
+
   if (IMAGE_EXTENSIONS.has(ext)) return 'image';
   if (VIDEO_EXTENSIONS.has(ext)) return 'video';
   if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
@@ -50,6 +55,9 @@ export function getFilePreviewType(filename: string): FilePreviewType {
 
   return 'none';
 }
+
+/** @deprecated Use getFilePreviewType */
+export const getPreviewType = getFilePreviewType;
 
 export function isPreviewable(filename: string): boolean {
   return getFilePreviewType(filename) !== 'none';

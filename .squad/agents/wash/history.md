@@ -904,3 +904,29 @@ Prevents layout drift when one card context is updated but not the other. Single
 **Test Results:** 408/408 pass (389 existing + 19 new from Zoe)
 
 Finalized auto-select implementation with storage persistence and intentional de-select logic. Integrated with Zoe's comprehensive test coverage. Ready for code review and merge.
+
+---
+
+### 2025-07- File Preview Modal (Issue #134)17 
+
+**Branch:** `squad/134-file-preview`
+
+**What was built:**
+- Created `src/SharedSpaces.Client/src/features/space-view/file-preview. standalone module for preview type detection and size limitsts` 
+- Updated `space-view.ts` to add file preview click handling, loading/error states, and a multi-type preview modal
+
+**Key files:**
+- `file-preview. `getFilePreviewType()` returns `'image' | 'video' | 'audio' | 'pdf' | 'text' | 'none'`; `isPreviewable()`, `isFileTooLargeForPreview()` helpers; `PREVIEW_SIZE_LIMITS` constantsts` 
+- `space-view. new state: `filePreviewItem`, `filePreviewType`, `filePreviewUrl`, `filePreviewText`, `filePreviewLoading`, `filePreviewError`; new methods: `handleFilePreviewClick`, `closeFilePreview`, `renderFilePreviewContent`, `renderFilePreviewModal`ts` 
+
+**Patterns followed:**
+- Reused existing modal pattern (backdrop click to close, stopPropagation on inner div, close button, z-50)
+- Used `downloadFile()` from space-api.ts to fetch blobs, created object URLs for media, read as text for text-like files
+- Object URLs revoked in `closeFilePreview()` to prevent memory leaks
+- Loading spinner + error-with-download-fallback pattern for async preview loading
+- File items get `cursor-pointer hover:text-slate-100` only when previewable (non-previewable files unchanged)
+
+**Learnings:**
+- `file-icons.ts` lives in `src/lib/file-icons.ts` (not in space-view directory as originally thought)
+- The download endpoint returns `application/octet- use `blob.text()` for text previews, `URL.createObjectURL(blob)` for mediastream` 
+- Pre-existing test file TS errors exist in the  only source file errors matter for validationrepo 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getPreviewType, type PreviewType } from './file-preview';
+import { getPreviewType, type PreviewType } from '../features/space-view/file-preview';
 
 describe('getPreviewType', () => {
   describe('image extensions', () => {
