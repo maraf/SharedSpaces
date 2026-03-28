@@ -4251,3 +4251,616 @@ Created `getFilePreviewType(filename: string): PreviewType` (exported as `getPre
 ## Impact
 
 Wash should import this function for the preview modal logic. The 80 tests lock the API contract — any extension reclassification will surface as a test failure. 
+
+---
+
+# Decision: Anonymous Access to  Architectural AnalysisItem 
+
+**Issue:** #138  
+**Author:** Mal (Lead/Architect)  
+**Date:** 2026-03-28  
+**Status:**  awaiting user decisionProposal 
+
+## Executive Summary
+
+**Simplest approach:** Add `ItemShareLink` entity with GUID token. New endpoint `GET /v1/public/items/{token}` returns item metadata + download URL with same token. No JWT. Revocation = delete row. Rate limit by IP. Ship it.
+
+**Complexity:** Low. No auth model changes, no JWT changes, no SignalR changes. Pure additive feature.
+
+**Scope boundary:** v1 does NOT include link expiry, password protection, view counts, or custom share permissions. Those are v2+.
+
+## Domain Model
+
+### New Entity: `ItemShareLink`
+
+```csharp
+public class ItemShareLink
+{
+    public Guid Id { get; set; } = Guid.NewGuid();  // This IS the share token
+    public Guid ItemId { get; set; }
+    public Guid CreatedByMemberId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsRevoked { get; set; }
+    
+    // Navigation properties
+    public SpaceItem Item { get; set; } = null!;
+    public SpaceMember CreatedBy { get; set; } = null!;
+}
+```
+
+**Key design decisions:**
+- Share token = `ItemShareLink.Id` (128-bit GUID = 2^128 = effectively unguessable)
+- No expiration in  revocation is manual (delete row or set `IsRevoked = true`)v1 
+- Links are tied to the creating member (audit trail + future permission enforcement)
+- One item can have multiple active share links (different tokens)
+
+## API Contract
+
+### 1. Create Share Link (Protected)
+
+**Endpoint:** `POST /v1/spaces/{spaceId}/items/{itemId}/shares`  
+**Auth:** JWT (existing `RequireAuthorization()`)  
+**Request:** Empty body  
+**Response:**
+
+```json
+{
+  "token": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "url": "https://example.com/v1/public/items/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "createdAt": "2026-03-19T10:00:00Z"
+}
+```
+
+### 2. Get Item via Share Link (Public)
+
+**Endpoint:** `GET /v1/public/items/{token}`  
+**Auth:** None (public endpoint)  
+**Response:**
+
+```json
+{
+  "id": "item-guid-here",
+  "contentType": "file",
+  "content": "filename.pdf",
+  "fileSize": 2048576,
+  "sharedAt": "2026-03-19T09:00:00Z",
+  "downloadUrl": "/v1/public/items/{token}/download"
+}
+```
+
+### 3. Download File via Share Link (Public)
+
+**Endpoint:** `GET /v1/public/items/{token}/download`  
+**Auth:** None (public endpoint)  
+**Rate Limiting:** 60 requests/minute per IP
+
+### 4. List Share Links for Item (Protected)
+
+**Endpoint:** `GET /v1/spaces/{spaceId}/items/{itemId}/shares`  
+**Auth:** JWT
+
+### 5. Revoke Share Link (Protected)
+
+**Endpoint:** `DELETE /v1/spaces/{spaceId}/items/{itemId}/shares/{token}`  
+**Auth:** JWT  
+**Response:** `204 No Content`
+
+## Security Considerations
+
+- **Link enumeration:** 128-bit GUID = infeasible (2^128 / 60 requests/min = 10^28 years)
+- **Rate limiting:** 60 req/min per IP prevents DoS on public endpoints
+- **Data exposure:** No space metadata leaked, no directory listing, item creator display name TBD
+ SpaceId foreign key relationship)
+
+## Implementation Estimate
+
+**Effort:** ~1 day (backend only)
+
+- Domain model + migration: 40 min
+- Endpoints: 3 hours
+- Rate limiting: 1 hour
+- Tests: 3 hours
+
+## Open Questions for Marek
+
+1. **Revocation model:** Soft delete (audit trail) or hard delete (simpler)?
+2. **Who can revoke?** Any space member or only link creator?
+3. **Creator name in public response?** Include or omit for privacy?
+4. **Multiple links per item?** Yes or one link per item?
+5. **Rate limiting threshold?** 60 req/min per IP or adjust?
+
+---
+
+# Decision: Backend  Anonymous Access to Item (Issue #138)Analysis 
+
+**Issue:** #138  
+**Author:** Kaylee (Backend Dev)  
+**Date:** 2026-03-28  
+**Status:** Feasibility Confirmed
+
+## Summary
+
+Enable unauthenticated access to individual items via shareable links without requiring membership in the space. Each link is revocable and tied to a single item.
+
+## 1. Data Model Changes
+
+### New Entity: `SharedLink`
+
+```
+SharedLink
+ Id: Guid (primary key)  
+ ItemId: Guid (FK to SpaceItem)
+ SpaceId: Guid (denormalized for fast lookup)
+ Token: string (unique, 43-char base64url, ~192 bits entropy)  
+ IsRevoked: bool (default: false)  
+ CreatedAt: DateTime (UTC)  
+ CreatedByMemberId: Guid (FK to SpaceMember)
+ ExpiresAt: DateTime? (nullable for permanent links)  
+```
+
+**Key design choices:**
+- **Token type: Cryptographically random string** (32-byte base64url, ~192 bits entropy)
+  - NOT a GUID (too predictable; sequential patterns leak)
+  - NOT a JWT (no claims needed; just a lookup key)
+- **IsRevoked flag** (soft delete): Consistent with `SpaceMember.IsRevoked` pattern
+- **Denormalized SpaceId**: Speeds up authorization checks
+- **ExpiresAt**: Optional expiration. If null = permanent until revoked
+
+### Indexes
+
+```sql
+CREATE INDEX idx_shared_links_token ON SharedLinks(Token);  -- Primary lookup
+CREATE INDEX idx_shared_links_item_not_revoked ON SharedLinks(ItemId, IsRevoked);  -- Fast revocation check
+CREATE INDEX idx_shared_links_expires_at ON SharedLinks(ExpiresAt);  -- Cleanup queries
+CREATE INDEX idx_shared_links_member ON SharedLinks(CreatedByMemberId);  -- Audit trail
+```
+
+## 2. Endpoint Design
+
+### Create a Shareable Link
+
+```
+POST /v1/spaces/{spaceId}/items/{itemId}/share
+Authorization: Bearer {jwt_token}
+
+Request:
+{
+  "expiresAt": "2026-04-28T10:00:00Z",  // optional; null = permanent
+  "description": "Share with client"
+}
+
+Response (201 Created):
+{
+  "token": "kxF9m8pL_2Qvz5nRw3jB7cT1d2H6sX4Y",
+  "link": "https://app.example.com/shared/kxF9m8pL_2Qvz5nRw3jB7cT1d2H6sX4Y",
+  "expiresAt": "2026-04-28T10:00:00Z",
+  "createdAt": "2026-03-28T10:00:00Z"
+}
+```
+
+### Anonymous Access
+
+```
+GET /v1/shared/{token}
+(no Authorization header)
+
+Response (200 OK):
+{
+  "id": "...",
+  "spaceId": "...",
+  "contentType": "text|file",
+  "content": "...",
+  "fileSize": 0,
+  "sharedAt": "2026-03-28T10:00:00Z",
+  "expiresAt": "2026-04-28T10:00:00Z"
+}
+```
+
+## 3. Token Generation
+
+Use **cryptographically random strings**:
+
+```csharp
+private static string GenerateToken()
+{
+    using var rng = new RNGCryptoServiceProvider();
+    byte[] tokenData = new byte[32];
+    rng.GetBytes(tokenData);
+    return Convert.ToBase64String(tokenData)
+        .TrimEnd('=')
+        .Replace("+", "-")
+        .Replace("/", "_");
+    // Result: 43-char URL-safe base64url string
+}
+```
+
+**Why not JWT?** Shared links don't need claims; revocation requires DB lookup anyway.
+
+## 4. EF Core Migration
+
+```csharp
+migrationBuilder.CreateTable(
+    name: "SharedLinks",
+    columns: table => new
+    {
+        Id = table.Column<Guid>(type: "TEXT", nullable: false),
+        ItemId = table.Column<Guid>(type: "TEXT", nullable: false),
+        SpaceId = table.Column<Guid>(type: "TEXT", nullable: false),
+        Token = table.Column<string>(type: "TEXT", nullable: false),
+        IsRevoked = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: false),
+        CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+        CreatedByMemberId = table.Column<Guid>(type: "TEXT", nullable: false),
+        ExpiresAt = table.Column<DateTime>(type: "TEXT", nullable: true),
+    });
+```
+
+## 5. Vertical Slice Architecture
+
+```
+Features/SharedLinks/
+ SharedLinkEndpoints.cs
+ SharedLinkTokenGenerator.cs
+ Models.cs (DTOs)
+ AnonymousItemEndpoints.cs
+
+Domain/
+ SharedLink.cs
+
+Infrastructure/Persistence/Configurations/
+ SharedLinkConfiguration.cs
+```
+
+## 6. Compatibility
+
+- **IFileStorage:**  no changesReused 
+- **AppDbContext:** Add `DbSet<SharedLink>`
+- **SpaceHubNotifier:** No changes (anonymous reads don't broadcast)
+- **Authorization:** Existing patterns (JWT for authenticated, bypass for public)
+
+## 7. Implementation Checklist
+
+- [ ] SharedLink entity + configuration
+- [ ] DbSet + migration
+- [ ] Token generator utility
+- [ ] Create share endpoint
+- [ ] Revoke endpoint
+- [ ] Anonymous read endpoint
+- [ ] Anonymous download endpoint
+- [ ] Integration tests
+
+## 8. Feasibility Assessment
+
+**HIGHLY  Estimated 3 days backend work, 2 days client UI12FEASIBLE** 
+
+- No breaking changes (additive only)
+- Reuses existing abstractions and patterns
+- Token generation is trivial (RNG + base64)
+
+---
+
+# Decision: Frontend UX  Anonymous Access to Item (Issue #138)Analysis 
+
+**Issue:** #138  
+**Author:** Wash (Frontend Dev)  
+**Date:** 2026-03-28  
+**Status:** UX Design Complete
+
+## Executive Summary
+
+Issue #138 requires:
+1. A **share button** on each item card to generate/copy the link
+2. A **new public route** (`/shared/{token}`) to display the item anonymously
+3. A **share link management UI** (revocation, link history)
+4. **Copy-to-clipboard** + **native share API** support
+5. **Error page** for expired/revoked links
+
+## 1. Share Link Generation UX
+
+### Button Placement
+
+Current item card buttons: Copy (text only), Download (files only), Send to, Delete
+
+ Delete
+
+- Icon: `share-2` from bootstrap-icons
+- Visible for both text and file items
+- Tooltip: "Generate shareable link"
+
+### Interaction Flow
+
+```
+User clicks Share
+  
+POST /v1/spaces/{spaceId}/items/{itemId}/share
+  
+Server returns { token, url, expiresAt }
+  
+Client auto-copies URL to clipboard
+  
+Toast: "Link copied! Expires in 7 days."
+  
+Button returns to normal
+```
+
+## 2. Anonymous Viewer Experience
+
+### New Route: `/shared/{token}`
+
+**Pattern:** Parallels existing `/` (join) + `/?space={spaceId}` (space view)
+
+**Minimal landing page:**
+- App logo/branding (no nav)
+- Single item display (reused component)
+- Download button (if file)
+- Copy button (if text)
+- No upload, no space context, no real-time updates
+
+### Component Reuse: `<item-display>`
+
+**Extract from space-view.ts:**
+
+```typescript
+// New component: src/components/item-display.ts
+@customElement('item-display')
+export class ItemDisplay extends BaseElement {
+  @property({ type: Object }) item!: SpaceItemResponse;
+  @property({ type: Boolean }) readonly = false;
+
+  render() {
+    // Reuse renderTextContent() / renderFileContent() logic
+    // Conditionally include action buttons based on @readonly
+  }
+}
+```
+
+**Use in both views:**
+
+```typescript
+// In space-view.ts:
+<item-display .item=${item} .readonly=${false}></item-display>
+
+// In anonymous-item-view.ts:
+<item-display .item=${item} .readonly=${true}></item-display>
+```
+
+## 3. Copy-to-Clipboard Strategy
+
+**Hybrid approach:**
+
+```typescript
+private async generateShareLink(item: SpaceItemResponse) {
+  try {
+    const { url } = await fetch(`/v1/spaces/${spaceId}/items/${itemId}/share`);
+    
+    if (navigator.share) {
+      await navigator.share({ title: 'SharedSpaces Item', url });
+      this.feedbackMessage = 'Shared!';
+    } else {
+      await navigator.clipboard.writeText(url);
+      this.feedbackMessage = 'Link copied to clipboard!';
+    }
+    
+    setTimeout(() => { this.feedbackMessage = ''; }, 2500);
+  } catch (error) {
+    this.feedbackMessage = 'Failed to generate link';
+  }
+}
+```
+
+- Desktop: Copy to clipboard + toast
+- Mobile: Native share API (WhatsApp, Messages, Email, etc.)
+
+## 4. Share Management Panel (Phase 2)
+
+**New view:** Share inventory showing all active links across items in the space
+
+- List format: [Item name] [Link count] [Copy all] [Revoke all]
+- Reduces item card complexity (avoids mobile overflow)
+- Can add inline link-count badges in Phase 2
+
+## 5. Mobile Layout Checks (390844)
+
+### Risk Areas
+
+1. **Item card with new Share button** (5 buttons total)
+   - Risk: Buttons wrap or overflow
+   - Solution: Dropdown menu on mobile
+
+2. **Share link modal URL display**
+   - Risk: Long URL overflows
+   - Solution: Input field with select-on-click, truncate with ellipsis
+
+3. **Share management panel**
+   - Risk: Item names overflow, action buttons wrap
+   - Solution: Proven responsive pattern from item list
+
+4. **Anonymous item viewer**
+   - No new risks (reuses existing responsive components)
+
+### Testing Checklist
+
+- [ ] Space-view: Verify buttons don't wrap at 390px
+- [ ] Anonymous item page: File preview/download work on mobile
+- [ ] Error page: Text readable, back button accessible
+- [ ] Share management: Item names don't overflow, buttons visible
+
+## 6. Routes & Views
+
+| Route | Purpose |
+|-------|---------|
+| `/?share-mgmt=true` | Share management panel |
+| `/shared/{token}` | Anonymous item access |
+
+## 7. API Contracts
+
+### Create Share Link
+
+```
+POST /v1/spaces/{spaceId}/items/{itemId}/share
+Response: { token, url, expiresAt, createdAt }
+```
+
+### Get Item via Share
+
+```
+GET /v1/shared/{token}
+Response: { id, spaceId, contentType, content, fileSize, sharedAt, expiresAt }
+```
+
+### Download File via Share
+
+```
+GET /v1/shared/{token}/download
+Response: [file blob]
+```
+
+### List Share Links (Optional)
+
+```
+GET /v1/spaces/{spaceId}/items/{itemId}/shares
+Response: [{ token, createdAt, expiresAt, visitCount }, ...]
+```
+
+### Revoke Share Link
+
+```
+DELETE /v1/spaces/{spaceId}/items/{itemId}/shares/{token}
+Response: 204 No Content
+```
+
+## 8. Error States
+
+When anonymous user visits expired/revoked/deleted link:
+
+```
+404 Not  Link expired (valid for 7 days)Found 
+403  Link revoked by ownerForbidden 
+404 Not  Item no longer existsFound 
+```
+
+Message: "This link has expired." + "Back to home" link
+
+## 9. Phase 1 MVP Checklist
+
+-  Share button on item cards
+-  Auto-copy + toast
+-  Anonymous viewer at `/shared/{token}`
+-  Extracted `item-display` component
+-  Error pages (expired/revoked/deleted)
+-  Mobile layout verified (390844)
+
+### Phase 2 (Polish)
+
+- [ ] Native share API (iOS/Android)
+- [ ] QR code generation
+- [ ] Share management panel
+- [ ] Analytics (view count per share)
+- [ ] Bulk operations
+
+---
+
+# Decision: Simplified 2-Part Invitation Format (Issue #139)
+
+**Issue:** #139  
+**Author:** Wash (Frontend Dev)  
+**Date:** 2026-03-28  
+**Status:** Decided
+
+## Context
+
+Current invitation strings: `serverUrl|spaceId|pin` (~77 chars), making QR codes large.
+
+**Proposal:** Drop spaceId for `serverUrl|pin` (~36  52% smaller QR code.chars) 
+
+## Decisions
+
+### 1. Part-Count Discrimination
+
+Rather than a format version flag, discriminate by `|`-delimited part count:
+- 2 parts = new format (serverUrl|pin)
+- 3 parts = legacy (serverUrl|spaceId|pin, with GUID validation on parts[1])
+
+This keeps the string compact and backward-compatible without protocol versioning.
+
+### 2. Token Endpoint Routing by SpaceId Presence
+
+- **With spaceId:** `POST /v1/spaces/{spaceId}/tokens` (unchanged)
+ space
+
+### 3. 409 Conflict on Ambiguous PIN
+
+If server returns HTTP 409 (multiple spaces match a PIN), show user-friendly message:
+
+> *"Multiple spaces match this PIN. Please use the full invitation link that includes the space ID."*
+
+This guides users to the full 3-part format as fallback.
+
+### 4. Manual Entry Keeps Optional Space ID
+
+The "Enter manually" mode still shows the Space ID input but labels it "(optional)". Gives power users a way to specify if needed without confusing the simple case.
+
+## Impact
+
+ space without spaceId. Return 409 on ambiguous PIN matches.
+- **Wash (Frontend):** Parse 2-part format, handle 409 conflict message
+- **Zoe (Tests):** New test cases for 2-part parsing + 409 error handling
+
+## Backward Compatibility
+
+- **Legacy 3-part format still  server validates GUID on parts[1]works** 
+- **No client force-update  old invitations remain validrequired** 
+- **QR code size  new 2-part format is 52% smallerwin** 
+
+
+---
+
+# Decision: Backend  Simplify Join (Issue #139)Implementation 
+
+**Issue:** #139  
+**Author:** Kaylee (Backend Dev)  
+**Date:** 2026-03-28  
+**Status:** Decided
+
+## Context
+
+Users currently join with `serverUrl|spaceId|pin`. The spaceId (a GUID) makes invitation strings long and unfriendly. Since PINs are only 6 digits and scoped per-space, different spaces can have identical PINs.
+
+## Decision
+
+Make PINs globally unique via retry-on-collision, allowing `serverUrl|pin` as the join format.
+
+### Server Implementation
+
+1. **PIN  Retry loop: generate PIN, hash, check if hash already exists in `SpaceInvitations`. Regenerate on collision. Collision probability: ~0.14% at 50 active invitations.generation** 
+
+2. **Pin  Added non-unique index on `SpaceInvitations.Pin` for O(1) hash lookup (EF Core migration `AddPinIndex`).index** 
+
+3. **New token  `POST /v1/tokens` accepts optional `spaceId` in request body. When omitted, looks up invitation by PIN hash only. If multiple matches (extremely rare), returns `409 Conflict` with message asking for spaceId. Original route `/v1/spaces/{spaceId}/tokens` preserved for backward compatibility.endpoint** 
+
+4. **Invitation string  Changed from `serverUrl|spaceId|pin` to `serverUrl|pin` (52% smaller, QR codes significantly more compact).format** 
+
+### CLI Changes
+
+5. ** Discriminates format by checking if part[1] is a GUID (legacy) or 6-digit PIN (new). InvitationParser** 
+
+6. **InvitationData. Now nullable (`string?`).SpaceId** 
+
+7. ** Routes to `/v1/tokens` when spaceId is null.SharedSpacesApiClient** 
+
+## Backward Compatibility
+
+- Legacy 3-part format (`serverUrl|spaceId|pin`) still works
+- Original endpoint `/v1/spaces/{spaceId}/tokens` unchanged
+- No force-update required for clients
+
+## Impact
+
+- **Wash (Frontend):** Client parser needs 2-part format support
+- **Zoe (Tests):** Update `InvitationParserTests`, add PIN-only lookup + 409 conflict test cases
+- **Coordination:** Aligns with Wash's Issue #139 frontend decision
+
+## Alternatives Considered
+
+- **Unique constraint on  Rejected: DB-level errors on collision instead of graceful retryPin** 
+- **Longer  Rejected: 6 digits is user-friendly; collision negligible at scalePINs** 
+

@@ -20,6 +20,7 @@ public class SpaceInvitationConfiguration : IEntityTypeConfiguration<SpaceInvita
             .IsRequired();
 
         builder.HasIndex(invitation => invitation.SpaceId);
+        builder.HasIndex(invitation => invitation.Pin);
 
         builder.HasOne(invitation => invitation.Space)
             .WithMany(space => space.Invitations)

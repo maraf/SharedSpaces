@@ -2,12 +2,18 @@
 
 export interface InvitationData {
   serverUrl: string;
-  spaceId: string;
+  spaceId?: string;
   pin: string;
 }
 
 /**
- * Parse an invitation string in the format: serverUrl|spaceId|pin
+ * Parse an invitation string in one of two formats:
+ * - New (2-part): serverUrl|pin
+ * - Legacy (3-part): serverUrl|spaceId|pin
+ *
+ * Discrimination: 3 parts where parts[1] is a GUID → legacy.
+ * 2 parts where parts[1] is a numeric PIN → new format.
+ *
  * @param invitation - Pipe-delimited invitation string
  * @returns Parsed invitation data or null if invalid
  */
@@ -17,26 +23,34 @@ export function parseInvitationString(invitation: string): InvitationData | null
   }
 
   const parts = invitation.split('|');
-  if (parts.length !== 3) {
-    return null;
+
+  if (parts.length === 3) {
+    return parseLegacyInvitation(parts);
   }
 
-  const [rawServerUrl, rawSpaceId, rawPin] = parts;
-  const serverUrl = rawServerUrl.trim();
-  const spaceId = rawSpaceId.trim();
-  const pin = rawPin.trim();
+  if (parts.length === 2) {
+    return parseSimplifiedInvitation(parts);
+  }
 
-  // Validate server URL (must be URL-like)
+  return null;
+}
+
+/**
+ * Parse legacy 3-part format: serverUrl|spaceId|pin
+ */
+function parseLegacyInvitation(parts: string[]): InvitationData | null {
+  const serverUrl = parts[0].trim();
+  const spaceId = parts[1].trim();
+  const pin = parts[2].trim();
+
   if (!serverUrl || !isValidUrl(serverUrl)) {
     return null;
   }
 
-  // Validate space ID (must be GUID-like)
   if (!spaceId || !isValidGuid(spaceId)) {
     return null;
   }
 
-  // Validate PIN (must be numeric)
   if (!pin || !isValidPin(pin)) {
     return null;
   }
@@ -45,8 +59,26 @@ export function parseInvitationString(invitation: string): InvitationData | null
 }
 
 /**
+ * Parse simplified 2-part format: serverUrl|pin
+ */
+function parseSimplifiedInvitation(parts: string[]): InvitationData | null {
+  const serverUrl = parts[0].trim();
+  const pin = parts[1].trim();
+
+  if (!serverUrl || !isValidUrl(serverUrl)) {
+    return null;
+  }
+
+  if (!pin || !isValidPin(pin)) {
+    return null;
+  }
+
+  return { serverUrl, pin };
+}
+
+/**
  * Parse invitation data from current URL query parameters
- * Expects ?join=serverUrl|spaceId|pin
+ * Expects ?join=serverUrl|pin or ?join=serverUrl|spaceId|pin
  * @returns Parsed invitation data or null if not present or invalid
  */
 export function parseInvitationFromUrl(): InvitationData | null {

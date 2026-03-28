@@ -321,10 +321,9 @@ public class AdminEndpointTests
         invitation.QrCodeBase64.Should().NotBeNullOrWhiteSpace();
 
         var parts = invitation.InvitationString.Split('|');
-        parts.Should().HaveCount(3);
+        parts.Should().HaveCount(2, "invitation string should have simplified format: server_url|pin");
         parts[0].Should().Be("http://localhost");
-        parts[1].Should().Be(space.Id.ToString());
-        parts[2].Should().MatchRegex(@"^\d{6}$");
+        parts[1].Should().MatchRegex(@"^\d{6}$", "second part should be 6-digit PIN");
     }
 
     [Fact]
@@ -347,10 +346,9 @@ public class AdminEndpointTests
         invitation!.QrCodeBase64.Should().NotBeNullOrWhiteSpace();
 
         var parts = invitation.InvitationString.Split('|');
-        parts.Should().HaveCount(3);
+        parts.Should().HaveCount(2, "invitation string should have simplified format: server_url|pin");
         parts[0].Should().Be("http://localhost");
-        parts[1].Should().Be(space.Id.ToString());
-        parts[2].Should().MatchRegex(@"^\d{6}$");
+        parts[1].Should().MatchRegex(@"^\d{6}$", "second part should be 6-digit PIN");
     }
 
     [Fact]
@@ -469,12 +467,10 @@ public class AdminEndpointTests
         invitation.Should().NotBeNull();
 
         var parts = invitation!.InvitationString.Split('|');
-        parts.Should().HaveCount(3, "invitation string should have format: server_url|space_id|pin");
+        parts.Should().HaveCount(2, "invitation string should have simplified format: server_url|pin");
         
         parts[0].Should().Be("http://localhost", "first part should be server URL");
-        Guid.TryParse(parts[1], out var spaceId).Should().BeTrue("second part should be valid GUID");
-        spaceId.Should().Be(space.Id, "second part should be the space ID");
-        parts[2].Should().MatchRegex(@"^\d{6}$", "third part should be 6-digit PIN");
+        parts[1].Should().MatchRegex(@"^\d{6}$", "second part should be 6-digit PIN");
     }
 
     [Fact]
@@ -492,7 +488,7 @@ public class AdminEndpointTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitation = await ReadJsonAsync<InvitationResponse>(response);
-        var pin = invitation!.InvitationString.Split('|')[2];
+        var pin = ExtractPin(invitation!.InvitationString);
 
         var invitationInDb = await factory.WithDbContextAsync(db => 
             db.SpaceInvitations.SingleOrDefaultAsync(i => i.SpaceId == space.Id));
@@ -522,9 +518,26 @@ public class AdminEndpointTests
         invitation1!.InvitationString.Should().NotBe(invitation2!.InvitationString);
         invitation1.QrCodeBase64.Should().NotBe(invitation2.QrCodeBase64);
 
-        var pin1 = invitation1.InvitationString.Split('|')[2];
-        var pin2 = invitation2.InvitationString.Split('|')[2];
+        var pin1 = ExtractPin(invitation1!.InvitationString);
+        var pin2 = ExtractPin(invitation2!.InvitationString);
         pin1.Should().NotBe(pin2);
+    }
+
+    [Fact]
+    public async Task CreateInvitation_PinHashIsGloballyUnique()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space1 = await CreateSpaceViaAdminAsync(client, "Space One");
+        var space2 = await CreateSpaceViaAdminAsync(client, "Space Two");
+
+        var invitation1 = await CreateInvitationViaAdminAsync(client, space1.Id);
+        var invitation2 = await CreateInvitationViaAdminAsync(client, space2.Id);
+
+        var pin1 = ExtractPin(invitation1.InvitationString);
+        var pin2 = ExtractPin(invitation2.InvitationString);
+        pin1.Should().NotBe(pin2, "PINs should be unique across all spaces");
     }
 
     // ========== Member Management Tests ==========
@@ -1235,8 +1248,8 @@ public class AdminEndpointTests
     private static string ExtractPin(string invitationString)
     {
         var parts = invitationString.Split('|');
-        parts.Should().HaveCount(3);
-        return parts[2];
+        parts.Length.Should().BeGreaterThanOrEqualTo(2).And.BeLessThanOrEqualTo(3);
+        return parts[^1];
     }
 
     private static async Task<HttpResponseMessage> ListMembersAsync(

@@ -244,7 +244,7 @@ public class ForwardedHeadersTests
     private static string ExtractServerUrl(string invitationString)
     {
         var parts = invitationString.Split('|');
-        parts.Should().HaveCount(3, "invitation string format is serverUrl|spaceId|pin");
+        parts.Length.Should().BeGreaterThanOrEqualTo(2).And.BeLessThanOrEqualTo(3);
         return parts[0];
     }
 

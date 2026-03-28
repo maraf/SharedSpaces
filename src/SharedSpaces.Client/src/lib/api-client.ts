@@ -23,7 +23,7 @@ export class TokenExchangeError extends Error {
 /**
  * Exchange PIN + display name for a JWT token
  * @param serverUrl - Server URL (e.g., 'http://localhost:5000')
- * @param spaceId - Space GUID
+ * @param spaceId - Space GUID (optional; omit for simplified invitations)
  * @param pin - Invitation PIN
  * @param displayName - User's display name
  * @returns JWT token
@@ -31,12 +31,14 @@ export class TokenExchangeError extends Error {
  */
 export async function exchangeToken(
   serverUrl: string,
-  spaceId: string,
+  spaceId: string | undefined,
   pin: string,
   displayName: string
 ): Promise<TokenExchangeResponse> {
   const normalizedServerUrl = serverUrl.replace(/\/+$/, '');
-  const url = `${normalizedServerUrl}/v1/spaces/${spaceId}/tokens`;
+  const url = spaceId
+    ? `${normalizedServerUrl}/v1/spaces/${spaceId}/tokens`
+    : `${normalizedServerUrl}/v1/tokens`;
   
   let response: Response;
   try {
@@ -67,6 +69,8 @@ export async function exchangeToken(
       errorMessage = 'Invalid PIN. Please check the PIN and try again.';
     } else if (response.status === 404) {
       errorMessage = 'Space not found. The invitation may be invalid or expired.';
+    } else if (response.status === 409) {
+      errorMessage = 'Multiple spaces match this PIN. Please use the full invitation link that includes the space ID.';
     }
 
     throw new TokenExchangeError(errorMessage, response.status);

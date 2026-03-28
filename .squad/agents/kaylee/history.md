@@ -862,3 +862,113 @@ Applied 6 targeted fixes to `SyncService.cs` from PR review feedback:
 **Pattern Learned:** When scoping variables for cleanup in exception handlers, declare them before the try block if they're needed in catch/finally. Avoids regenerating resource IDs that should match the ones created in the try block.
 
 **Build:** Clean build after implementation
+
+---
+
+## Issue #138: Anonymous Access to Item — Feasibility Analysis
+
+**Date:** 2026-03-28  
+**Status:** Research Complete ✅  
+**Verdict:** HIGHLY FEASIBLE
+
+### Key Design Decisions
+1. **SharedLink entity** — New table with GUID PK, unique Token field, IsRevoked soft-delete flag, optional ExpiresAt
+2. **Token generation** — Cryptographically random base64url strings (43 chars, ~256 bits entropy), NOT GUIDs/JWTs
+3. **Endpoints** — Authenticated: POST/DELETE /v1/spaces/{id}/items/{id}/share; Anonymous: GET /v1/shared/{token}, GET /v1/shared/{token}/download
+4. **File serving** — Reuse IFileStorage abstraction; no new abstractions needed
+5. **Authorization** — Anonymous endpoints not protected; authenticated endpoints require space membership (existing pattern)
+
+### Data Model Highlights
+- **SharedLink fields:** Id (GUID), ItemId (FK), SpaceId (FK denormalized), Token (unique), IsRevoked, CreatedAt, ExpiresAt (nullable), CreatedByMemberId
+- **Indexes:** Token (unique), (ItemId, IsRevoked), ExpiresAt (for cleanup), CreatedByMemberId (for audit)
+- **Soft delete:** Consistent with SpaceMember.IsRevoked pattern; enables audit trail
+
+### Architecture Fit
+- **Vertical slice:** New Features/SharedLinks/ folder + Domain/SharedLink.cs + Infrastructure config
+- **Additive only:** No changes to existing endpoints; Space/Item/Member/Invitation entities untouched
+- **No new abstractions:** Token generator is stateless utility; reuses IFileStorage, AppDbContext, existing middleware
+
+### Gotchas & Security
+- **Rate limiting:** Unauthenticated endpoints need stricter limits to prevent token guessing (~256-bit security margin still high though)
+- **File download duplication:** Extract DownloadFile logic to helper to avoid code duplication between authenticated and anonymous paths
+- **Token not JWT:** Random lookup key, not claims-based; one DB query per request (revocation is immediate, no blacklist lag)
+
+### Implementation Scope
+- **Phase 1:** SharedLink entity + EF config + migration (~1 day)
+- **Phase 2:** Create/revoke endpoints (~1 day)
+- **Phase 3:** Anonymous endpoints + file download (~1 day)
+- **Phase 4:** Tests (~1 day)
+- **Est. backend effort:** 3-4 days solo, 2 days with pair
+
+### Files to Reference
+- src/SharedSpaces.Server/Domain/SpaceItem.cs — Client-generated GUID pattern
+- src/SharedSpaces.Server/Domain/SpaceMember.cs — IsRevoked soft-delete pattern
+- src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs — Auth pattern (TryAuthorizeSpaceRequest), file download logic
+- src/SharedSpaces.Server/Infrastructure/Persistence/Configurations/SpaceItemConfiguration.cs — Index design patterns
+- src/SharedSpaces.Server/Infrastructure/FileStorage/IFileStorage.cs — Abstraction reuse
+
+### Learnings
+- **Token strategy:** Random base64url >>> GUID (no sequential leak) or JWT (unnecessary crypto overhead)
+- **Denormalized SpaceId:** SharedLink needs direct SpaceId reference for auth checks and cascade rules; avoids multi-join queries
+- **Soft delete pattern:** IsRevoked flag on SharedLink (not hard delete) mirrors existing SpaceMember pattern; consistent DDD
+- **Anonymous file download:** Can reuse DownloadFile logic if extracted to private helper; no conflict with authenticated endpoint
+
+### Decision Document
+→ Full technical specification saved to: `.squad/decisions/inbox/kaylee-anonymous-access-analysis.md`
+
+## Issue # Simplify Join (2026-03-28)139 
+
+### Changes Made
+- **EF Core migration (AddPinIndex):** Added index on `SpaceInvitations.Pin` for O(1) PIN lookup
+- **InvitationEndpoints:** Retry-on-collision loop for globally unique PINs; invitation string now `serverUrl|pin`
+- **TokenEndpoints:** New `/v1/tokens` endpoint with optional spaceId; PIN-only lookup with collision detection (409 Conflict)
+- **CLI InvitationParser:** Discriminates 2-part (`serverUrl|pin`) vs 3-part (`serverUrl|spaceId|pin`) by GUID pattern matching
+- **CLI InvitationData:** `SpaceId` is now nullable (`string?`)
+- **CLI SharedSpacesApiClient:** Routes to `/v1/tokens` when spaceId is null, `/v1/spaces/{id}/tokens` when provided
+
+### Architecture Decisions
+- Kept existing `/v1/spaces/{spaceId}/tokens` route for backward compat; added new `/v1/tokens` top-level route
+- Token core logic extracted into `ExchangePinForTokenCore(Guid?  both routes delegate to itspaceId, ...)` 
+ 409 Conflict with guidance to provide spaceId (extremely rare: ~0.14% at 50 active invitations)
+- `Take(2)` optimization: only fetch 2 matches to detect collision without loading all
+
+## Issue #139 - Simplify Join (2026-03-28)
+
+### Changes Made
+- **EF Core migration (AddPinIndex):** Added index on SpaceInvitations.Pin for O(1) PIN lookup
+- **InvitationEndpoints:** Retry-on-collision loop for globally unique PINs; invitation string now serverUrl|pin
+- **TokenEndpoints:** New /v1/tokens endpoint with optional spaceId; PIN-only lookup with collision detection (409 Conflict)
+- **CLI InvitationParser:** Discriminates 2-part (serverUrl|pin) vs 3-part (serverUrl|spaceId|pin) by GUID pattern matching
+- **CLI InvitationData:** SpaceId is now nullable (string?)
+- **CLI SharedSpacesApiClient:** Routes to /v1/tokens when spaceId is null, /v1/spaces/{id}/tokens when provided
+
+### Architecture Decisions
+- Kept existing /v1/spaces/{spaceId}/tokens route for backward compat; added new /v1/tokens top-level route
+- Token core logic extracted into ExchangePinForTokenCore(Guid? spaceId, ...) - both routes delegate to it
+- PIN collision on join returns 409 Conflict with guidance to provide spaceId (extremely rare at typical scale)
+- Take(2) optimization: only fetch 2 matches to detect collision without loading all rows
+
+---
+
+## Session 2026-03-28: Cross-Agent Coordination (Orchestration)
+
+**Completed:** Feasibility analysis merge + orchestration logging
+
+Your backend feasibility study has been merged into shared decision log. Key findings from peer analysis:
+
+**From Mal (Lead):**
+- Proposes GUID-based tokens (128-bit, simpler) vs. your crypto-random approach
+- Your token strategy is more secure theoretically but adds RNG complexity
+- Mal's 1-day estimate aligns with your 3 day estimate (acceptable range)2
+- Security analysis (enumeration, rate limiting) validated your approach
+
+**From Wash (Frontend):**
+- Expects `/v1/shared/{token}` endpoints (anonymous read + download)
+- Share creation: `POST /v1/spaces/{spaceId}/items/{itemId}/share`
+- Revocation: `DELETE /v1/spaces/{spaceId}/items/{itemId}/shares/{token}`
+- API contracts align perfectly with your endpoint design
+
+**Team decision pending:** Token strategy (GUID vs. crypto-random). Vote needed before implementation starts.
+
+**Next:** Implementation checklist + assigned work once token strategy is settled.
+

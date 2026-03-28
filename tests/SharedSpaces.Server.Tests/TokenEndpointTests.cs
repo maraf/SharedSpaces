@@ -258,9 +258,175 @@ public class TokenEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    // ========== Simplified token endpoint (PIN-only join) ==========
+
+    [Fact]
+    public async Task SimplifiedJoin_WithValidPin_ReturnsToken()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var displayName = "Zoe";
+        var space = await factory.CreateSpaceAsync();
+        await factory.CreateInvitationAsync(space.Id, pin);
+
+        var response = await ExchangeTokenSimplifiedAsync(client, pin, displayName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = await ReadTokenAsync(response);
+        token.Should().NotBeNullOrWhiteSpace();
+        token.Split('.').Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_JwtContainsCorrectSpaceId()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var displayName = "Zoe";
+        var space = await factory.CreateSpaceAsync("My Space");
+        await factory.CreateInvitationAsync(space.Id, pin);
+
+        var response = await ExchangeTokenSimplifiedAsync(client, pin, displayName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = await ReadTokenAsync(response);
+        var payload = DecodeJwtPayload(token);
+        payload["space_id"].GetString().Should().Be(space.Id.ToString());
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_InvitationDeletedAfterUse()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var space = await factory.CreateSpaceAsync();
+        var invitation = await factory.CreateInvitationAsync(space.Id, pin);
+
+        var response = await ExchangeTokenSimplifiedAsync(client, pin, "Zoe");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var invitationStillExists = await factory.WithDbContextAsync(db => db.SpaceInvitations.AnyAsync(x => x.Id == invitation.Id));
+        invitationStillExists.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_MemberCreated()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var displayName = "Zoe";
+        var space = await factory.CreateSpaceAsync();
+        await factory.CreateInvitationAsync(space.Id, pin);
+
+        var response = await ExchangeTokenSimplifiedAsync(client, pin, displayName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var member = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync());
+        member.SpaceId.Should().Be(space.Id);
+        member.DisplayName.Should().Be(displayName);
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_NoMatchingInvitation_ReturnsUnauthorized()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        await factory.CreateInvitationAsync(space.Id, "123456");
+
+        var response = await ExchangeTokenSimplifiedAsync(client, "654321", "Zoe");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_NoInvitationsAtAll_ReturnsUnauthorized()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await ExchangeTokenSimplifiedAsync(client, "123456", "Zoe");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_PinCollision_ReturnsConflict()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var space1 = await factory.CreateSpaceAsync("Space One");
+        var space2 = await factory.CreateSpaceAsync("Space Two");
+        await factory.CreateInvitationAsync(space1.Id, pin);
+        await factory.CreateInvitationAsync(space2.Id, pin);
+
+        var response = await ExchangeTokenSimplifiedAsync(client, pin, "Zoe");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task SimplifiedJoin_WithExplicitSpaceId_BypassesCollisionCheck()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var space1 = await factory.CreateSpaceAsync("Space One");
+        var space2 = await factory.CreateSpaceAsync("Space Two");
+        await factory.CreateInvitationAsync(space1.Id, pin);
+        await factory.CreateInvitationAsync(space2.Id, pin);
+
+        var response = await ExchangeTokenWithOptionalSpaceIdAsync(client, pin, "Zoe", space1.Id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = await ReadTokenAsync(response);
+        var payload = DecodeJwtPayload(token);
+        payload["space_id"].GetString().Should().Be(space1.Id.ToString());
+    }
+
+    [Fact]
+    public async Task LegacyJoin_WithSpaceIdInRoute_StillWorks()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var displayName = "Zoe";
+        var space = await factory.CreateSpaceAsync();
+        await factory.CreateInvitationAsync(space.Id, pin);
+
+        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = await ReadTokenAsync(response);
+        await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
+    }
+
     private static Task<HttpResponseMessage> ExchangeTokenAsync(HttpClient client, Guid spaceId, string pin, string displayName)
     {
         return client.PostAsJsonAsync($"/v1/spaces/{spaceId}/tokens", new ExchangeTokenRequest(pin, displayName));
+    }
+
+    private static Task<HttpResponseMessage> ExchangeTokenSimplifiedAsync(HttpClient client, string pin, string displayName)
+    {
+        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName, null));
+    }
+
+    private static Task<HttpResponseMessage> ExchangeTokenWithOptionalSpaceIdAsync(HttpClient client, string pin, string displayName, Guid? spaceId)
+    {
+        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName, spaceId));
     }
 
     private static async Task<HttpResponseMessage> GetProtectedEndpointAsync(HttpClient client, string? token = null)
@@ -332,6 +498,8 @@ public class TokenEndpointTests
     }
 
     private sealed record ExchangeTokenRequest(string Pin, string DisplayName);
+
+    private sealed record ExchangeTokenSimplifiedRequest(string Pin, string DisplayName, Guid? SpaceId);
 
     private sealed record TokenResponse(string Token);
 

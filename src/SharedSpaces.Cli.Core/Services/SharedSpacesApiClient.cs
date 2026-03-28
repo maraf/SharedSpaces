@@ -20,13 +20,24 @@ public sealed class SharedSpacesApiClient : IDisposable
 
     public async Task<TokenResponse> ExchangeTokenAsync(
         string serverUrl,
-        string spaceId,
+        string? spaceId,
         string pin,
         string displayName,
         CancellationToken ct = default)
     {
-        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/tokens";
-        var request = new CreateTokenRequest(pin, displayName);
+        string url;
+        CreateTokenRequest request;
+
+        if (spaceId is not null)
+        {
+            url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/tokens";
+            request = new CreateTokenRequest(pin, displayName);
+        }
+        else
+        {
+            url = $"{serverUrl.TrimEnd('/')}/v1/tokens";
+            request = new CreateTokenRequest(pin, displayName);
+        }
 
         using var response = await _http.PostAsJsonAsync(url, request, ct);
 

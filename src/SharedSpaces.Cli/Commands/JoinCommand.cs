@@ -10,7 +10,7 @@ public static class JoinCommand
 {
     public static Command Create()
     {
-        var urlArg = new Argument<string>("url") { Description = "Invite URL or invitation string (serverUrl|spaceId|pin)" };
+        var urlArg = new Argument<string>("url") { Description = "Invite URL or invitation string (serverUrl|pin or serverUrl|spaceId|pin)" };
         var pinOption = new Option<string?>("--pin") { Description = "PIN code (overrides PIN embedded in URL)" };
         var displayNameOption = new Option<string?>("--display-name") { Description = "Display name for the space membership" };
 
@@ -36,8 +36,8 @@ public static class JoinCommand
         if (invitation is null)
         {
             Console.Error.WriteLine("Error: Invalid invite URL or invitation string.");
-            Console.Error.WriteLine("Expected format: serverUrl|spaceId[|pin]");
-            Console.Error.WriteLine("            or: https://app.example.com/?join=serverUrl%7CspaceId%7Cpin");
+            Console.Error.WriteLine("Expected format: serverUrl|pin or serverUrl|spaceId[|pin]");
+            Console.Error.WriteLine("            or: https://app.example.com/?join=serverUrl%7Cpin");
             Console.Error.WriteLine("Use --pin to provide the PIN separately when not embedded in the invite.");
             Environment.ExitCode = 1;
             return;
@@ -53,7 +53,8 @@ public static class JoinCommand
 
         displayName ??= Environment.UserName;
 
-        Console.WriteLine($"Joining space {invitation.SpaceId} on {invitation.ServerUrl}...");
+        var spaceLabel = invitation.SpaceId is not null ? $"space {invitation.SpaceId}" : "space";
+        Console.WriteLine($"Joining {spaceLabel} on {invitation.ServerUrl}...");
 
         using var api = new SharedSpacesApiClient();
         var configService = new ConfigService();

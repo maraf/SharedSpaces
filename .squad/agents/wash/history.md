@@ -947,3 +947,103 @@ Finalized auto-select implementation with storage persistence and intentional de
 - Next: Cross-browser video/audio codec testing, mobile viewport testing for modal overflow
 
 **Decisions documented:** File Preview Architecture, File Preview Type Detection API contract
+
+### Anonymous Access to  Feature Analysis (2026-04-01)Item 
+
+**Issue #138: Anonymous access to item**
+
+**Context:** Allow users to generate revocable share links for single items without requiring recipients to join the space. This is a new  moving from invitation-based join flow to direct item access.paradigm 
+
+**UX Architecture:**
+
+ Delete order). Hidden in transfer modal. Auto-generates link + copies to clipboard with native share API fallback.
+
+2. **Anonymous viewer route:** New `/shared/{token}` route with minimal UI (no compose, no real-time, no space context). Reuse extracted `<item-display>` component in read-only mode.
+
+3. **Share management:** Optional Phase  separate `share-management-view` panel showing active shares per space. Inline badges on item cards in Phase 2.2 
+
+4. **Copy flow:** Hybrid: Native Share API if available (mobile + desktop), fallback to auto-copy + toast on clipboard.
+
+5. **Error states:** 404 for expired/deleted, 403 for revoked. Use `view-card` component with error messaging + back-to-home link.
+
+6. **Mobile (390844):** Convert action buttons to dropdown 'EOF') on mobile; verified no overflow with 5 buttons. URL field in modal uses input + select-on-click to prevent wrapping.menu (
+
+7. **Component reuse:** Extract core item rendering (`renderTextContent`/`renderFileContent`) to new `<item-display>` web component with `@property readonly` flag. Use in space-view (with actions) and anonymous-item-view (view-only). Reduces space-view complexity from ~1700 lines.
+
+**Key files:**
+- `src/SharedSpaces.Client/src/components/item-display.ts` [NEW]
+- `src/SharedSpaces.Client/src/features/anonymous-item/anonymous-item-view.ts` [NEW]
+- `src/SharedSpaces.Client/src/features/share-management/share-management-view.ts` [NEW Phase 2]
+- `src/SharedSpaces.Client/src/lib/navigation.ts` [UPDATE]
+- `src/SharedSpaces.Client/src/app-shell.ts` [UPDATE]
+
+**API contracts expected:**
+ `{ shareToken, url, expiresAt }`
+ item data (no auth)
+ revoke
+ download (no auth)
+
+**Pattern decisions:**
+- No real-time updates for anonymous views (static, read-only)
+- 7-day link expiration (matches PIN validity)
+- Shared tokens are public/unguarded (no auth required)
+- Pending shares / offline queue patterns don't apply (anonymous = no membership)
+
+**Related:** Issue #135 (transfer UI), Issue #107 (offline patterns), `.squad/decisions.md` (Light DOM + Tailwind)
+
+**Decision doc:** `.squad/decisions/inbox/wash-anonymous-access-analysis.md`
+
+
+### Simplified Invitation Format (2026-03-28)
+
+**Issue #139: Simplify  Client**Join 
+
+**Key patterns established:**
+- **Dual-format invitation parsing:** Parser now accepts both `serverUrl|pin` (2-part, new) and `serverUrl|spaceId|pin` (3-part, legacy). Discrimination by part count + validation (GUID check for spaceId in 3-part, numeric check for PIN in 2-part).
+- **Optional spaceId throughout the join flow:** `InvitationData.spaceId` is now `string | undefined`. All consumers (join-view, api-client) handle the optional field.
+- **Conditional token endpoint routing:** When spaceId is present, POST to `/v1/spaces/{spaceId}/tokens` (existing). When absent, POST to `/v1/tokens` (new simplified endpoint).
+- **409 Conflict handling:** If server reports multiple spaces matching a PIN, client surfaces a clear message telling user to use the full invitation with spaceId.
+
+**Implementation details:**
+- `invitation. Split parsing into `parseLegacyInvitation()` and `parseSimplifiedInvitation()` helpersts` 
+- `api-client. `exchangeToken()` second param changed from `string` to `string | undefined`; URL path branches on spaceId presence; added 409 error handlerts` 
+- `join-view. Validation requires only serverUrl + PIN (not spaceId); placeholder updated to `https://server.com|123456`; manual entry Space ID field marked "(optional)"ts` 
+
+**Key files:**
+- `src/SharedSpaces.Client/src/lib/invitation. Invitation parser (2-part + 3-part)ts` 
+- `src/SharedSpaces.Client/src/lib/api-client. Token exchange with optional spaceIdts` 
+- `src/SharedSpaces.Client/src/features/join/join-view. Join flow UIts` 
+
+**Related:** Issue #139, `.squad/decisions/inbox/wash-simplify-join.md`
+
+---
+
+## Session 2026-03-28: Cross-Agent Coordination (Orchestration)
+
+**Completed:** UX analysis + Issue #139 decision + orchestration logging
+
+Your Issue #138 frontend analysis has been merged into shared decision log. Bonus decision on Issue #139 (simplified invitation format) also finalized.
+
+**From Mal (Lead):**
+- Architectural proposal for public endpoints at `/v1/public/items/{token}` (note: you proposed `/v1/shared/{ coordinate with Mal on endpoint naming)token}` 
+- GUID-based tokens proposed (128-bit, simple, unguessable)
+- Soft revocation with `IsRevoked` flag (consistent with SpaceMember pattern)
+
+**From Kaylee (Backend):**
+- Endpoint structure matches your expectations: create/revoke/read/download
+- Proposes crypto-random tokens as alternative to GUID (more complex but theoretically harder to guess)
+- 3 day backend estimate; 2 day client UI estimate aligns with your MVP scope12
+
+**Issue #139 Decision (Your Bonus Work):**
+- 2-part invitation format approved: `serverUrl|pin` (drop spaceId, 52% smaller QR)
+- Backward compatible with legacy 3-part format (discriminate by part count)
+- Kaylee must implement `POST /v1/tokens` endpoint (new, without spaceId)
+- Handle 409 Conflict on ambiguous PIN matches with user-friendly message
+
+**Next Steps:**
+1. Coordinate endpoint naming with Mal (`/v1/public/` vs. `/v1/shared/`)
+2. Extract `item-display` component + implement share button
+3. Add `/shared/{token}` route for anonymous viewer
+4. Add error pages for expired/revoked/deleted links
+5. Mobile testing at 390844 for button wrapping
+
