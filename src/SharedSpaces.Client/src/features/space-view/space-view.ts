@@ -91,6 +91,8 @@ export class SpaceView extends BaseElement {
   @state() private filePreviewLoading = false;
   @state() private filePreviewError = '';
 
+  private _previewRequestId = 0;
+
   private token?: string;
   private lastLoadedKey = '';
   private signalRClient?: SignalRClient;
@@ -791,6 +793,14 @@ export class SpaceView extends BaseElement {
     const previewType = getFilePreviewType(item.content);
     if (previewType === 'none') return;
 
+    // Revoke previous blob URL to avoid memory leak
+    if (this.filePreviewUrl) {
+      URL.revokeObjectURL(this.filePreviewUrl);
+    }
+
+    // Race guard: capture a request ID so stale responses are discarded
+    const requestId = ++this._previewRequestId;
+
     if (isFileTooLargeForPreview(item.content, item.fileSize)) {
       this.filePreviewItem = item;
       this.filePreviewType = previewType;
@@ -816,12 +826,17 @@ export class SpaceView extends BaseElement {
         this.token,
       );
 
+      // Stale response — user clicked a different file while we were loading
+      if (this._previewRequestId !== requestId) return;
+
       if (previewType === 'text') {
         this.filePreviewText = await blob.text();
       } else {
         this.filePreviewUrl = URL.createObjectURL(blob);
       }
     } catch (error) {
+      if (this._previewRequestId !== requestId) return;
+
       if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
         this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
@@ -830,7 +845,9 @@ export class SpaceView extends BaseElement {
       }
       this.filePreviewError = 'Failed to load preview.';
     } finally {
-      this.filePreviewLoading = false;
+      if (this._previewRequestId === requestId) {
+        this.filePreviewLoading = false;
+      }
     }
   };
 
@@ -1458,13 +1475,16 @@ export class SpaceView extends BaseElement {
       </div>
       <!-- Center: Content -->
       <div class="min-w-0 flex-1">
-        <p
-          class="${canPreview ? 'cursor-pointer hover:text-slate-100' : ''} truncate text-sm font-medium text-slate-200"
-          title=${canPreview ? 'Click to preview' : item.content}
-          @click=${canPreview ? () => this.handleFilePreviewClick(item) : nothing}
-        >
-          ${item.content}
-        </p>
+        ${canPreview
+          ? html`<button
+              type="button"
+              class="cursor-pointer truncate text-sm font-medium text-slate-200 hover:text-slate-100 bg-transparent border-none p-0 text-left w-full"
+              title=${item.content}
+              aria-label=${'Click to preview ' + item.content}
+              @click=${() => this.handleFilePreviewClick(item)}
+            >${item.content}</button>`
+          : html`<p class="truncate text-sm font-medium text-slate-200" title=${item.content}>${item.content}</p>`
+        }
         <p class="text-xs text-slate-500">
           ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
         </p>
