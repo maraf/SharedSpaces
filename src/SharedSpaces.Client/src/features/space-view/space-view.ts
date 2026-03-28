@@ -33,6 +33,12 @@ import {
 import { requestBackgroundSync } from '../../lib/sw-registration';
 import { getFileTypeIcon, getTextItemIcon } from '../../lib/file-icons';
 import {
+  getFilePreviewType,
+  isPreviewable,
+  isFileTooLargeForPreview,
+  type FilePreviewType,
+} from './file-preview';
+import {
   queueForOffline,
   processOfflineQueue,
 } from '../../lib/offline-sync';
@@ -78,6 +84,12 @@ export class SpaceView extends BaseElement {
   @state() private transferModalItem: SpaceItemResponse | null = null;
   @state() private transferInProgress = false;
   @state() private transferError = '';
+  @state() private filePreviewItem: SpaceItemResponse | null = null;
+  @state() private filePreviewType: FilePreviewType = 'none';
+  @state() private filePreviewUrl: string | null = null;
+  @state() private filePreviewText: string | null = null;
+  @state() private filePreviewLoading = false;
+  @state() private filePreviewError = '';
 
   private token?: string;
   private lastLoadedKey = '';
@@ -773,6 +785,67 @@ export class SpaceView extends BaseElement {
     this.modalItem = null;
   };
 
+  private handleFilePreviewClick = async (item: SpaceItemResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    const previewType = getFilePreviewType(item.content);
+    if (previewType === 'none') return;
+
+    if (isFileTooLargeForPreview(item.content, item.fileSize)) {
+      this.filePreviewItem = item;
+      this.filePreviewType = previewType;
+      this.filePreviewError = 'File is too large to preview.';
+      this.filePreviewLoading = false;
+      this.filePreviewUrl = null;
+      this.filePreviewText = null;
+      return;
+    }
+
+    this.filePreviewItem = item;
+    this.filePreviewType = previewType;
+    this.filePreviewLoading = true;
+    this.filePreviewError = '';
+    this.filePreviewUrl = null;
+    this.filePreviewText = null;
+
+    try {
+      const blob = await downloadFile(
+        this.serverUrl,
+        this.spaceId,
+        item.id,
+        this.token,
+      );
+
+      if (previewType === 'text') {
+        this.filePreviewText = await blob.text();
+      } else {
+        this.filePreviewUrl = URL.createObjectURL(blob);
+      }
+    } catch (error) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
+        this.closeFilePreview();
+        return;
+      }
+      this.filePreviewError = 'Failed to load preview.';
+    } finally {
+      this.filePreviewLoading = false;
+    }
+  };
+
+  private closeFilePreview = () => {
+    if (this.filePreviewUrl) {
+      URL.revokeObjectURL(this.filePreviewUrl);
+    }
+    this.filePreviewItem = null;
+    this.filePreviewType = 'none';
+    this.filePreviewUrl = null;
+    this.filePreviewText = null;
+    this.filePreviewLoading = false;
+    this.filePreviewError = '';
+  };
+
   private openTransferModal(item: SpaceItemResponse) {
     this.transferModalItem = item;
     this.transferError = '';
@@ -914,6 +987,7 @@ export class SpaceView extends BaseElement {
         ${this.renderPendingUploadsSection()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
+        ${this.filePreviewItem ? this.renderFilePreviewModal() : nothing}
         ${this.transferModalItem ? this.renderTransferModal() : nothing}
       </div>
     `;
@@ -1376,6 +1450,7 @@ export class SpaceView extends BaseElement {
 
   private renderFileContent(item: SpaceItemResponse) {
     const icon = getFileTypeIcon(item.content);
+    const canPreview = isPreviewable(item.content);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -1384,8 +1459,9 @@ export class SpaceView extends BaseElement {
       <!-- Center: Content -->
       <div class="min-w-0 flex-1">
         <p
-          class="truncate text-sm font-medium text-slate-200"
-          title=${item.content}
+          class="${canPreview ? 'cursor-pointer hover:text-slate-100' : ''} truncate text-sm font-medium text-slate-200"
+          title=${canPreview ? 'Click to preview' : item.content}
+          @click=${canPreview ? () => this.handleFilePreviewClick(item) : nothing}
         >
           ${item.content}
         </p>
@@ -1465,6 +1541,133 @@ export class SpaceView extends BaseElement {
             </button>
           </div>
           <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">${this.modalItem.content}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderFilePreviewContent() {
+    if (this.filePreviewLoading) {
+      return html`
+        <div class="flex items-center justify-center py-12">
+          <svg class="h-8 w-8 animate-spin text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span class="ml-3 text-sm text-slate-400">Loading preview…</span>
+        </div>
+      `;
+    }
+
+    if (this.filePreviewError) {
+      return html`
+        <div class="flex flex-col items-center gap-4 py-8 text-center">
+          <p class="text-sm text-slate-400">${this.filePreviewError}</p>
+          ${this.filePreviewItem
+            ? html`
+                <button
+                  @click=${() => this.handleDownload(this.filePreviewItem!)}
+                  class="inline-flex cursor-pointer items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Download instead
+                </button>
+              `
+            : nothing}
+        </div>
+      `;
+    }
+
+    switch (this.filePreviewType) {
+      case 'image':
+        return html`
+          <div class="flex items-center justify-center">
+            <img
+              src=${this.filePreviewUrl!}
+              alt=${this.filePreviewItem?.content ?? 'Image preview'}
+              class="max-h-[60vh] max-w-full rounded object-contain"
+            />
+          </div>
+        `;
+
+      case 'video':
+        return html`
+          <div class="flex items-center justify-center">
+            <video
+              src=${this.filePreviewUrl!}
+              controls
+              class="max-h-[60vh] max-w-full rounded"
+            >
+              Your browser does not support video playback.
+            </video>
+          </div>
+        `;
+
+      case 'audio':
+        return html`
+          <div class="flex items-center justify-center py-4">
+            <audio src=${this.filePreviewUrl!} controls class="w-full max-w-md">
+              Your browser does not support audio playback.
+            </audio>
+          </div>
+        `;
+
+      case 'pdf':
+        return html`
+          <iframe
+            src=${this.filePreviewUrl!}
+            class="h-[60vh] w-full rounded border border-slate-700"
+            title=${this.filePreviewItem?.content ?? 'PDF preview'}
+          ></iframe>
+        `;
+
+      case 'text':
+        return html`
+          <p class="whitespace-pre-wrap break-words text-start text-sm text-slate-200">
+            ${this.filePreviewText}
+          </p>
+        `;
+
+      default:
+        return nothing;
+    }
+  }
+
+  private renderFilePreviewModal() {
+    if (!this.filePreviewItem) return nothing;
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        @click=${this.closeFilePreview}
+      >
+        <div
+          class="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <h3 class="min-w-0 flex-1 truncate text-lg font-semibold text-white" title=${this.filePreviewItem.content}>
+              ${this.filePreviewItem.content}
+            </h3>
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                @click=${() => this.handleDownload(this.filePreviewItem!)}
+                class="rounded p-1 text-slate-400 transition hover:text-white"
+                title="Download file"
+                aria-label="Download file"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </button>
+              <button
+                @click=${this.closeFilePreview}
+                class="rounded p-1 text-slate-400 transition hover:text-white"
+                aria-label="Close preview"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+          </div>
+          ${this.renderFilePreviewContent()}
         </div>
       </div>
     `;
