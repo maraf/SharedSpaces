@@ -30,7 +30,7 @@ export class JoinView extends BaseElement {
 
   @state() private invitationString = '';
   @state() private serverUrl = '';
-  @state() private spaceId = '';
+  @state() private spaceId: string | undefined = undefined;
   @state() private pin = '';
   @state() private displayName = '';
   @state() private isLoading = false;
@@ -46,7 +46,9 @@ export class JoinView extends BaseElement {
       this.serverUrl = urlInvitation.serverUrl;
       this.spaceId = urlInvitation.spaceId;
       this.pin = urlInvitation.pin;
-      this.invitationString = `${urlInvitation.serverUrl}|${urlInvitation.spaceId}|${urlInvitation.pin}`;
+      this.invitationString = urlInvitation.spaceId
+        ? `${urlInvitation.serverUrl}|${urlInvitation.spaceId}|${urlInvitation.pin}`
+        : `${urlInvitation.serverUrl}|${urlInvitation.pin}`;
 
       // Strip only the join query parameter from URL
       const url = new URL(window.location.href);
@@ -71,7 +73,7 @@ export class JoinView extends BaseElement {
       this.pin = parsed.pin;
     } else {
       this.serverUrl = '';
-      this.spaceId = '';
+      this.spaceId = undefined;
       this.pin = '';
     }
   };
@@ -84,7 +86,7 @@ export class JoinView extends BaseElement {
 
   private handleSpaceIdInput = (e: Event) => {
     const input = e.target as HTMLInputElement;
-    this.spaceId = input.value;
+    this.spaceId = input.value || undefined;
     this.errorMessage = '';
   };
 
@@ -109,8 +111,8 @@ export class JoinView extends BaseElement {
     this.errorMessage = '';
 
     // Validate inputs
-    if (!this.serverUrl || !this.spaceId || !this.pin) {
-      this.errorMessage = 'Please provide server URL, space ID, and PIN.';
+    if (!this.serverUrl || !this.pin) {
+      this.errorMessage = 'Please provide server URL and PIN.';
       return;
     }
 
@@ -198,7 +200,7 @@ export class JoinView extends BaseElement {
                   <input
                     id="invitation"
                     type="text"
-                    placeholder="https://server.com|space-id|123456"
+                    placeholder="https://server.com|123456"
                     aria-label="Invitation string"
                     .value=${this.invitationString}
                     @input=${this.handleInvitationPaste}
@@ -225,9 +227,9 @@ export class JoinView extends BaseElement {
                   <input
                     id="spaceId"
                     type="text"
-                    placeholder="Space ID"
-                    aria-label="Space ID"
-                    .value=${this.spaceId}
+                    placeholder="Space ID (optional)"
+                    aria-label="Space ID (optional)"
+                    .value=${this.spaceId ?? ''}
                     @input=${this.handleSpaceIdInput}
                     ?disabled=${this.isLoading}
                     class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-mono text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
