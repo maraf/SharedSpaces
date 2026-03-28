@@ -18,8 +18,12 @@ import {
   downloadFile,
   deleteItem,
   transferItem,
+  createSharedLink,
+  getSharedLinks,
+  deleteSharedLink,
   SpaceApiError,
   type SpaceItemResponse,
+  type SharedLinkResponse,
 } from './space-api';
 import {
   getPendingShares,
@@ -90,6 +94,14 @@ export class SpaceView extends BaseElement {
   @state() private filePreviewText: string | null = null;
   @state() private filePreviewLoading = false;
   @state() private filePreviewError = '';
+  @state() private shareModalItem: SpaceItemResponse | null = null;
+  @state() private shareModalLinks: SharedLinkResponse[] = [];
+  @state() private shareModalLoading = false;
+  @state() private shareModalError = '';
+  @state() private shareModalCreating = false;
+  @state() private shareModalDeleteConfirmId: string | null = null;
+  @state() private shareCopiedLinkId: string | null = null;
+  @state() private shareItemCopiedIds = new Set<string>();
 
   private _previewRequestId = 0;
 
@@ -921,6 +933,166 @@ export class SpaceView extends BaseElement {
     }
   }
 
+  // --- Shared link handlers ---
+
+  private handleShareItem = async (item: SpaceItemResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    try {
+      const link = await createSharedLink(
+        this.serverUrl,
+        this.spaceId,
+        item.id,
+        this.token,
+      );
+      const shareUrl = `${window.location.origin}/shared/${link.token}`;
+
+      // Try native share first, fall back to clipboard
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: item.contentType === 'file' ? item.content : 'Shared text',
+            url: shareUrl,
+          });
+        } catch (shareError) {
+          // User cancelled native share — still copy to clipboard
+          if ((shareError as DOMException).name !== 'AbortError') {
+            await this.copyToClipboard(shareUrl);
+          }
+        }
+      } else {
+        await this.copyToClipboard(shareUrl);
+      }
+
+      // Brief visual feedback on the button
+      this.shareItemCopiedIds = new Set([...this.shareItemCopiedIds, item.id]);
+      setTimeout(() => {
+        const next = new Set(this.shareItemCopiedIds);
+        next.delete(item.id);
+        this.shareItemCopiedIds = next;
+      }, 1500);
+    } catch (error) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
+        return;
+      }
+      // Non-critical; could surface later
+    }
+  };
+
+  private async copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard may fail in insecure contexts
+    }
+  }
+
+  private openShareModal = async (item: SpaceItemResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    this.shareModalItem = item;
+    this.shareModalLinks = [];
+    this.shareModalLoading = true;
+    this.shareModalError = '';
+    this.shareModalDeleteConfirmId = null;
+    this.shareCopiedLinkId = null;
+
+    try {
+      this.shareModalLinks = await getSharedLinks(
+        this.serverUrl,
+        this.spaceId,
+        item.id,
+        this.token,
+      );
+    } catch (error) {
+      if (error instanceof SpaceApiError) {
+        this.shareModalError = error.message;
+      } else {
+        this.shareModalError = 'Failed to load shared links.';
+      }
+    } finally {
+      this.shareModalLoading = false;
+    }
+  };
+
+  private closeShareModal = () => {
+    this.shareModalItem = null;
+    this.shareModalLinks = [];
+    this.shareModalError = '';
+    this.shareModalDeleteConfirmId = null;
+    this.shareCopiedLinkId = null;
+  };
+
+  private handleCreateShareLink = async () => {
+    if (!this.serverUrl || !this.spaceId || !this.token || !this.shareModalItem) return;
+
+    this.shareModalCreating = true;
+    this.shareModalError = '';
+
+    try {
+      const link = await createSharedLink(
+        this.serverUrl,
+        this.spaceId,
+        this.shareModalItem.id,
+        this.token,
+      );
+      this.shareModalLinks = [...this.shareModalLinks, link];
+
+      // Auto-copy the new link
+      const shareUrl = `${window.location.origin}/shared/${link.token}`;
+      await this.copyToClipboard(shareUrl);
+      this.shareCopiedLinkId = link.id;
+      setTimeout(() => {
+        if (this.shareCopiedLinkId === link.id) {
+          this.shareCopiedLinkId = null;
+        }
+      }, 1500);
+    } catch (error) {
+      if (error instanceof SpaceApiError) {
+        this.shareModalError = error.message;
+      } else {
+        this.shareModalError = 'Failed to create shared link.';
+      }
+    } finally {
+      this.shareModalCreating = false;
+    }
+  };
+
+  private handleCopyShareLink = async (link: SharedLinkResponse) => {
+    const shareUrl = `${window.location.origin}/shared/${link.token}`;
+    await this.copyToClipboard(shareUrl);
+    this.shareCopiedLinkId = link.id;
+    setTimeout(() => {
+      if (this.shareCopiedLinkId === link.id) {
+        this.shareCopiedLinkId = null;
+      }
+    }, 1500);
+  };
+
+  private handleDeleteShareLink = async (link: SharedLinkResponse) => {
+    if (!this.serverUrl || !this.spaceId || !this.token || !this.shareModalItem) return;
+
+    try {
+      await deleteSharedLink(
+        this.serverUrl,
+        this.spaceId,
+        this.shareModalItem.id,
+        link.id,
+        this.token,
+      );
+      this.shareModalLinks = this.shareModalLinks.filter((l) => l.id !== link.id);
+      this.shareModalDeleteConfirmId = null;
+    } catch (error) {
+      if (error instanceof SpaceApiError) {
+        this.shareModalError = error.message;
+      } else {
+        this.shareModalError = 'Failed to delete shared link.';
+      }
+    }
+  };
+
   private formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
@@ -1007,6 +1179,7 @@ export class SpaceView extends BaseElement {
         ${this.modalItem ? this.renderModal() : nothing}
         ${this.filePreviewItem ? this.renderFilePreviewModal() : nothing}
         ${this.transferModalItem ? this.renderTransferModal() : nothing}
+        ${this.shareModalItem ? this.renderShareModal() : nothing}
       </div>
     `;
   }
@@ -1393,6 +1566,35 @@ export class SpaceView extends BaseElement {
     `;
   }
 
+  private renderShareButton(item: SpaceItemResponse) {
+    const shared = this.shareItemCopiedIds.has(item.id);
+    return html`
+      <button
+        @click=${() => this.handleShareItem(item)}
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-violet-400"
+        title=${shared ? 'Link copied!' : 'Share link'}
+        aria-label=${shared ? 'Share link copied' : 'Create and copy share link'}
+      >
+        ${shared
+          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+          : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`}
+      </button>
+    `;
+  }
+
+  private renderManageLinksButton(item: SpaceItemResponse) {
+    return html`
+      <button
+        @click=${() => this.openShareModal(item)}
+        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-violet-400"
+        title="Manage shared links"
+        aria-label="Manage shared links"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+      </button>
+    `;
+  }
+
   private renderDeleteButton(item: SpaceItemResponse) {
     return html`
       <button
@@ -1460,6 +1662,8 @@ export class SpaceView extends BaseElement {
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderCopyButton(item)}
+        ${this.renderShareButton(item)}
+        ${this.renderManageLinksButton(item)}
         ${this.renderSendToButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
@@ -1493,6 +1697,8 @@ export class SpaceView extends BaseElement {
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderDownloadButton(item)}
+        ${this.renderShareButton(item)}
+        ${this.renderManageLinksButton(item)}
         ${this.renderSendToButton(item)}
         ${this.renderDeleteButton(item)}
       </div>
@@ -1690,6 +1896,116 @@ export class SpaceView extends BaseElement {
             ${this.renderFilePreviewContent()}
           </div>
         </div>
+      </div>
+    `;
+  }
+
+  private renderShareModal() {
+    if (!this.shareModalItem) return nothing;
+
+    const itemPreview = this.getItemPreviewLabel(this.shareModalItem);
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        @click=${this.closeShareModal}
+      >
+        <div
+          class="relative w-full max-w-md max-h-[80vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <div class="min-w-0 flex-1">
+              <h3 class="text-lg font-semibold text-white mb-1">Shared links</h3>
+              <p class="text-sm text-slate-400 truncate">${itemPreview}</p>
+            </div>
+            <button
+              @click=${this.closeShareModal}
+              class="shrink-0 rounded p-1 text-slate-400 transition hover:text-white"
+              aria-label="Close modal"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+
+          ${this.shareModalError
+            ? html`
+                <div class="mb-4 rounded-lg border border-red-500/50 bg-red-950/40 p-3">
+                  <p class="text-sm text-red-300">${this.shareModalError}</p>
+                </div>
+              `
+            : nothing}
+
+          ${this.shareModalLoading
+            ? html`
+                <div class="flex items-center justify-center py-8">
+                  <p class="text-sm text-slate-400">Loading links…</p>
+                </div>
+              `
+            : html`
+                <div class="space-y-3">
+                  ${this.shareModalLinks.length === 0
+                    ? html`<p class="py-4 text-center text-sm text-slate-500">No shared links yet.</p>`
+                    : this.shareModalLinks.map((link) => this.renderShareLinkItem(link))}
+
+                  <button
+                    @click=${this.handleCreateShareLink}
+                    ?disabled=${this.shareModalCreating}
+                    class="w-full cursor-pointer rounded-md bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    ${this.shareModalCreating ? 'Creating…' : 'Create new link'}
+                  </button>
+                </div>
+              `}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderShareLinkItem(link: SharedLinkResponse) {
+    const shareUrl = `${window.location.origin}/shared/${link.token}`;
+    const isCopied = this.shareCopiedLinkId === link.id;
+    const isConfirming = this.shareModalDeleteConfirmId === link.id;
+
+    return html`
+      <div class="rounded-lg border border-slate-700/60 bg-slate-800/40 p-3">
+        <p class="mb-2 truncate font-mono text-xs text-slate-400" title=${shareUrl}>
+          ${shareUrl}
+        </p>
+        ${isConfirming
+          ? html`
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs text-slate-300">Delete this link?</p>
+                <div class="flex gap-2">
+                  <button
+                    @click=${() => this.handleDeleteShareLink(link)}
+                    class="cursor-pointer rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-red-500"
+                  >Delete</button>
+                  <button
+                    @click=${() => { this.shareModalDeleteConfirmId = null; }}
+                    class="cursor-pointer rounded-md border border-slate-600 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+                  >Cancel</button>
+                </div>
+              </div>
+            `
+          : html`
+              <div class="flex gap-2">
+                <button
+                  @click=${() => this.handleCopyShareLink(link)}
+                  class="flex-1 cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium transition ${isCopied
+                    ? 'border-emerald-500/50 text-emerald-300'
+                    : 'text-slate-300 hover:border-slate-500 hover:text-white'}"
+                >
+                  ${isCopied ? '✓ Copied' : 'Copy URL'}
+                </button>
+                <button
+                  @click=${() => { this.shareModalDeleteConfirmId = link.id; }}
+                  class="cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-red-500/50 hover:text-red-300"
+                >
+                  Delete
+                </button>
+              </div>
+            `}
       </div>
     `;
   }
