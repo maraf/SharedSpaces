@@ -31,6 +31,54 @@
 
 ## Learnings
 
+### Transfer UI Implementation (2026-03-21)
+
+**Issue #135: Copy and move items between spaces**
+
+**Key patterns established:**
+- **Property passing for single-level data flow:** Used property binding (`.spaces=${this.spaces}`) from `app-shell` to `space-view` instead of context API — simpler for parent-child relationships
+- **Conditional UI based on user context:** "Send to…" button hidden when user is in only 1 space (no transfer destinations available)
+- **Action button ordering (least to most destructive):** Copy → Download → Send to… → Delete
+- **Modal feedback pattern:** Errors shown in modal, success feedback via main UI banner (existing `syncMessage`)
+- **Loading states in modals:** Buttons disabled + text changes during async operations ("Copying…" / "Moving…")
+
+**Implementation details:**
+- `transferItem()` API function in `space-api.ts` — POST to `/v1/spaces/{spaceId}/items/{itemId}/transfer`
+- `JoinedSpace` interface exported from `space-view.ts` (for type reuse)
+- Transfer modal: responsive (`max-w-md`), lists destination spaces with Copy/Move buttons
+- Success feedback: uses existing `syncMessage` pattern (emerald banner, 3s timeout)
+- SignalR handles real-time updates: destination receives `ItemAdded`, source receives `ItemDeleted` on move
+
+### Transfer UI Testing & Screenshots (2026-03-27)
+
+**Added 4 Playwright screenshot tests:**
+- Transfer button visibility and interaction (desktop + mobile viewports)
+- Transfer modal display, space list, and buttons (desktop + mobile viewports)
+- All 36 Playwright tests pass
+- Mobile layout verified: no text overflow (UUIDs/URLs), buttons stay within viewport, labels not truncated
+
+**Key verification points:**
+- Button appears only when multiple spaces available
+- Modal centers and respects viewport bounds
+- Copy/Move buttons clear and actionable
+- Loading and error states display correctly
+
+## Team Updates (2026-03-27)
+
+**Issue #135 completed (Copy and move items between spaces):**
+- **Kaylee:** Implemented `POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer` endpoint with dual-token auth, quota locks, file streaming, and SignalR broadcasts. Key design: server-generated destination item IDs, serializable transactions on destination space only, broadcast ordering (ItemAdded → ItemDeleted).
+- **Wash:** Built client transfer UI — "Send to…" button, space-picker modal with Copy/Move buttons, loading states, error feedback in modal, success via existing `syncMessage` banner. Also fixed Issue #100 (pending share card layout unification).
+- **Zoe:** Wrote 11 integration tests covering copy/move for text/file items, quota enforcement, token validation, revoked member rejection. Fixed critical JWT `MapInboundClaims` bug in transfer endpoint: handler now preserves original claim names (matches `JwtAuthenticationExtensions.cs`). All 151 tests passing.
+- **Cross-agent pattern:** Dual-token authorization ensures user membership in both spaces; serializable transactions + quota locks prevent TOCTOU on destination; stream-based file copy suits large files. Established for reuse in future cross-space operations.
+- **PR #136 ready for merge.**
+
+**Key files:**
+- `src/SharedSpaces.Client/src/features/space-view/space-api.ts` — Transfer API function
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts` — Transfer UI, modal, handlers
+- `src/SharedSpaces.Client/src/app-shell.ts` — Pass `spaces[]` to `space-view`
+
+**Related:** Issue #135, `.squad/decisions/inbox/wash-transfer-ui.md`
+
 ### Offline Experience UI (2026-03-20)
 
 **Decision:** Never block the compose box for network errors — only for auth errors.

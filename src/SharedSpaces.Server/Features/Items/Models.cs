@@ -20,3 +20,9 @@ public sealed record SpaceItemResponse(
     string Content,
     long FileSize,
     DateTime SharedAt);
+
+public sealed class TransferItemRequest
+{
+    public string DestinationToken { get; init; } = string.Empty;
+    public string Action { get; init; } = string.Empty;
+}

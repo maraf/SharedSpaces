@@ -645,6 +645,7 @@ export class AppShell extends BaseElement {
           .apiBaseUrl=${this.appConfig.apiBaseUrl}
           .spaceId=${this.currentSpaceId}
           .serverUrl=${this.currentServerUrl}
+          .spaces=${this.spaces}
         ></space-view>`;
       case 'pending-shares':
         return this.renderPendingSharesView();

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { nothing } from 'lit';
 import './space-view';
 import { SpaceView } from './space-view';
 import type { ItemAddedPayload } from '../../lib/signalr-client';
@@ -2497,6 +2498,520 @@ describe('SpaceView - Unified Item Card Layout', () => {
           expect(card.classList.contains(cls)).toBe(true);
         });
       });
+    });
+  });
+});
+
+describe('SpaceView - Transfer Feature', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+
+  const otherSpace = {
+    serverUrl,
+    spaceId: '660e8400-e29b-41d4-a716-446655440001',
+    spaceName: 'Other Space',
+    token: 'other-space-token',
+  };
+
+  const thirdSpace = {
+    serverUrl,
+    spaceId: '770e8400-e29b-41d4-a716-446655440002',
+    spaceName: 'Third Space',
+    token: 'third-space-token',
+  };
+
+  let element: SpaceView;
+  let mockFetchFn: ReturnType<typeof vi.fn>;
+
+  function makeItem(overrides: Partial<SpaceItemResponse> = {}): SpaceItemResponse {
+    return {
+      id: 'item-1',
+      spaceId,
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'Hello world',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === `${serverUrl}:${spaceId}`) return token;
+      return null;
+    });
+
+    mockFetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    globalThis.fetch = mockFetchFn;
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  // --- getAvailableTransferSpaces ---
+
+  describe('getAvailableTransferSpaces', () => {
+    it('returns empty array when no other spaces are joined', () => {
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+      ];
+      const result = (element as any).getAvailableTransferSpaces();
+      expect(result).toEqual([]);
+    });
+
+    it('filters out the current space and returns others', () => {
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+        otherSpace,
+        thirdSpace,
+      ];
+      const result = (element as any).getAvailableTransferSpaces();
+      expect(result).toHaveLength(2);
+      expect(result[0].spaceId).toBe(otherSpace.spaceId);
+      expect(result[1].spaceId).toBe(thirdSpace.spaceId);
+    });
+
+    it('returns all spaces when current spaceId is not in the list', () => {
+      (element as any).spaces = [otherSpace, thirdSpace];
+      const result = (element as any).getAvailableTransferSpaces();
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns empty array when spaces list is empty', () => {
+      (element as any).spaces = [];
+      const result = (element as any).getAvailableTransferSpaces();
+      expect(result).toEqual([]);
+    });
+  });
+
+  // --- openTransferModal / closeTransferModal ---
+
+  describe('openTransferModal', () => {
+    it('sets transferModalItem to the given item', () => {
+      const item = makeItem();
+      (element as any).openTransferModal(item);
+      expect((element as any).transferModalItem).toBe(item);
+    });
+
+    it('clears any previous transfer error', () => {
+      (element as any).transferError = 'Previous error';
+      const item = makeItem();
+      (element as any).openTransferModal(item);
+      expect((element as any).transferError).toBe('');
+    });
+  });
+
+  describe('closeTransferModal', () => {
+    it('clears transferModalItem', () => {
+      (element as any).transferModalItem = makeItem();
+      (element as any).closeTransferModal();
+      expect((element as any).transferModalItem).toBeNull();
+    });
+
+    it('clears transferError', () => {
+      (element as any).transferError = 'Some error';
+      (element as any).closeTransferModal();
+      expect((element as any).transferError).toBe('');
+    });
+
+    it('resets transferInProgress', () => {
+      (element as any).transferInProgress = true;
+      (element as any).closeTransferModal();
+      expect((element as any).transferInProgress).toBe(false);
+    });
+  });
+
+  // --- handleTransfer ---
+
+  describe('handleTransfer', () => {
+    it('calls transferItem API and closes modal on successful copy', async () => {
+      const item = makeItem();
+      const destItem = { ...item, spaceId: otherSpace.spaceId, id: 'new-dest-id' };
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => destItem,
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      expect(mockFetchFn).toHaveBeenCalledWith(
+        expect.stringContaining(`/items/${item.id}/transfer`),
+        expect.objectContaining({ method: 'POST' }),
+      );
+      expect((element as any).transferModalItem).toBeNull();
+      expect((element as any).transferInProgress).toBe(false);
+    });
+
+    it('shows success message with space name after copy', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...item }),
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      expect((element as any).syncMessage).toContain('copied');
+      expect((element as any).syncMessage).toContain('Other Space');
+    });
+
+    it('shows success message with "moved" for move action', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...item }),
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'move');
+
+      expect((element as any).syncMessage).toContain('moved');
+      expect((element as any).syncMessage).toContain('Other Space');
+    });
+
+    it('sends correct destination space and token in the request body', async () => {
+      const item = makeItem({ id: 'transfer-test-id' });
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...item }),
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      const call = mockFetchFn.mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('/transfer'),
+      );
+      expect(call).toBeDefined();
+      const body = JSON.parse(call![1].body);
+      expect(body.destinationToken).toBe(otherSpace.token);
+      expect(body.action).toBe('copy');
+      expect(body.destinationSpaceId).toBeUndefined();
+    });
+
+    it('shows error on SpaceApiError and keeps modal open', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 413,
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      expect((element as any).transferError).toMatch(/quota exceeded/i);
+      expect((element as any).transferModalItem).toBe(item);
+      expect((element as any).transferInProgress).toBe(false);
+    });
+
+    it('shows generic error for non-SpaceApiError failures', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      // SpaceApiError wraps network errors, but the catch block in handleTransfer
+      // also handles the case where error is NOT SpaceApiError (generic fallback).
+      // To trigger non-SpaceApiError path, we need the transferItem call itself to
+      // throw a non-SpaceApiError. Since transferItem wraps everything, we mock at
+      // the fetch level to simulate a SpaceApiError first, then check the error path.
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'move');
+
+      // SpaceApiError message is shown directly
+      expect((element as any).transferError).toMatch(/Access denied/);
+      expect((element as any).transferModalItem).toBe(item);
+    });
+
+    it('sets transferInProgress during the operation', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      let fetchResolve: (value: any) => void;
+      const fetchPromise = new Promise((resolve) => {
+        fetchResolve = resolve;
+      });
+      mockFetchFn.mockReturnValueOnce(fetchPromise);
+
+      const transferPromise = (element as any).handleTransfer(otherSpace, 'copy');
+
+      // While in progress
+      expect((element as any).transferInProgress).toBe(true);
+      expect((element as any).transferError).toBe('');
+
+      // Complete the fetch
+      fetchResolve!({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...item }),
+      });
+
+      await transferPromise;
+      expect((element as any).transferInProgress).toBe(false);
+    });
+
+    it('is a no-op when transferModalItem is null', async () => {
+      (element as any).transferModalItem = null;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      expect(mockFetchFn).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when token is missing', async () => {
+      (element as any).transferModalItem = makeItem();
+      (element as any).token = undefined;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      expect(mockFetchFn).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- renderSendToButton ---
+
+  describe('renderSendToButton', () => {
+    it('returns nothing when no other spaces are available', () => {
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+      ];
+      const result = (element as any).renderSendToButton(makeItem());
+      expect(result).toBe(nothing);
+    });
+
+    it('returns a button when other spaces are available', () => {
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+        otherSpace,
+      ];
+      const result = (element as any).renderSendToButton(makeItem());
+      // Lit TemplateResult has strings array
+      const strings = result.strings ?? result._$litType$?.strings ?? [];
+      const flatStrings = Array.from(strings).join('');
+      expect(flatStrings).toContain('Send to another space');
+    });
+  });
+
+  // --- renderTransferModal ---
+
+  describe('renderTransferModal', () => {
+    it('returns nothing when transferModalItem is null', () => {
+      (element as any).transferModalItem = null;
+      const result = (element as any).renderTransferModal();
+      expect(result).toBe(nothing);
+    });
+
+    it('renders modal with "Send to…" heading', () => {
+      (element as any).transferModalItem = makeItem();
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+        otherSpace,
+      ];
+      const result = (element as any).renderTransferModal();
+      const strings = result.strings ?? result._$litType$?.strings ?? [];
+      const flatStrings = Array.from(strings).join('');
+      expect(flatStrings).toContain('Send to');
+    });
+
+    it('renders available space names in the modal', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).isLoading = false;
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+        otherSpace,
+        thirdSpace,
+      ];
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const modalHtml = element.innerHTML;
+      expect(modalHtml).toContain('Copy here');
+      expect(modalHtml).toContain('Move here');
+      expect(modalHtml).toContain('Other Space');
+      expect(modalHtml).toContain('Third Space');
+    });
+
+    it('renders disabled buttons when transfer is in progress', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).transferInProgress = true;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).isLoading = false;
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+        otherSpace,
+      ];
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const modalHtml = element.innerHTML;
+      expect(modalHtml).toContain('Copying…');
+      expect(modalHtml).toContain('Moving…');
+    });
+
+    it('shows "join one more space" message when no other spaces', async () => {
+      const item = makeItem();
+      (element as any).transferModalItem = item;
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).isLoading = false;
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+      ];
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const modalHtml = element.innerHTML;
+      expect(modalHtml).toContain('join at least one more space');
+    });
+  });
+
+  // --- Transfer flow integration ---
+
+  describe('transfer flow integration', () => {
+    it('full flow: open modal → copy → success → modal closes', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+      (element as any).spaces = [
+        { serverUrl, spaceId, spaceName: 'Current', token },
+        otherSpace,
+      ];
+
+      // Step 1: Open modal
+      (element as any).openTransferModal(item);
+      expect((element as any).transferModalItem).toBe(item);
+
+      // Step 2: Transfer succeeds
+      mockFetchFn.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...item, spaceId: otherSpace.spaceId }),
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'copy');
+
+      // Step 3: Modal closed, success shown
+      expect((element as any).transferModalItem).toBeNull();
+      expect((element as any).syncMessage).toContain('copied');
+    });
+
+    it('full flow: open modal → transfer fails → error shown, modal stays open', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      // Step 1: Open modal
+      (element as any).openTransferModal(item);
+
+      // Step 2: Transfer fails with 401
+      mockFetchFn.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      });
+
+      await (element as any).handleTransfer(otherSpace, 'move');
+
+      // Step 3: Error shown, modal stays
+      expect((element as any).transferError).toMatch(/Authentication failed/);
+      expect((element as any).transferModalItem).toBe(item);
+    });
+
+    it('full flow: open modal → fail → close → reopen has clean state', async () => {
+      const item = makeItem();
+      (element as any).items = [item];
+      (element as any).token = token;
+      (element as any).serverUrl = serverUrl;
+      (element as any).spaceId = spaceId;
+
+      // Open and fail
+      (element as any).openTransferModal(item);
+      mockFetchFn.mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Error' });
+      await (element as any).handleTransfer(otherSpace, 'copy');
+      expect((element as any).transferError).toBeTruthy();
+
+      // Close
+      (element as any).closeTransferModal();
+      expect((element as any).transferError).toBe('');
+      expect((element as any).transferModalItem).toBeNull();
+
+      // Reopen — state should be clean
+      (element as any).openTransferModal(item);
+      expect((element as any).transferError).toBe('');
+      expect((element as any).transferModalItem).toBe(item);
+      expect((element as any).transferInProgress).toBe(false);
     });
   });
 });

@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Tokens;
@@ -33,6 +34,7 @@ public static class ItemEndpoints
         itemsGroup.MapPut("/{itemId:guid}", UpsertItem)
             .DisableAntiforgery();
         itemsGroup.MapDelete("/{itemId:guid}", DeleteItem);
+        itemsGroup.MapPost("/{itemId:guid}/transfer", TransferItem);
 
         return app;
     }
@@ -484,6 +486,279 @@ public static class ItemEndpoints
         catch (InvalidDataException)
         {
             return (null, Results.BadRequest(new { Error = "Invalid form payload" }));
+        }
+    }
+
+    private static async Task<IResult> TransferItem(
+        Guid spaceId,
+        Guid itemId,
+        TransferItemRequest request,
+        HttpContext httpContext,
+        AppDbContext db,
+        IFileStorage fileStorage,
+        IOptions<StorageOptions> storageOptions,
+        ISpaceHubNotifier hubNotifier,
+        IConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        // Authorize source space
+        var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
+        if (authorizationResult is not null)
+        {
+            return authorizationResult;
+        }
+
+        // Validate action
+        if (string.IsNullOrWhiteSpace(request.Action))
+        {
+            return Results.BadRequest(new { Error = "Action must be either 'copy' or 'move'" });
+        }
+
+        var action = request.Action.Trim().ToLowerInvariant();
+        if (action is not ("copy" or "move"))
+        {
+            return Results.BadRequest(new { Error = "Action must be either 'copy' or 'move'" });
+        }
+
+        // Validate destination token
+        var tokenHandler = new JwtSecurityTokenHandler
+        {
+            MapInboundClaims = false
+        };
+        var signingKey = JwtTokenSigningKeyFactory.Create(configuration);
+        
+        System.Security.Claims.ClaimsPrincipal? destinationPrincipal;
+        try
+        {
+            destinationPrincipal = tokenHandler.ValidateToken(request.DestinationToken, new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = signingKey,
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateLifetime = false,
+                RequireExpirationTime = false
+            }, out _);
+        }
+        catch (Exception ex) when (ex is SecurityTokenException or ArgumentException)
+        {
+            return Results.BadRequest(new { Error = "Invalid destination token" });
+        }
+
+        // Extract destination member ID
+        var destMemberClaim = destinationPrincipal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+        if (!Guid.TryParse(destMemberClaim, out var destinationMemberId) || destinationMemberId == Guid.Empty)
+        {
+            return Results.BadRequest(new { Error = "Invalid destination token: missing or invalid member ID" });
+        }
+
+        // Verify destination member exists and not revoked
+        var destinationMember = await db.SpaceMembers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(m => m.Id == destinationMemberId, cancellationToken);
+
+        if (destinationMember is null || destinationMember.IsRevoked)
+        {
+            return Results.BadRequest(new { Error = "Destination member is invalid or revoked" });
+        }
+
+        // Extract destination space ID from token
+        var destSpaceClaim = destinationPrincipal.FindFirst(SpaceMemberClaimTypes.SpaceId)?.Value;
+        if (!Guid.TryParse(destSpaceClaim, out var destinationSpaceId) || destinationSpaceId == Guid.Empty)
+        {
+            return Results.BadRequest(new { Error = "Invalid destination token: missing or invalid space_id" });
+        }
+
+        // Validate destination member belongs to the claimed space
+        if (destinationMember.SpaceId != destinationSpaceId)
+        {
+            return Results.BadRequest(new { Error = "Destination token space does not match member's space" });
+        }
+
+        // Reject same-space transfer
+        if (spaceId == destinationSpaceId)
+        {
+            return Results.BadRequest(new { Error = "Cannot transfer item to the same space" });
+        }
+
+        // Load source item
+        var sourceItem = await db.SpaceItems
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.SpaceId == spaceId && item.Id == itemId, cancellationToken);
+
+        if (sourceItem is null)
+        {
+            return Results.NotFound(new { Error = "Item not found" });
+        }
+
+        var isFile = string.Equals(sourceItem.ContentType, "file", StringComparison.OrdinalIgnoreCase);
+
+        IAsyncDisposable? quotaLock = null;
+        IDbContextTransaction? transaction = null;
+        var newItemId = Guid.NewGuid();
+
+        try
+        {
+            // Acquire destination space quota lock (always lock for file items)
+            if (isFile)
+            {
+                quotaLock = await AcquireQuotaLockAsync(destinationSpaceId, cancellationToken);
+                if (db.Database.IsRelational())
+                {
+                    transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                }
+            }
+
+            // Check destination quota
+            if (isFile)
+            {
+                var destinationSpace = await db.Spaces
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(s => s.Id == destinationSpaceId, cancellationToken);
+
+                if (destinationSpace is null)
+                {
+                    return Results.BadRequest(new { Error = "Destination space not found" });
+                }
+
+                var currentUsage = await db.SpaceItems
+                    .Where(item => item.SpaceId == destinationSpaceId)
+                    .SumAsync(item => (long?)item.FileSize, cancellationToken) ?? 0L;
+
+                var quota = destinationSpace.MaxUploadSize ?? storageOptions.Value.MaxSpaceQuotaBytes;
+                var projectedUsage = currentUsage + sourceItem.FileSize;
+
+                if (projectedUsage > quota)
+                {
+                    return Results.Json(new { Error = "Destination space storage quota exceeded" }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                }
+            }
+
+            // Create new item in destination
+            var destinationItem = new SpaceItem(newItemId)
+            {
+                SpaceId = destinationSpaceId,
+                MemberId = destinationMemberId,
+                ContentType = sourceItem.ContentType,
+                Content = sourceItem.Content,
+                FileSize = sourceItem.FileSize,
+                SharedAt = DateTime.UtcNow
+            };
+
+            db.SpaceItems.Add(destinationItem);
+
+            // Copy file if item is a file
+            if (isFile)
+            {
+                await using var sourceStream = await fileStorage.ReadAsync(spaceId, itemId, cancellationToken);
+                await fileStorage.SaveAsync(destinationSpaceId, newItemId, sourceStream, cancellationToken);
+                
+                // Update content to reference new item ID
+                // Only rename auto-converted text files (Content == "{sourceItemId:N}.txt")
+                var isAutoConvertedText = string.Equals(sourceItem.Content, $"{sourceItem.Id:N}.txt", StringComparison.OrdinalIgnoreCase);
+                destinationItem.Content = isAutoConvertedText
+                    ? $"{newItemId:N}.txt"
+                    : sourceItem.Content;
+            }
+
+            // If move, delete source item
+            if (action == "move")
+            {
+                var sourceItemTracked = await db.SpaceItems
+                    .SingleOrDefaultAsync(item => item.SpaceId == spaceId && item.Id == itemId, cancellationToken);
+
+                if (sourceItemTracked is not null)
+                {
+                    db.SpaceItems.Remove(sourceItemTracked);
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            // Broadcast ItemAdded to destination space
+            var destinationDisplayName = destinationPrincipal.FindFirst(SpaceMemberClaimTypes.DisplayName)?.Value ?? string.Empty;
+            var itemAddedEvent = new ItemAddedEvent(
+                destinationItem.Id,
+                destinationItem.SpaceId,
+                destinationItem.MemberId,
+                destinationDisplayName,
+                destinationItem.ContentType,
+                destinationItem.Content,
+                destinationItem.FileSize,
+                destinationItem.SharedAt);
+
+            await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+
+            // Broadcast ItemDeleted to source space if move
+            if (action == "move")
+            {
+                var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
+                await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
+
+                // Clean up source file
+                if (isFile)
+                {
+                    try
+                    {
+                        await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+                    }
+                    catch
+                    {
+                        // Best-effort cleanup
+                    }
+                }
+            }
+
+            var response = new SpaceItemResponse(
+                destinationItem.Id,
+                destinationItem.SpaceId,
+                destinationItem.MemberId,
+                destinationItem.ContentType,
+                destinationItem.Content,
+                destinationItem.FileSize,
+                destinationItem.SharedAt);
+
+            return Results.Created($"/v1/spaces/{destinationSpaceId}/items/{newItemId}", response);
+        }
+        catch (Exception exception)
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            // Clean up destination file on failure
+            if (isFile)
+            {
+                try
+                {
+                    await fileStorage.DeleteAsync(destinationSpaceId, newItemId, cancellationToken);
+                }
+                catch
+                {
+                    // Best-effort cleanup
+                }
+            }
+
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+
+            if (quotaLock is not null)
+            {
+                await quotaLock.DisposeAsync();
+            }
         }
     }
 

@@ -98,6 +98,15 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Admin space management now also covers `/v1/spaces/{spaceId}/members` and `/v1/spaces/{spaceId}/invitations`: member listings return `MemberResponse` newest-first, revocation is idempotent via `POST .../members/{memberId}/revoke`, and invitation listings/deletes never expose hashed PIN values.
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
 - Server container publishing uses .NET SDK container support (`EnableSdkContainerSupport`) in `.csproj`, targeting `ghcr.io/maraf/sharedspaces-server` with tag format `{VersionPrefix}-{RuntimeIdentifier}`.
+
+## Team Updates (2026-03-27)
+
+**Issue #135 completed (Copy and move items between spaces):**
+- **Kaylee:** Implemented `POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer` endpoint with dual-token auth, quota locks, file streaming, and SignalR broadcasts. Key design: server-generated destination item IDs, serializable transactions on destination space only, broadcast ordering (ItemAdded → ItemDeleted).
+- **Wash:** Built client transfer UI — "Send to…" button, space-picker modal with Copy/Move buttons, loading states, error feedback in modal, success via existing `syncMessage` banner. Also fixed Issue #100 (pending share card layout unification).
+- **Zoe:** Wrote 11 integration tests covering copy/move for text/file items, quota enforcement, token validation, revoked member rejection. Fixed critical JWT `MapInboundClaims` bug in transfer endpoint: handler now preserves original claim names (matches `JwtAuthenticationExtensions.cs`). All 151 tests passing.
+- **Cross-agent pattern:** Dual-token authorization ensures user membership in both spaces; serializable transactions + quota locks prevent TOCTOU on destination; stream-based file copy suits large files. Established for reuse in future cross-space operations.
+- **PR #136 ready for merge.**
 - The `server-container.yml` workflow triggers on `server-*` tags, extracts version via shell parameter expansion (`${GITHUB_REF_NAME#server-}`), and publishes for `linux-x64` using `dotnet publish` with `-p:PublishProfile=DefaultContainer`.
 - `ForwardedHeadersOptions` must clear `KnownIPNetworks` and `KnownProxies` for reverse proxy deployments (containers, cloud)—ASP.NET Core defaults to trusting only localhost, silently ignoring `X-Forwarded-*` headers from real proxies. Note: `KnownNetworks` is deprecated in .NET 10; use `KnownIPNetworks`.
 - `UseForwardedHeaders()` is placed first in the middleware pipeline (before CORS, auth, HTTPS redirection) so `HttpRequest.Scheme` and `HttpRequest.Host` reflect the proxy's values when endpoints generate URLs.
@@ -818,3 +827,38 @@ Applied 6 targeted fixes to `SyncService.cs` from PR review feedback:
 **Pattern learned:** When a ConcurrentDictionary serves dual purposes (echo-prevention AND state tracking), use a separate tracking collection to disambiguate in-flight vs confirmed entries.
 
 **Build:** Clean build after fix
+---
+
+## 2026-03-26: Transfer Endpoint Implementation (Issue #135)
+
+**What:** Implemented POST /v1/spaces/{sourceSpaceId}/items/{itemId}/transfer endpoint to copy or move items between spaces.
+
+**Key Implementation Details:**
+- **Dual token authorization:** Source space via Bearer header, destination space via destinationToken in request body
+- **Server-generated destination IDs:** Unlike normal item creation, transfer generates new GUIDs server-side for destination items
+- **Quota enforcement:** Destination quota checked and locked (serializable transaction), consistent with existing UpsertItem pattern
+- **File streaming:** Files copied via IFileStorage stream API (no memory buffering)
+- **Move semantics:** Source item deleted after destination created; SignalR broadcasts ItemAdded to destination, then ItemDeleted to source
+- **Same-space rejection:** Returns 400 if source and destination space IDs match
+
+**Pattern Reuse:**
+- AcquireQuotaLockAsync(destinationSpaceId) — same SemaphoreSlim pattern as UpsertItem
+- JwtTokenSigningKeyFactory.Create(configuration) — reused JWT validation from JwtAuthenticationExtensions.cs
+- ISpaceHubNotifier — consistent broadcast pattern for ItemAdded/ItemDeleted events
+- Serializable transaction + rollback on exception
+
+**Files Modified:**
+- src/SharedSpaces.Server/Features/Items/Models.cs — Added TransferItemRequest record
+- src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs — Added TransferItem endpoint (~250 lines) + using Microsoft.IdentityModel.Tokens
+
+**Design Decisions:**
+- Destination member attribution: Transferred item owned by transferring user in destination space (not original author)
+- Move quota check: Only destination quota matters; move fails if destination full even though source would shrink
+- Auto-converted text items (>65KB stored as files) transferred as files with updated .txt content field
+- V1 is single-item only (no batch transfers)
+
+**Pattern Learned:** For server-side operations that touch multiple spaces, dual-token validation ensures proper authorization without relying on client-provided credentials. The destination token must be independently validated, not just trusted.
+
+**Pattern Learned:** When scoping variables for cleanup in exception handlers, declare them before the try block if they're needed in catch/finally. Avoids regenerating resource IDs that should match the ones created in the try block.
+
+**Build:** Clean build after implementation

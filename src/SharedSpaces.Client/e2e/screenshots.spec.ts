@@ -394,6 +394,41 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space-delete-confirm', vp);
     });
 
+    test(`space view - transfer button - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Click the first space pill to enter space view
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForSelector('button[aria-label="Send to another space"]', { timeout: 10_000 });
+      await page.waitForTimeout(500);
+      await capture(page, 'space-transfer-button', vp);
+    });
+
+    test(`space view - transfer modal - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Click the first space pill to enter space view
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForSelector('button[aria-label="Send to another space"]', { timeout: 10_000 });
+      await page.waitForTimeout(500);
+      // Click the "Send to..." button on the first item card
+      const sendBtn = page.locator('button[aria-label="Send to another space"]').first();
+      await sendBtn.click();
+      // Wait for the transfer modal to appear (heading: "Send to…")
+      await page.waitForFunction(
+        () => document.querySelector('h3')?.textContent?.includes('Send to'),
+        { timeout: 5_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'space-transfer-modal', vp);
+    });
+
     test(`admin view - invitation modal - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
