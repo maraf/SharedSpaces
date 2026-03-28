@@ -36,9 +36,7 @@ export async function exchangeToken(
   displayName: string
 ): Promise<TokenExchangeResponse> {
   const normalizedServerUrl = serverUrl.replace(/\/+$/, '');
-  const url = spaceId
-    ? `${normalizedServerUrl}/v1/spaces/${spaceId}/tokens`
-    : `${normalizedServerUrl}/v1/tokens`;
+  const url = `${normalizedServerUrl}/v1/tokens`;
   
   let response: Response;
   try {
@@ -48,6 +46,7 @@ export async function exchangeToken(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        ...(spaceId ? { spaceId } : {}),
         pin,
         displayName,
       }),
