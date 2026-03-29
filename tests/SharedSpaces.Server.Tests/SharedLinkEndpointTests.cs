@@ -40,7 +40,7 @@ public class SharedLinkEndpointTests
             contentType: "text", content: "Hello shared world",
             sharedAt: DateTime.UtcNow.AddMinutes(-5), fileSize: 0);
 
-        var beforeRequest = DateTimeOffset.UtcNow;
+        var beforeRequest = DateTime.UtcNow;
 
         var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token);
 
@@ -166,6 +166,38 @@ public class SharedLinkEndpointTests
         links.Should().OnlyContain(link => link.SpaceId == space.Id);
         // Tokens should be unique
         links.Select(l => l.Token).Distinct().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task ListSharedLinks_ReturnsLinksOrderedByCreatedAtDescending()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "ordered links",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        // Create links with explicit timestamps via DB
+        var olderLink = await factory.CreateSharedLinkAsync(
+            space.Id, item.Id, member.Id, DateTime.UtcNow.AddMinutes(-10));
+        var middleLink = await factory.CreateSharedLinkAsync(
+            space.Id, item.Id, member.Id, DateTime.UtcNow.AddMinutes(-5));
+        var newerLink = await factory.CreateSharedLinkAsync(
+            space.Id, item.Id, member.Id, DateTime.UtcNow);
+
+        var response = await ListSharedLinksAsync(client, space.Id, item.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var links = await ReadJsonAsync<List<SharedLinkResponse>>(response);
+        links.Should().HaveCount(3);
+        links.Select(l => l.Id).Should().ContainInOrder(
+            newerLink.Id, middleLink.Id, olderLink.Id);
     }
 
     [Fact]
@@ -590,13 +622,13 @@ public class SharedLinkEndpointTests
         Guid SpaceId,
         Guid ItemId,
         Guid CreatedBy,
-        DateTimeOffset CreatedAt);
+        DateTime CreatedAt);
 
     private sealed record SharedItemResponse(
         string ContentType,
         string Content,
         long FileSize,
-        DateTimeOffset SharedAt);
+        DateTime SharedAt);
 
     // ──────────────────────────────────────────────
     // Test infrastructure
@@ -696,6 +728,29 @@ public class SharedLinkEndpointTests
                 db.SpaceItems.Add(item);
                 await db.SaveChangesAsync();
                 return item;
+            });
+        }
+
+        public async Task<SharedLink> CreateSharedLinkAsync(
+            Guid spaceId,
+            Guid itemId,
+            Guid createdBy,
+            DateTime createdAt)
+        {
+            return await WithDbContextAsync(async db =>
+            {
+                var link = new SharedLink
+                {
+                    Id = Guid.NewGuid(),
+                    SpaceId = spaceId,
+                    ItemId = itemId,
+                    CreatedBy = createdBy,
+                    CreatedAt = createdAt
+                };
+
+                db.SharedLinks.Add(link);
+                await db.SaveChangesAsync();
+                return link;
             });
         }
 

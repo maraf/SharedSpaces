@@ -6,10 +6,10 @@ public sealed record SharedLinkResponse(
     Guid SpaceId,
     Guid ItemId,
     Guid CreatedBy,
-    DateTimeOffset CreatedAt);
+    DateTime CreatedAt);
 
 public sealed record SharedItemResponse(
     string ContentType,
     string Content,
     long FileSize,
-    DateTimeOffset SharedAt);
+    DateTime SharedAt);
