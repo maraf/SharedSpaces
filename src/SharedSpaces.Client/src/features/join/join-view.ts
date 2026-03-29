@@ -30,7 +30,6 @@ export class JoinView extends BaseElement {
 
   @state() private invitationString = '';
   @state() private serverUrl = '';
-  @state() private spaceId: string | undefined = undefined;
   @state() private pin = '';
   @state() private displayName = '';
   @state() private isLoading = false;
@@ -44,7 +43,6 @@ export class JoinView extends BaseElement {
     const urlInvitation = parseInvitationFromUrl();
     if (urlInvitation) {
       this.serverUrl = urlInvitation.serverUrl;
-      this.spaceId = urlInvitation.spaceId;
       this.pin = urlInvitation.pin;
       this.invitationString = urlInvitation.spaceId
         ? `${urlInvitation.serverUrl}|${urlInvitation.spaceId}|${urlInvitation.pin}`
@@ -69,11 +67,9 @@ export class JoinView extends BaseElement {
     const parsed = parseInvitationString(this.invitationString);
     if (parsed) {
       this.serverUrl = parsed.serverUrl;
-      this.spaceId = parsed.spaceId;
       this.pin = parsed.pin;
     } else {
       this.serverUrl = '';
-      this.spaceId = undefined;
       this.pin = '';
     }
   };
@@ -81,12 +77,6 @@ export class JoinView extends BaseElement {
   private handleServerUrlInput = (e: Event) => {
     const input = e.target as HTMLInputElement;
     this.serverUrl = input.value;
-    this.errorMessage = '';
-  };
-
-  private handleSpaceIdInput = (e: Event) => {
-    const input = e.target as HTMLInputElement;
-    this.spaceId = input.value || undefined;
     this.errorMessage = '';
   };
 
@@ -127,7 +117,6 @@ export class JoinView extends BaseElement {
       // Exchange PIN for JWT
       const response = await exchangeToken(
         this.serverUrl,
-        this.spaceId,
         this.pin,
         this.displayName.trim()
       );
@@ -223,16 +212,6 @@ export class JoinView extends BaseElement {
                     @input=${this.handleServerUrlInput}
                     ?disabled=${this.isLoading}
                     class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-                  />
-                  <input
-                    id="spaceId"
-                    type="text"
-                    placeholder="Space ID (optional)"
-                    aria-label="Space ID (optional)"
-                    .value=${this.spaceId ?? ''}
-                    @input=${this.handleSpaceIdInput}
-                    ?disabled=${this.isLoading}
-                    class="w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-mono text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
                   />
                   <input
                     id="pin"
