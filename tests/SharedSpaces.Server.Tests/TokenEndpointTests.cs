@@ -29,7 +29,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(response);
@@ -49,7 +49,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var token = await ReadTokenAsync(response);
@@ -67,7 +67,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         var invitation = await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(response);
@@ -88,7 +88,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(response);
@@ -111,20 +111,9 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, "123456");
 
-        var response = await ExchangeTokenAsync(client, space.Id, "654321", "Zoe");
+        var response = await ExchangeTokenAsync(client, "654321", "Zoe");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    public async Task NonExistentSpace_Returns404()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        using var client = factory.CreateClient();
-
-        var response = await ExchangeTokenAsync(client, Guid.NewGuid(), "123456", "Zoe");
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -135,7 +124,7 @@ public class TokenEndpointTests
 
         var space = await factory.CreateSpaceAsync();
 
-        var response = await ExchangeTokenAsync(client, space.Id, "123456", "Zoe");
+        var response = await ExchangeTokenAsync(client, "123456", "Zoe");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -151,7 +140,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var tokenResponse = await ExchangeTokenAsync(client, pin, displayName);
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
         await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
@@ -183,7 +172,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var tokenResponse = await ExchangeTokenAsync(client, pin, displayName);
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
         await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
@@ -211,7 +200,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var tokenResponse = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var tokenResponse = await ExchangeTokenAsync(client, pin, displayName);
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(tokenResponse);
         await AssertJwtClaimsAsync(factory, token, space.Id, displayName);
@@ -233,7 +222,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var token = await ReadTokenAsync(response);
@@ -253,7 +242,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenAsync(client, space.Id, pin, new string('x', 101));
+        var response = await ExchangeTokenAsync(client, pin, new string('x', 101));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -271,7 +260,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenSimplifiedAsync(client, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(response);
@@ -290,7 +279,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync("My Space");
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenSimplifiedAsync(client, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var token = await ReadTokenAsync(response);
@@ -308,7 +297,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         var invitation = await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenSimplifiedAsync(client, pin, "Zoe");
+        var response = await ExchangeTokenAsync(client, pin, "Zoe");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var invitationStillExists = await factory.WithDbContextAsync(db => db.SpaceInvitations.AnyAsync(x => x.Id == invitation.Id));
@@ -326,7 +315,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, pin);
 
-        var response = await ExchangeTokenSimplifiedAsync(client, pin, displayName);
+        var response = await ExchangeTokenAsync(client, pin, displayName);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var member = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync());
@@ -343,7 +332,7 @@ public class TokenEndpointTests
         var space = await factory.CreateSpaceAsync();
         await factory.CreateInvitationAsync(space.Id, "123456");
 
-        var response = await ExchangeTokenSimplifiedAsync(client, "654321", "Zoe");
+        var response = await ExchangeTokenAsync(client, "654321", "Zoe");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -354,61 +343,14 @@ public class TokenEndpointTests
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
 
-        var response = await ExchangeTokenSimplifiedAsync(client, "123456", "Zoe");
+        var response = await ExchangeTokenAsync(client, "123456", "Zoe");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    [Fact]
-    public async Task SimplifiedJoin_PinCollision_ReturnsConflict()
+    private static Task<HttpResponseMessage> ExchangeTokenAsync(HttpClient client, string pin, string displayName)
     {
-        await using var factory = new TestWebApplicationFactory();
-        using var client = factory.CreateClient();
-
-        var pin = "123456";
-        var space1 = await factory.CreateSpaceAsync("Space One");
-        var space2 = await factory.CreateSpaceAsync("Space Two");
-        await factory.CreateInvitationAsync(space1.Id, pin);
-        await factory.CreateInvitationAsync(space2.Id, pin);
-
-        var response = await ExchangeTokenSimplifiedAsync(client, pin, "Zoe");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-    }
-
-    [Fact]
-    public async Task SimplifiedJoin_WithExplicitSpaceId_BypassesCollisionCheck()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        using var client = factory.CreateClient();
-
-        var pin = "123456";
-        var space1 = await factory.CreateSpaceAsync("Space One");
-        var space2 = await factory.CreateSpaceAsync("Space Two");
-        await factory.CreateInvitationAsync(space1.Id, pin);
-        await factory.CreateInvitationAsync(space2.Id, pin);
-
-        var response = await ExchangeTokenWithOptionalSpaceIdAsync(client, pin, "Zoe", space1.Id);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var token = await ReadTokenAsync(response);
-        var payload = DecodeJwtPayload(token);
-        payload["space_id"].GetString().Should().Be(space1.Id.ToString());
-    }
-
-    private static Task<HttpResponseMessage> ExchangeTokenAsync(HttpClient client, Guid spaceId, string pin, string displayName)
-    {
-        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName, spaceId));
-    }
-
-    private static Task<HttpResponseMessage> ExchangeTokenSimplifiedAsync(HttpClient client, string pin, string displayName)
-    {
-        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName, null));
-    }
-
-    private static Task<HttpResponseMessage> ExchangeTokenWithOptionalSpaceIdAsync(HttpClient client, string pin, string displayName, Guid? spaceId)
-    {
-        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName, spaceId));
+        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName));
     }
 
     private static async Task<HttpResponseMessage> GetProtectedEndpointAsync(HttpClient client, string? token = null)
@@ -479,7 +421,7 @@ public class TokenEndpointTests
         return Convert.FromBase64String(padded);
     }
 
-    private sealed record ExchangeTokenSimplifiedRequest(string Pin, string DisplayName, Guid? SpaceId);
+    private sealed record ExchangeTokenSimplifiedRequest(string Pin, string DisplayName);
 
     private sealed record TokenResponse(string Token);
 

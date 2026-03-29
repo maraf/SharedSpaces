@@ -42,45 +42,15 @@ public static class TokenEndpoints
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
         var hashedPin = InvitationPinHasher.HashPin(request.Pin.Trim(), adminSecret);
 
-        Space? space = null;
-        SpaceInvitation? invitation;
-
-        if (request.SpaceId.HasValue)
-        {
-            space = await db.Spaces
-                .AsNoTracking()
-                .SingleOrDefaultAsync(existingSpace => existingSpace.Id == request.SpaceId.Value);
-
-            if (space == null)
-            {
-                return Results.NotFound(new { Error = "Space not found" });
-            }
-
-            invitation = await db.SpaceInvitations
-                .FirstOrDefaultAsync(i => i.SpaceId == request.SpaceId.Value && i.Pin == hashedPin);
-        }
-        else
-        {
-            var matchingInvitations = await db.SpaceInvitations
-                .Where(i => i.Pin == hashedPin)
-                .Take(2)
-                .ToListAsync();
-
-            if (matchingInvitations.Count > 1)
-            {
-                return Results.Conflict(new { Error = "Multiple invitations match this PIN. Please provide the space ID." });
-            }
-
-            invitation = matchingInvitations.SingleOrDefault();
-        }
+        var invitation = await db.SpaceInvitations
+            .FirstOrDefaultAsync(i => i.Pin == hashedPin);
 
         if (invitation == null)
         {
             return Results.Unauthorized();
         }
 
-        // Load space once if not already loaded (when spaceId was not provided in the request)
-        space ??= await db.Spaces
+        var space = await db.Spaces
             .AsNoTracking()
             .SingleOrDefaultAsync(s => s.Id == invitation.SpaceId);
 

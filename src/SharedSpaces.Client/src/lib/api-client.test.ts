@@ -26,7 +26,7 @@ describe('api-client', () => {
       expect(result).toEqual(mockResponse);
     });
 
-    it('calls correct URL with correct method and headers', async () => {
+    it('calls /v1/tokens with correct method and headers', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
@@ -36,7 +36,6 @@ describe('api-client', () => {
 
       await exchangeToken(
         'http://localhost:5000',
-        '550e8400-e29b-41d4-a716-446655440000',
         '123456',
         'Alice'
       );
@@ -49,7 +48,6 @@ describe('api-client', () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            spaceId: '550e8400-e29b-41d4-a716-446655440000',
             pin: '123456',
             displayName: 'Alice',
           }),
@@ -64,11 +62,11 @@ describe('api-client', () => {
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', '')
+        exchangeToken('http://localhost:5000', '123456', '')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', '')
+        exchangeToken('http://localhost:5000', '123456', '')
       ).rejects.toThrow('Invalid request');
     });
 
@@ -79,7 +77,7 @@ describe('api-client', () => {
       });
 
       try {
-        await exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', '');
+        await exchangeToken('http://localhost:5000', '123456', '');
       } catch (error) {
         expect(error).toBeInstanceOf(TokenExchangeError);
         expect((error as TokenExchangeError).statusCode).toBe(400);
@@ -93,11 +91,11 @@ describe('api-client', () => {
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'wrong', 'Alice')
+        exchangeToken('http://localhost:5000', 'wrong', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'wrong', 'Alice')
+        exchangeToken('http://localhost:5000', 'wrong', 'Alice')
       ).rejects.toThrow('Invalid PIN');
     });
 
@@ -108,26 +106,26 @@ describe('api-client', () => {
       });
 
       try {
-        await exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'wrong', 'Alice');
+        await exchangeToken('http://localhost:5000', 'wrong', 'Alice');
       } catch (error) {
         expect(error).toBeInstanceOf(TokenExchangeError);
         expect((error as TokenExchangeError).statusCode).toBe(401);
       }
     });
 
-    it('throws TokenExchangeError on 404 response (space not found)', async () => {
+    it('throws TokenExchangeError on 404 response (endpoint not found)', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-999999999999', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-999999999999', '123456', 'Alice')
-      ).rejects.toThrow('Space not found');
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
+      ).rejects.toThrow('Token endpoint not found');
     });
 
     it('throws TokenExchangeError with statusCode 404', async () => {
@@ -137,7 +135,7 @@ describe('api-client', () => {
       });
 
       try {
-        await exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-999999999999', '123456', 'Alice');
+        await exchangeToken('http://localhost:5000', '123456', 'Alice');
       } catch (error) {
         expect(error).toBeInstanceOf(TokenExchangeError);
         expect((error as TokenExchangeError).statusCode).toBe(404);
@@ -148,11 +146,11 @@ describe('api-client', () => {
       globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow('Network error');
     });
 
@@ -166,11 +164,11 @@ describe('api-client', () => {
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow('Invalid response from server');
     });
 
@@ -182,11 +180,11 @@ describe('api-client', () => {
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow('Invalid response from server');
     });
 
@@ -198,11 +196,11 @@ describe('api-client', () => {
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow('Invalid response from server');
     });
 
@@ -211,7 +209,7 @@ describe('api-client', () => {
       globalThis.fetch = vi.fn().mockRejectedValue(networkError);
 
       try {
-        await exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice');
+        await exchangeToken('http://localhost:5000', '123456', 'Alice');
       } catch (error) {
         expect(error).toBeInstanceOf(TokenExchangeError);
         expect((error as TokenExchangeError).originalError).toBe(networkError);
@@ -225,15 +223,16 @@ describe('api-client', () => {
       });
 
       await expect(
-        exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice')
+        exchangeToken('http://localhost:5000', '123456', 'Alice')
       ).rejects.toThrow(TokenExchangeError);
 
       try {
-        await exchangeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', '123456', 'Alice');
+        await exchangeToken('http://localhost:5000', '123456', 'Alice');
       } catch (error) {
         expect((error as TokenExchangeError).statusCode).toBe(500);
         expect((error as TokenExchangeError).message).toContain('500');
       }
     });
+
   });
 });
