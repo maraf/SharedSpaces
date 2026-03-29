@@ -5,15 +5,20 @@
 namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class AddPinIndex : Migration
+    public partial class MakePinIndexUnique : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropIndex(
+                name: "IX_SpaceInvitations_Pin",
+                table: "SpaceInvitations");
+
             migrationBuilder.CreateIndex(
                 name: "IX_SpaceInvitations_Pin",
                 table: "SpaceInvitations",
-                column: "Pin");
+                column: "Pin",
+                unique: true);
         }
 
         /// <inheritdoc />
@@ -22,6 +27,11 @@ namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
             migrationBuilder.DropIndex(
                 name: "IX_SpaceInvitations_Pin",
                 table: "SpaceInvitations");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_SpaceInvitations_Pin",
+                table: "SpaceInvitations",
+                column: "Pin");
         }
     }
 }

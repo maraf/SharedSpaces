@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using QRCoder;
 using SharedSpaces.Server.Domain;
@@ -89,9 +90,9 @@ public static class InvitationEndpoints
                 await db.SaveChangesAsync();
                 break;
             }
-            catch (DbUpdateException) when (attempt < maxRetries - 1)
+            catch (DbUpdateException ex) when (attempt < maxRetries - 1 && IsUniqueConstraintViolation(ex))
             {
-                // Unique constraint violation — PIN collision, retry with a new PIN
+                // PIN collision — detach and retry with a new PIN
                 db.Entry(invitation).State = EntityState.Detached;
             }
         }
@@ -144,6 +145,11 @@ public static class InvitationEndpoints
     private static string GeneratePin()
     {
         return RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        return ex.InnerException is SqliteException { SqliteErrorCode: 19 };
     }
 
     private static string GenerateQrCode(string data)

@@ -11,8 +11,8 @@ using SharedSpaces.Server.Infrastructure.Persistence;
 namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260328185754_AddPinIndex")]
-    partial class AddPinIndex
+    [Migration("20260329064632_MakePinIndexUnique")]
+    partial class MakePinIndexUnique
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -56,7 +56,8 @@ namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Pin");
+                    b.HasIndex("Pin")
+                        .IsUnique();
 
                     b.HasIndex("SpaceId");
 
