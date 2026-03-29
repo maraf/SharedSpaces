@@ -82,14 +82,10 @@ describe('invitation', () => {
       expect(result?.spaceId).toBeUndefined();
     });
 
-    it('accepts PINs of various lengths in 2-part', () => {
-      const shortPin = parseInvitationString('https://api.example.com|1');
-      const longPin = parseInvitationString('https://api.example.com|123456789012');
-      
-      expect(shortPin).not.toBeNull();
-      expect(shortPin?.pin).toBe('1');
-      expect(longPin).not.toBeNull();
-      expect(longPin?.pin).toBe('123456789012');
+    it('rejects PINs that are not exactly 6 digits in 2-part', () => {
+      expect(parseInvitationString('https://api.example.com|1')).toBeNull();
+      expect(parseInvitationString('https://api.example.com|123456789012')).toBeNull();
+      expect(parseInvitationString('https://api.example.com|abcdef')).toBeNull();
     });
 
     // ========== Discrimination between formats ==========
@@ -199,16 +195,16 @@ describe('invitation', () => {
       expect(result).toBeNull();
     });
 
-    it('accepts PINs of various lengths in 3-part', () => {
-      const shortPin = parseInvitationString(
+    it('rejects PINs that are not exactly 6 digits in 3-part', () => {
+      expect(parseInvitationString(
         'https://api.example.com|550e8400-e29b-41d4-a716-446655440000|1'
-      );
-      const longPin = parseInvitationString(
+      )).toBeNull();
+      expect(parseInvitationString(
         'https://api.example.com|550e8400-e29b-41d4-a716-446655440000|123456789012'
-      );
-      
-      expect(shortPin).not.toBeNull();
-      expect(longPin).not.toBeNull();
+      )).toBeNull();
+      expect(parseInvitationString(
+        'https://api.example.com|550e8400-e29b-41d4-a716-446655440000|abcdef'
+      )).toBeNull();
     });
   });
 });

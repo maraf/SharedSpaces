@@ -1,0 +1,37 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
+{
+    /// <inheritdoc />
+    public partial class MakePinIndexUnique : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropIndex(
+                name: "IX_SpaceInvitations_Pin",
+                table: "SpaceInvitations");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_SpaceInvitations_Pin",
+                table: "SpaceInvitations",
+                column: "Pin",
+                unique: true);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropIndex(
+                name: "IX_SpaceInvitations_Pin",
+                table: "SpaceInvitations");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_SpaceInvitations_Pin",
+                table: "SpaceInvitations",
+                column: "Pin");
+        }
+    }
+}

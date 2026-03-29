@@ -12,35 +12,12 @@ public static class TokenEndpoints
 {
     public static IEndpointRouteBuilder MapTokenEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/v1/spaces/{spaceId:guid}/tokens");
-        group.MapPost("/", ExchangePinForToken);
-
-        app.MapPost("/v1/tokens", ExchangePinForTokenSimplified);
+        app.MapPost("/v1/tokens", ExchangePinForToken);
 
         return app;
     }
 
     private static async Task<IResult> ExchangePinForToken(
-        Guid spaceId,
-        CreateTokenRequest request,
-        AppDbContext db,
-        IConfiguration configuration,
-        HttpRequest httpRequest)
-    {
-        return await ExchangePinForTokenCore(spaceId, request, db, configuration, httpRequest);
-    }
-
-    private static async Task<IResult> ExchangePinForTokenSimplified(
-        CreateTokenRequest request,
-        AppDbContext db,
-        IConfiguration configuration,
-        HttpRequest httpRequest)
-    {
-        return await ExchangePinForTokenCore(request.SpaceId, request, db, configuration, httpRequest);
-    }
-
-    private static async Task<IResult> ExchangePinForTokenCore(
-        Guid? spaceId,
         CreateTokenRequest request,
         AppDbContext db,
         IConfiguration configuration,
@@ -65,13 +42,14 @@ public static class TokenEndpoints
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
         var hashedPin = InvitationPinHasher.HashPin(request.Pin.Trim(), adminSecret);
 
+        Space? space = null;
         SpaceInvitation? invitation;
 
-        if (spaceId.HasValue)
+        if (request.SpaceId.HasValue)
         {
-            var space = await db.Spaces
+            space = await db.Spaces
                 .AsNoTracking()
-                .SingleOrDefaultAsync(existingSpace => existingSpace.Id == spaceId.Value);
+                .SingleOrDefaultAsync(existingSpace => existingSpace.Id == request.SpaceId.Value);
 
             if (space == null)
             {
@@ -79,7 +57,7 @@ public static class TokenEndpoints
             }
 
             invitation = await db.SpaceInvitations
-                .FirstOrDefaultAsync(i => i.SpaceId == spaceId.Value && i.Pin == hashedPin);
+                .FirstOrDefaultAsync(i => i.SpaceId == request.SpaceId.Value && i.Pin == hashedPin);
         }
         else
         {
@@ -101,19 +79,19 @@ public static class TokenEndpoints
             return Results.Unauthorized();
         }
 
-        var resolvedSpaceId = invitation.SpaceId;
-        var resolvedSpace = await db.Spaces
+        // Load space once if not already loaded (when spaceId was not provided in the request)
+        space ??= await db.Spaces
             .AsNoTracking()
-            .SingleOrDefaultAsync(s => s.Id == resolvedSpaceId);
+            .SingleOrDefaultAsync(s => s.Id == invitation.SpaceId);
 
-        if (resolvedSpace == null)
+        if (space == null)
         {
             return Results.NotFound(new { Error = "Space not found" });
         }
 
         var member = new SpaceMember
         {
-            SpaceId = resolvedSpaceId,
+            SpaceId = invitation.SpaceId,
             DisplayName = displayName,
             JoinedAt = DateTime.UtcNow,
             IsRevoked = false
@@ -132,7 +110,7 @@ public static class TokenEndpoints
         }
 
         var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
-        var token = CreateToken(member, serverUrl, resolvedSpace.Name, configuration);
+        var token = CreateToken(member, serverUrl, space.Name, configuration);
         return Results.Ok(new TokenResponse(token));
     }
 

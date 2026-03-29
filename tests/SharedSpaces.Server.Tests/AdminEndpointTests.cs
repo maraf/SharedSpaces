@@ -1206,7 +1206,7 @@ public class AdminEndpointTests
         string pin,
         string displayName)
     {
-        return client.PostAsJsonAsync($"/v1/spaces/{spaceId}/tokens", new ExchangeTokenRequest(pin, displayName));
+        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenRequest(pin, displayName, spaceId));
     }
 
     private static async Task<SpaceResponse> CreateSpaceViaAdminAsync(HttpClient client, string name)
@@ -1448,7 +1448,7 @@ public class AdminEndpointTests
 
     private sealed record CreateInvitationRequest(string? ClientAppUrl);
 
-    private sealed record ExchangeTokenRequest(string Pin, string DisplayName);
+    private sealed record ExchangeTokenRequest(string Pin, string DisplayName, Guid? SpaceId = null);
 
     private sealed record InvitationResponse(string InvitationString, string? QrCodeBase64);
 

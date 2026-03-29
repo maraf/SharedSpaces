@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using QRCoder;
 using SharedSpaces.Server.Domain;
@@ -63,22 +64,38 @@ public static class InvitationEndpoints
 
         var adminSecret = configuration["Admin:Secret"] ?? throw new InvalidOperationException("Admin:Secret not configured");
 
+        // Retry loop: generate PINs until we find one that doesn't violate the UNIQUE constraint.
+        // We rely on the DB-level unique index on Pin rather than a pre-check with AnyAsync,
+        // which would be race-prone under concurrent requests.
+        const int maxRetries = 10;
         string pin;
         string hashedPin;
-        do
+        SpaceInvitation invitation;
+
+        for (var attempt = 0; ; attempt++)
         {
             pin = GeneratePin();
             hashedPin = InvitationPinHasher.HashPin(pin, adminSecret);
-        } while (await db.SpaceInvitations.AnyAsync(i => i.Pin == hashedPin));
 
-        var invitation = new SpaceInvitation
-        {
-            SpaceId = spaceId,
-            Pin = hashedPin
-        };
+            invitation = new SpaceInvitation
+            {
+                SpaceId = spaceId,
+                Pin = hashedPin
+            };
 
-        db.SpaceInvitations.Add(invitation);
-        await db.SaveChangesAsync();
+            db.SpaceInvitations.Add(invitation);
+
+            try
+            {
+                await db.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateException ex) when (attempt < maxRetries - 1 && IsUniqueConstraintViolation(ex))
+            {
+                // PIN collision — detach and retry with a new PIN
+                db.Entry(invitation).State = EntityState.Detached;
+            }
+        }
 
         var serverUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
         var invitationString = $"{serverUrl}|{pin}";
@@ -128,6 +145,11 @@ public static class InvitationEndpoints
     private static string GeneratePin()
     {
         return RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        return ex.InnerException is SqliteException { SqliteErrorCode: 19 };
     }
 
     private static string GenerateQrCode(string data)

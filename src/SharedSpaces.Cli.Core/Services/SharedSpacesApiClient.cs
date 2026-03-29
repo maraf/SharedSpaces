@@ -25,19 +25,8 @@ public sealed class SharedSpacesApiClient : IDisposable
         string displayName,
         CancellationToken ct = default)
     {
-        string url;
-        CreateTokenRequest request;
-
-        if (spaceId is not null)
-        {
-            url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/tokens";
-            request = new CreateTokenRequest(pin, displayName);
-        }
-        else
-        {
-            url = $"{serverUrl.TrimEnd('/')}/v1/tokens";
-            request = new CreateTokenRequest(pin, displayName);
-        }
+        var url = $"{serverUrl.TrimEnd('/')}/v1/tokens";
+        var request = new CreateTokenRequest(pin, displayName, spaceId);
 
         using var response = await _http.PostAsJsonAsync(url, request, ct);
 
@@ -141,7 +130,8 @@ public sealed class SharedSpacesApiClient : IDisposable
 
 public sealed record CreateTokenRequest(
     [property: JsonPropertyName("pin")] string Pin,
-    [property: JsonPropertyName("displayName")] string DisplayName);
+    [property: JsonPropertyName("displayName")] string DisplayName,
+    [property: JsonPropertyName("spaceId")] string? SpaceId = null);
 
 public sealed record TokenResponse(
     [property: JsonPropertyName("token")] string Token);

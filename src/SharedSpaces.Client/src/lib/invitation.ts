@@ -113,8 +113,9 @@ function isValidGuid(guid: string): boolean {
 }
 
 /**
- * Validate PIN format (numeric)
+ * Validate PIN format (exactly 6 digits). Enforced at generation and parsing;
+ * the token exchange endpoint accepts any non-empty PIN and hashes it.
  */
 function isValidPin(pin: string): boolean {
-  return /^\d+$/.test(pin);
+  return /^\d{6}$/.test(pin);
 }
