@@ -20,6 +20,40 @@ namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
 
+            modelBuilder.Entity("SharedSpaces.Server.Domain.SharedLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SpaceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("Token")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedBy");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("SpaceId", "ItemId");
+
+                    b.ToTable("SharedLinks", (string)null);
+                });
+
             modelBuilder.Entity("SharedSpaces.Server.Domain.Space", b =>
                 {
                     b.Property<Guid>("Id")
@@ -127,6 +161,33 @@ namespace SharedSpaces.Server.Infrastructure.Persistence.Migrations
                     b.HasIndex("SpaceId");
 
                     b.ToTable("SpaceMembers", (string)null);
+                });
+
+            modelBuilder.Entity("SharedSpaces.Server.Domain.SharedLink", b =>
+                {
+                    b.HasOne("SharedSpaces.Server.Domain.SpaceMember", "Creator")
+                        .WithMany()
+                        .HasForeignKey("CreatedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SharedSpaces.Server.Domain.SpaceItem", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SharedSpaces.Server.Domain.Space", "Space")
+                        .WithMany()
+                        .HasForeignKey("SpaceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Creator");
+
+                    b.Navigation("Item");
+
+                    b.Navigation("Space");
                 });
 
             modelBuilder.Entity("SharedSpaces.Server.Domain.SpaceInvitation", b =>
