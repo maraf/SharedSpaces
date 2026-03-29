@@ -13,6 +13,7 @@ const inboxFillSvg14 = inboxFillSvg.replace(/width="16"/, 'width="14"').replace(
 import './features/admin/admin-view';
 import './features/join/join-view';
 import './features/space-view/space-view';
+import './features/shared-item/shared-item-view';
 import {
   appContext,
   getRuntimeAppConfig,
@@ -69,6 +70,7 @@ export class AppShell extends BaseElement {
   @state() private pendingShareCount = 0;
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private sheetOpen = false;
+  @state() private sharedToken?: string;
 
   private headerElement?: HTMLElement;
   private headerResizeObserver?: ResizeObserver;
@@ -91,6 +93,15 @@ export class AppShell extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
+
+    // Check for /shared/{token} route first — standalone view, no app chrome
+    const sharedMatch = window.location.pathname.match(/^\/shared\/([^/]+)$/);
+    if (sharedMatch) {
+      this.sharedToken = sharedMatch[1];
+      this.view = 'shared-item';
+      return;
+    }
+
     this.loadSpacesFromStorage();
 
     const invitation = parseInvitationFromUrl();
@@ -335,6 +346,14 @@ export class AppShell extends BaseElement {
     'border-sky-500 bg-sky-950/60 text-sky-300';
 
   override render() {
+    // Shared-item view is standalone — no app chrome (header, nav, bottom bar)
+    if (this.view === 'shared-item' && this.sharedToken) {
+      return html`<shared-item-view
+        .token=${this.sharedToken}
+        .apiBaseUrl=${this.appConfig.apiBaseUrl}
+      ></shared-item-view>`;
+    }
+
     return html`
       <div
         class="min-h-svh bg-slate-950 px-4 pb-20 sm:pb-6 text-slate-50 sm:px-6 lg:px-8"

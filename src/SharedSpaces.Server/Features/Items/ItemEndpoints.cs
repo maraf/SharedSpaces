@@ -123,18 +123,8 @@ public static class ItemEndpoints
             return Results.NotFound(new { Error = "Item not found" });
         }
 
-        Stream stream;
-        try
-        {
-            stream = await fileStorage.ReadAsync(spaceId, itemId, cancellationToken);
-        }
-        catch (FileNotFoundException)
-        {
-            return Results.NotFound(new { Error = "Item not found" });
-        }
-
-        var fileName = !string.IsNullOrWhiteSpace(item.Content) ? item.Content : $"{itemId}.bin";
-        return Results.File(stream, "application/octet-stream", fileName);
+        return await SharedLinks.SharedLinkEndpoints.DownloadFileCore(
+            item.SpaceId, item.Id, item.Content, fileStorage, cancellationToken);
     }
 
     private static async Task<IResult> UpsertItem(
