@@ -16,6 +16,15 @@
 
 ## Learnings
 
+- **Migration snapshot validation (2026-03-29):**
+  - Created `MigrationSnapshotTests.MigrationSnapshot_ShouldMatchCurrentModel` test to catch EF Core migration snapshot desync bugs at test time, not server startup.
+  - Test compares the current `AppDbContext` model against the last migration's `AppDbContextModelSnapshot` using `IMigrationsModelDiffer.HasDifferences()`.
+  - Both models must be initialized with `IModelRuntimeInitializer.Initialize(model, designTime: true, validationLogger: null)` before calling `GetRelationalModel()` for comparison — raw models from `IMigrationsAssembly.ModelSnapshot.Model` and `IModelSource.GetModel()` are not finalized and will throw `InvalidOperationException`.
+  - Test uses SQLite (not InMemoryDatabase) because migrations require a real database provider — `options.UseSqlite("DataSource=:memory:")`.
+  - Key services retrieved from `DbContext.GetInfrastructure().GetRequiredService<T>()`: `IMigrationsModelDiffer`, `IMigrationsAssembly`, `IModelRuntimeInitializer`, `IModelSource`.
+  - Test file: `tests/SharedSpaces.Server.Tests/MigrationSnapshotTests.cs`.
+  - This prevents production crashes from missing entities in Designer.cs files (e.g., the `SharedLink` desync that caused the original crash).
+
 - **Client test patterns for transfer feature (2026-03-27):**
   - API tests in `space-api.test.ts` use `mockFetch()` / `mockFetchReject()` helpers and test URL construction, request body (JSON.parse of body), auth headers, and error status codes (401/403/413/500/network).
   - Component tests in `space-view.test.ts` access private state/methods via `(element as any)` cast. Must set `isLoading = false` before mounting to DOM for render tests, otherwise "Loading space…" is shown.
