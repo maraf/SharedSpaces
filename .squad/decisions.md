@@ -4864,3 +4864,34 @@ Make PINs globally unique via retry-on-collision, allowing `serverUrl|pin` as th
 - **Unique constraint on  Rejected: DB-level errors on collision instead of graceful retryPin** 
 - **Longer  Rejected: 6 digits is user-friendly; collision negligible at scalePINs** 
 
+
+---
+
+# Decision: Dual-Endpoint Routing in exchangeToken
+
+**Decision Date:** 2026-03-21  
+**Author:** Wash  
+**PR:** #148 (Review Feedback on #144)  
+**Status:** Decided
+
+## Context
+
+PR #148 review feedback on #144 fix raised questions about token endpoint routing during the transition from 3-part to 2-part invitation format.
+
+## Decision
+
+`exchangeToken()` uses two endpoints based on whether `spaceId` is present:
+
+- **With spaceId** (legacy 3-part invitation): `POST /v1/spaces/${spaceId}/tokens` — for backward compat with older servers
+- **Without spaceId** (new 2-part invitation): `POST /v1/tokens` — simplified endpoint added in PR #143
+
+The Space ID input field is removed from the manual join form UI. `spaceId` is only populated internally when parsing a legacy invitation string or URL.
+
+## Rationale
+
+PINs are globally unique, so users shouldn't need to know or enter a Space ID. But legacy invitation strings still contain one, and older servers may only have the `/v1/spaces/{id}/tokens` endpoint. Routing based on presence keeps both paths working without user friction.
+
+## Impact
+
+- **Kaylee (Backend):** Both endpoints must remain available on the server
+- **Zoe (Tests):** New test added for undefined spaceId path; existing tests updated for legacy URL format

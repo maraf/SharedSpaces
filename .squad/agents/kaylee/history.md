@@ -972,3 +972,80 @@ Your backend feasibility study has been merged into shared decision log. Key fin
 
 **Next:** Implementation checklist + assigned work once token strategy is settled.
 
+
+---
+
+## Session 2026-03-29: EF Core Migration Fix
+
+**Completed:** Fixed PendingModelChangesWarning crash on server startup
+
+### Issue
+Server was crashing on startup with EF Core `PendingModelChangesWarning` due to stale model snapshot not reflecting the `SharedLink` entity added in Issue #147.
+
+### Root Cause
+After the shared link feature was added, the EF Core model snapshot (`AppDbContextModelSnapshot.cs`) was out of sync with the actual DbContext configuration. This caused EF Core to detect pending model changes on initialization and fail startup.
+
+### Fix Applied
+- Regenerated `AppDbContextModelSnapshot.cs` to reflect current model state including `SharedLink` entity
+- Updated migration designer metadata in `20260329064632_MakePinIndexUnique.Designer.cs`
+- Finalized migration in `20260329064632_MakePinIndexUnique.cs`
+
+### Commit
+```
+fix(server): sync EF Core model snapshot with SharedLink entity
+SHA: bfa6ed2
+Files: 3 migration-related files
+```
+
+### Result
+✅ Server startup now succeeds without warnings or crashes  
+✅ EF Core model snapshot correctly reflects all entities  
+✅ Migration pipeline validated and working correctly
+
+### Impact
+- Zero blockers for dependent client work (Wash frontend on Issue #147)
+- Migration strategy for similar future entity additions is now clear
+
+---
+
+## Session 2026-03-29: Proper EF Core Migration Fix
+
+**Completed:** Fixed the previous incorrect migration fix by properly restoring MakePinIndexUnique migration with updated snapshot
+
+### What Went Wrong With First Fix
+The initial fix deleted the `MakePinIndexUnique` migration entirely to resolve the `PendingModelChangesWarning`. This was WRONG because:
+- The migration implemented a critical business constraint (making the PIN index unique)
+- Deleting migrations breaks the migration history and can cause database inconsistencies
+- The real issue wasn't the migration itself, but its Designer.cs snapshot being out of sync
+
+### The Real Problem
+The `MakePinIndexUnique` migration's Designer.cs snapshot was missing the `SharedLink` entity, which had been added in a prior migration (`AddSharedLinks`). EF Core detected this mismatch between:
+- Current model (includes SharedLink)
+- Last migration snapshot (missing SharedLink)
+
+This triggered the `PendingModelChangesWarning` on server startup.
+
+### Proper Fix Strategy
+1. **Restore the migration** from git history (before it was deleted)
+2. **Regenerate the Designer.cs** by removing and re-adding the migration
+3. **Manually fix the Up/Down methods** because EF Core auto-generated them incorrectly (tried to recreate SharedLinks table)
+4. **Verify the fix**:
+   - Designer.cs now includes SharedLink entity
+   - Up/Down methods still make the Pin index unique (original intent preserved)
+   - AppDbContextModelSnapshot remains correct
+   - Server builds successfully
+
+### Technical Details
+- Migration timeline: AddPinIndex → AddSharedLinks → MakePinIndexUnique
+- When regenerating a migration, EF Core compares current model with the snapshot from the PREVIOUS migration
+- If the previous migration's snapshot is missing entities that exist in the current model, EF Core will generate migration code to create those entities (incorrectly)
+- Solution: Manually edit the generated Up/Down methods to match the original intent while keeping the updated Designer.cs snapshot
+
+### Key Learning
+**Never delete migrations to fix snapshot issues.** Instead:
+1. Identify which migration has the stale snapshot
+2. Remove and regenerate that specific migration
+3. Verify the generated Up/Down methods match the original intent
+4. Manually fix if EF Core auto-generated incorrect changes
+
+This preserves migration history integrity while fixing the snapshot sync issue.
