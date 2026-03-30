@@ -124,6 +124,27 @@ public class SharedLinkEndpointTests
     }
 
     [Fact]
+    public async Task CreateSharedLink_WithOverLimitName_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Over limit name test",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        var overLimitName = new string('A', 201);
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token, overLimitName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task CreateSharedLink_ForFileItem_Returns201()
     {
         await using var factory = new TestWebApplicationFactory();
