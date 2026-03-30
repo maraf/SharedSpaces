@@ -1107,3 +1107,12 @@ Added optional name field to shared link creation and display, enabling users to
 **Session documented in:**
 - `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
 - Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`
+
+## Learnings — PR Review Fixes for Shared Link Modal — 2026-03-30
+
+**PR #162 review feedback addressed (3 items):**
+
+- **Type contract alignment:** `SharedLinkResponse.name` changed from `name?: string` to `name: string | null` — server returns explicit `null` for unnamed links, not `undefined`. Always match server nullability in client types.
+- **Accessibility:** Added `aria-label="Link name"` to the share-link name input. Inputs with only placeholder text are invisible to screen readers.
+- **Client-side validation parity:** Added `maxlength="200"` to match the server's 200-char EF constraint. Always mirror server-side constraints in client inputs for immediate feedback.
+- **PR comment reply API:** Use `pulls/{number}/comments/{id}/replies` endpoint (needs PR number), not `pulls/comments/{id}/replies`.
