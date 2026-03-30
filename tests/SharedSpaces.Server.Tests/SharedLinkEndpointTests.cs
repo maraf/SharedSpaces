@@ -422,8 +422,63 @@ public class SharedLinkEndpointTests
     }
 
     // ──────────────────────────────────────────────
+    // Share link creation: ServerUrl in response
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateSharedLink_ResponseIncludesServerUrl()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("ServerUrl Space");
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Check serverUrl",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        body.ServerUrl.Should().NotBeNullOrEmpty("the response must include the server URL for client-side share link encoding");
+        body.ServerUrl.Should().StartWith("http", "the server URL should be a valid HTTP(S) URL");
+    }
+
+    // ──────────────────────────────────────────────
     // Unauthenticated: Get shared item
     // ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetSharedItem_WithRawGuidToken_ReturnsItem_BackwardCompat()
+    {
+        // Backward compatibility: clients that still use legacy /shared/{guid} format
+        // should continue to work — the server accepts raw GUID tokens.
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Legacy Compat");
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Legacy shared content",
+            sharedAt: DateTime.UtcNow.AddHours(-1), fileSize: 0);
+
+        // Seed directly via DB (simulates a link created before the base64 encoding change)
+        var link = await factory.CreateSharedLinkAsync(space.Id, item.Id, member.Id, DateTime.UtcNow);
+
+        // Access with the raw GUID token — no base64 encoding
+        var response = await GetSharedItemAsync(client, link.Token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<SharedItemResponse>(response);
+        body.ContentType.Should().Be("text");
+        body.Content.Should().Be("Legacy shared content");
+    }
 
     [Fact]
     public async Task GetSharedItem_TextItem_ReturnsMetadataWithoutAuth()
@@ -749,7 +804,8 @@ public class SharedLinkEndpointTests
         Guid ItemId,
         Guid CreatedBy,
         DateTime CreatedAt,
-        string? Name);
+        string? Name,
+        string? ServerUrl = null);
 
     private sealed record SharedItemResponse(
         string ContentType,
