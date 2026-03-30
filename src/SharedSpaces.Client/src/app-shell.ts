@@ -73,6 +73,7 @@ export class AppShell extends BaseElement {
   @state() private sheetOpen = false;
   @state() private sharedToken?: string;
   @state() private sharedApiUrl?: string;
+  @state() private sharedError?: string;
 
   private headerElement?: HTMLElement;
   private headerResizeObserver?: ResizeObserver;
@@ -101,7 +102,8 @@ export class AppShell extends BaseElement {
     if (sharedMatch) {
       const result = decodeShareLinkSegment(sharedMatch[1]);
       if (!result) {
-        console.error('Invalid share link segment:', sharedMatch[1]);
+        this.sharedError = 'Invalid share link.';
+        this.view = 'shared-item';
         return;
       }
       this.sharedToken = result.token;
@@ -355,11 +357,31 @@ export class AppShell extends BaseElement {
 
   override render() {
     // Shared-item view is standalone — no app chrome (header, nav, bottom bar)
-    if (this.view === 'shared-item' && this.sharedToken) {
-      return html`<shared-item-view
-        .token=${this.sharedToken}
-        .apiBaseUrl=${this.sharedApiUrl ?? this.appConfig.apiBaseUrl}
-      ></shared-item-view>`;
+    if (this.view === 'shared-item') {
+      if (this.sharedError) {
+        return html`
+          <div class="flex min-h-svh flex-col bg-slate-950 text-slate-50">
+            <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-8 sm:px-6">
+              <div class="mb-8 text-center">
+                <p class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300">SharedSpaces</p>
+              </div>
+              <div class="flex flex-1 flex-col items-center justify-start">
+                <div class="w-full max-w-md space-y-4 py-16 text-center">
+                  <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-slate-700 bg-slate-800/60">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                  </div>
+                  <p class="text-sm text-slate-400">${this.sharedError}</p>
+                </div>
+              </div>
+            </div>
+          </div>`;
+      }
+      if (this.sharedToken) {
+        return html`<shared-item-view
+          .token=${this.sharedToken}
+          .apiBaseUrl=${this.sharedApiUrl ?? this.appConfig.apiBaseUrl}
+        ></shared-item-view>`;
+      }
     }
 
     return html`
