@@ -10,7 +10,8 @@ public sealed record SharedLinkResponse(
     Guid ItemId,
     Guid CreatedBy,
     DateTime CreatedAt,
-    string? Name);
+    string? Name,
+    string? ServerUrl = null);
 
 public sealed record SharedItemResponse(
     string ContentType,

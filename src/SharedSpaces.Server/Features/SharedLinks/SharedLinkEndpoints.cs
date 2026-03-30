@@ -71,8 +71,9 @@ public static class SharedLinkEndpoints
         db.SharedLinks.Add(link);
         await db.SaveChangesAsync(cancellationToken);
 
+        var serverUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
         var response = new SharedLinkResponse(
-            link.Id, link.Token, link.SpaceId, link.ItemId, link.CreatedBy, link.CreatedAt, link.Name);
+            link.Id, link.Token, link.SpaceId, link.ItemId, link.CreatedBy, link.CreatedAt, link.Name, serverUrl);
 
         return Results.Created($"/v1/spaces/{spaceId}/items/{itemId}/share/{link.Id}", response);
     }
