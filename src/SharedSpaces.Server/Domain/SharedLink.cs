@@ -8,6 +8,7 @@ public class SharedLink
     public Guid ItemId { get; set; }
     public Guid CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? Name { get; set; }
     public Space Space { get; set; } = null!;
     public SpaceItem Item { get; set; } = null!;
     public SpaceMember Creator { get; set; } = null!;
