@@ -20,80 +20,65 @@ describe('base64UrlEncode / base64UrlDecode', () => {
     expect(encoded).not.toMatch(/[+/=]/);
     expect(base64UrlDecode(encoded)).toBe(input);
   });
+
+  it('restores padding for lengths not divisible by 4', () => {
+    // 1 byte → 2 base64url chars (needs ==)
+    expect(base64UrlDecode(base64UrlEncode('a'))).toBe('a');
+    // 2 bytes → 3 base64url chars (needs =)
+    expect(base64UrlDecode(base64UrlEncode('ab'))).toBe('ab');
+    // 3 bytes → 4 base64url chars (no padding)
+    expect(base64UrlDecode(base64UrlEncode('abc'))).toBe('abc');
+  });
+
+  it('throws on invalid base64url (length % 4 === 1)', () => {
+    expect(() => base64UrlDecode('A')).toThrow('Invalid base64url string');
+  });
 });
 
 describe('encodeShareLinkSegment / decodeShareLinkSegment', () => {
   const token = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
   const apiUrl = 'https://my-server.example.com';
-  const fallback = 'https://fallback.example.com';
 
   it('round-trips token and api', () => {
     const segment = encodeShareLinkSegment(token, apiUrl);
-    const result = decodeShareLinkSegment(segment, fallback);
-    expect(result.token).toBe(token);
-    expect(result.api).toBe(apiUrl);
+    const result = decodeShareLinkSegment(segment);
+    expect(result).not.toBeNull();
+    expect(result!.token).toBe(token);
+    expect(result!.api).toBe(apiUrl);
   });
 
   it('handles API URLs with paths and ports', () => {
     const complexUrl = 'https://host:8443/api/v2';
     const segment = encodeShareLinkSegment(token, complexUrl);
-    const result = decodeShareLinkSegment(segment, fallback);
-    expect(result.api).toBe(complexUrl);
-    expect(result.token).toBe(token);
+    const result = decodeShareLinkSegment(segment);
+    expect(result).not.toBeNull();
+    expect(result!.api).toBe(complexUrl);
+    expect(result!.token).toBe(token);
   });
 });
 
-describe('decodeShareLinkSegment – backward compatibility', () => {
-  const fallback = 'https://fallback.example.com';
-
-  it('treats a bare GUID as legacy token', () => {
+describe('decodeShareLinkSegment – invalid input', () => {
+  it('returns null for a bare GUID', () => {
     const guid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-    const result = decodeShareLinkSegment(guid, fallback);
-    expect(result.token).toBe(guid);
-    expect(result.api).toBe(fallback);
+    expect(decodeShareLinkSegment(guid)).toBeNull();
   });
 
-  it('treats an uppercase GUID as legacy token', () => {
-    const guid = 'A1B2C3D4-E5F6-7890-ABCD-EF1234567890';
-    const result = decodeShareLinkSegment(guid, fallback);
-    expect(result.token).toBe(guid);
-    expect(result.api).toBe(fallback);
+  it('returns null for non-base64 junk', () => {
+    expect(decodeShareLinkSegment('!!!not-base64!!!')).toBeNull();
   });
 
-  it('falls back for non-base64 junk', () => {
-    const junk = '!!!not-base64!!!';
-    const result = decodeShareLinkSegment(junk, fallback);
-    expect(result.token).toBe(junk);
-    expect(result.api).toBe(fallback);
-  });
-
-  it('falls back when base64 decodes but has no token param', () => {
+  it('returns null when base64 decodes but has no token param', () => {
     const noToken = base64UrlEncode('api=http://example.com');
-    const result = decodeShareLinkSegment(noToken, fallback);
-    expect(result.token).toBe(noToken);
-    expect(result.api).toBe(fallback);
+    expect(decodeShareLinkSegment(noToken)).toBeNull();
   });
 
-  it('falls back when base64 decodes but has no api param', () => {
+  it('returns null when base64 decodes but has no api param', () => {
     const noApi = base64UrlEncode('token=my-token');
-    const result = decodeShareLinkSegment(noApi, fallback);
-    expect(result.token).toBe(noApi);
-    expect(result.api).toBe(fallback);
+    expect(decodeShareLinkSegment(noApi)).toBeNull();
   });
 
-  it('falls back on empty string', () => {
-    const result = decodeShareLinkSegment('', fallback);
-    expect(result.token).toBe('');
-    expect(result.api).toBe(fallback);
-  });
-
-  it('uses the decoded API URL, not the fallback', () => {
-    const token = 'my-token';
-    const customApi = 'https://custom-server.example.com:9090';
-    const segment = encodeShareLinkSegment(token, customApi);
-    const result = decodeShareLinkSegment(segment, fallback);
-    expect(result.api).toBe(customApi);
-    expect(result.api).not.toBe(fallback);
+  it('returns null on empty string', () => {
+    expect(decodeShareLinkSegment('')).toBeNull();
   });
 });
 
@@ -121,9 +106,10 @@ describe('buildShareUrl', () => {
     const serverUrl = 'https://api.sharedspaces.io';
     const url = buildShareUrl(token, serverUrl);
     const segment = url.split('/shared/')[1];
-    const result = decodeShareLinkSegment(segment, 'https://unused.com');
-    expect(result.token).toBe(token);
-    expect(result.api).toBe(serverUrl);
+    const result = decodeShareLinkSegment(segment);
+    expect(result).not.toBeNull();
+    expect(result!.token).toBe(token);
+    expect(result!.api).toBe(serverUrl);
   });
 });
 
@@ -152,9 +138,10 @@ describe('GitHub Pages SPA redirect contract', () => {
 
     // After replaceState, app-shell parses the restored segment
     const restoredSegment = restoredPath.match(/^\/shared\/([^/]+)$/)![1];
-    const result = decodeShareLinkSegment(restoredSegment, 'https://fallback.com');
-    expect(result.token).toBe(token);
-    expect(result.api).toBe(api);
+    const result = decodeShareLinkSegment(restoredSegment);
+    expect(result).not.toBeNull();
+    expect(result!.token).toBe(token);
+    expect(result!.api).toBe(api);
   });
 
   it('handles search and hash through the redirect', () => {

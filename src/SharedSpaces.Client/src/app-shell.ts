@@ -99,12 +99,13 @@ export class AppShell extends BaseElement {
     // Check for /shared/{segment} route first — standalone view, no app chrome
     const sharedMatch = window.location.pathname.match(/^\/shared\/([^/]+)$/);
     if (sharedMatch) {
-      const { token, api } = decodeShareLinkSegment(
-        sharedMatch[1],
-        this.appConfig.apiBaseUrl,
-      );
-      this.sharedToken = token;
-      this.sharedApiUrl = api;
+      const result = decodeShareLinkSegment(sharedMatch[1]);
+      if (!result) {
+        console.error('Invalid share link segment:', sharedMatch[1]);
+        return;
+      }
+      this.sharedToken = result.token;
+      this.sharedApiUrl = result.api;
       this.view = 'shared-item';
       return;
     }
