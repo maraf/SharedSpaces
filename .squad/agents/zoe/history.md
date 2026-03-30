@@ -67,3 +67,28 @@
 - Next test areas: Cross-browser codec compatibility, edge case validation, performance testing for large files
 
 **Decisions documented:** File Preview Type Detection API contract (your decision locked by tests)
+
+## Team Update (2026-03-29)
+
+**Issue #159 in progress (Optional name for shared link):**
+- **Zoe:** Added 5 integration tests to `tests/SharedSpaces.Server.Tests/SharedLinkEndpointTests.cs` for the new optional `Name` property on SharedLink:
+  1. `CreateSharedLink_WithName_Returns201WithName` — POST with `{ "name": "My shared link" }` returns the name in the response
+  2. `CreateSharedLink_WithEmptyStringName_ReturnsCreatedWithNullName` — POST with `{ "name": "" }` treats empty as null (backward compatibility)
+  3. `CreateSharedLink_WithLongName_Succeeds` — POST with 200-character name succeeds
+  4. `ListSharedLinks_IncludesNameInResponse` — GET returns name in list for named links, null for unnamed
+  5. Updated existing `CreateSharedLink_ForTextItem_Returns201WithLinkDetails` to assert `Name` is null when not provided
+- Updated `CreateSharedLinkAsync()` helper to accept optional `name` parameter and send JSON body `{ "name": "..." }` when provided
+- Updated local `SharedLinkResponse` record to include `string? Name` property (matches production Models.cs)
+- Tests compile against current codebase; will pass once Kaylee's server implementation merges
+- **Key pattern:** Empty string names are normalized to null for storage — matches existing SharedSpaces pattern for optional strings
+
+## Learnings
+
+- **SharedLink name test patterns (2026-03-29):**
+  - Test file: `tests/SharedSpaces.Server.Tests/SharedLinkEndpointTests.cs`
+  - Request body pattern: `request.Content = JsonContent.Create(new { Name = name })` for POST with name
+  - No request body sent when name is null/omitted — preserves backward compatibility (existing clients sending empty POST still work)
+  - Empty string name (`""`) is normalized to null in response — test validates this server behavior
+  - Max length test (200 chars) validates entity constraint without triggering validation error
+  - List endpoint test creates both named and unnamed links, then verifies both appear correctly in response
+  - Public shared endpoint (`/v1/shared/{token}`) does NOT include name in `SharedItemResponse` — name is only for link management UI, not public consumption

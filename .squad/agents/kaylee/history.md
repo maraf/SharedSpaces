@@ -972,3 +972,14 @@ Your backend feasibility study has been merged into shared decision log. Key fin
 
 **Next:** Implementation checklist + assigned work once token strategy is settled.
 
+### Issue #159: Optional SharedLink Name (2026-03-30)
+
+**Changes:**
+- Added optional `Name` property (string?, max 200 chars) to `SharedLink` entity and EF configuration
+- Created `CreateSharedLinkRequest` record to accept optional name in POST body
+- Updated `SharedLinkResponse` to include `Name` in all shared link responses
+- Created migration `20260330112139_AddSharedLinkName` to add nullable Name column to SharedLinks table
+- Updated all endpoints (create, list) to handle the new Name property
+
+**Pattern reinforced:** When adding nullable properties to existing entities, follow the full vertical slice: entity → configuration → DTOs → endpoint mapping → migration. EF Core migrations capture schema changes after updating fluent configuration.
+

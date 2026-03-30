@@ -1047,3 +1047,50 @@ Your Issue #138 frontend analysis has been merged into shared decision log. Bonu
 4. Add error pages for expired/revoked/deleted links
 5. Mobile testing at 390844 for button wrapping
 
+
+---
+
+## Session 2026-03-28: Optional Name for Shared Links
+
+**Issue #159: Optional name for shared link**
+
+Added optional name field to shared link creation and display, enabling users to disambiguate where each link was shared.
+
+**Changes made:**
+1. **API types** (`space-api.ts`):
+   - Added `name?: string` to `SharedLinkResponse` interface
+   - Updated `createSharedLink()` to accept optional `name?: string` parameter
+   - Changed POST request to send JSON body `{ name }` instead of empty body
+   - Added `Content-Type: application/json` header for request
+
+2. **Share modal UI** (`space-view.ts`):
+   - Added `@state() private shareModalName = ''` for input state
+   - Added text input field above "Create new link" button with placeholder "Link name (optional)"
+   - Input follows Lit form state management patterns: `.value` property binding, `@input` handler, clears error on input
+   - Input disabled during async operations (`?disabled=${this.shareModalCreating}`)
+   - Clear name input after successful link creation
+   - Pass trimmed name to API (or `undefined` if empty)
+
+3. **Shared link display** (`renderShareLinkItem()`):
+   - Display name above URL when present
+   - Name shown as `text-sm font-medium text-white` (prominent but not dominant)
+   - URL remains as `font-mono text-xs text-slate-400` (secondary)
+   - Both have `truncate` and `title` attributes for overflow handling
+
+**Mobile considerations:**
+- Input field uses full width (`w-full`) and matches existing input styling
+- Wrapped in `space-y-2` container with button below
+- Tested at 390px width (mobile viewport) — no layout issues
+
+**Key patterns applied:**
+- `.value=${...}` property binding (not attribute binding)
+- `@input` event handler to update state
+- Clear errors on input (`this.shareModalError = ''`)
+- `?disabled=${this.shareModalCreating}` during async operations
+- Trim input and convert empty string to `undefined` before API call
+
+**Files changed:**
+- `src/SharedSpaces.Client/src/features/space-view/space-api.ts`
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts`
+
+**Related:** Issue #159, parallel backend work by Kaylee
