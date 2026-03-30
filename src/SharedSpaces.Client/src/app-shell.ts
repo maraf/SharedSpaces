@@ -37,6 +37,7 @@ import {
   removePendingShare,
   type PendingShareItem,
 } from './lib/idb-storage';
+import { decodeShareLinkSegment } from './lib/share-link';
 
 interface SpaceEntry {
   serverUrl: string;
@@ -71,6 +72,7 @@ export class AppShell extends BaseElement {
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private sheetOpen = false;
   @state() private sharedToken?: string;
+  @state() private sharedApiUrl?: string;
 
   private headerElement?: HTMLElement;
   private headerResizeObserver?: ResizeObserver;
@@ -94,10 +96,15 @@ export class AppShell extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
 
-    // Check for /shared/{token} route first — standalone view, no app chrome
+    // Check for /shared/{segment} route first — standalone view, no app chrome
     const sharedMatch = window.location.pathname.match(/^\/shared\/([^/]+)$/);
     if (sharedMatch) {
-      this.sharedToken = sharedMatch[1];
+      const { token, api } = decodeShareLinkSegment(
+        sharedMatch[1],
+        this.appConfig.apiBaseUrl,
+      );
+      this.sharedToken = token;
+      this.sharedApiUrl = api;
       this.view = 'shared-item';
       return;
     }
@@ -350,7 +357,7 @@ export class AppShell extends BaseElement {
     if (this.view === 'shared-item' && this.sharedToken) {
       return html`<shared-item-view
         .token=${this.sharedToken}
-        .apiBaseUrl=${this.appConfig.apiBaseUrl}
+        .apiBaseUrl=${this.sharedApiUrl ?? this.appConfig.apiBaseUrl}
       ></shared-item-view>`;
     }
 
