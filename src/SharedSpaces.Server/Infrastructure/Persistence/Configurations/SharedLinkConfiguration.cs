@@ -18,6 +18,10 @@ public class SharedLinkConfiguration : IEntityTypeConfiguration<SharedLink>
         builder.Property(link => link.Token)
             .IsRequired();
 
+        builder.Property(link => link.Name)
+            .HasMaxLength(200)
+            .IsRequired(false);
+
         builder.HasIndex(link => link.Token)
             .IsUnique();
 

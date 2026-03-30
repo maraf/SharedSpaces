@@ -50,9 +50,9 @@ async function seedSpace(name: string) {
     body: JSON.stringify({ clientAppUrl: CLIENT_URL }),
   });
 
-  const pin = invitation.invitationString.split('|')[2];
+  const pin = invitation.invitationString.split('|').pop()!;
 
-  const aliceToken = await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/tokens`, {
+  const aliceToken = await apiCall(`${SERVER_URL}/v1/tokens`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin, displayName: 'Alice' }),
@@ -64,8 +64,8 @@ async function seedSpace(name: string) {
     headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
     body: JSON.stringify({ clientAppUrl: CLIENT_URL }),
   });
-  const pin2 = invitation2.invitationString.split('|')[2];
-  await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/tokens`, {
+  const pin2 = invitation2.invitationString.split('|').pop()!;
+  await apiCall(`${SERVER_URL}/v1/tokens`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin: pin2, displayName: 'Bob' }),
@@ -502,6 +502,48 @@ test.describe('Screenshot Capture', () => {
       );
       await page.waitForTimeout(500);
       await capture(page, 'space-transfer-modal', vp);
+    });
+
+    test(`space view - share modal - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      // Click "Manage shared links" button on the first item
+      const manageBtn = page.locator('button[aria-label="Manage shared links"]').first();
+      await manageBtn.click();
+      // Wait for the share modal to appear (heading: "Shared links")
+      await page.waitForFunction(
+        () => document.querySelector('h3')?.textContent?.includes('Shared links'),
+        { timeout: 5_000 },
+      );
+      await page.waitForTimeout(500);
+
+      // Create a named shared link to show the name feature
+      const nameInput = page.locator('input[placeholder="Link name (optional)"]');
+      await nameInput.fill('For the design team');
+      await page.locator('button:has-text("Create new link")').click();
+      // Wait for the link to appear in the list
+      await page.waitForFunction(
+        () => document.querySelectorAll('.rounded-lg.border').length > 0,
+        { timeout: 5_000 },
+      );
+      await page.waitForTimeout(300);
+
+      // Create a second link without a name
+      await nameInput.fill('');
+      await page.locator('button:has-text("Create new link")').click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('.rounded-lg.border').length > 1,
+        { timeout: 5_000 },
+      );
+      await page.waitForTimeout(500);
+
+      await capture(page, 'space-share-modal', vp, { fullPage: false });
     });
 
     test(`admin view - invitation modal - ${vp.name}`, async ({ page }) => {

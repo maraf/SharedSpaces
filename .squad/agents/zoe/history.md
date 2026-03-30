@@ -67,3 +67,49 @@
 - Next test areas: Cross-browser codec compatibility, edge case validation, performance testing for large files
 
 **Decisions documented:** File Preview Type Detection API contract (your decision locked by tests)
+
+## Team Update (2026-03-29)
+
+**Issue #159 in progress (Optional name for shared link):**
+- **Zoe:** Added 5 integration tests to `tests/SharedSpaces.Server.Tests/SharedLinkEndpointTests.cs` for the new optional `Name` property on SharedLink:
+  1. `CreateSharedLink_WithName_Returns201WithName` — POST with `{ "name": "My shared link" }` returns the name in the response
+  2. `CreateSharedLink_WithEmptyStringName_ReturnsCreatedWithNullName` — POST with `{ "name": "" }` treats empty as null (backward compatibility)
+  3. `CreateSharedLink_WithLongName_Succeeds` — POST with 200-character name succeeds
+  4. `ListSharedLinks_IncludesNameInResponse` — GET returns name in list for named links, null for unnamed
+  5. Updated existing `CreateSharedLink_ForTextItem_Returns201WithLinkDetails` to assert `Name` is null when not provided
+- Updated `CreateSharedLinkAsync()` helper to accept optional `name` parameter and send JSON body `{ "name": "..." }` when provided
+- Updated local `SharedLinkResponse` record to include `string? Name` property (matches production Models.cs)
+- Tests compile against current codebase; will pass once Kaylee's server implementation merges
+- **Key pattern:** Empty string names are normalized to null for storage — matches existing SharedSpaces pattern for optional strings
+
+## Learnings
+
+- **SharedLink name test patterns (2026-03-29):**
+  - Test file: `tests/SharedSpaces.Server.Tests/SharedLinkEndpointTests.cs`
+  - Request body pattern: `request.Content = JsonContent.Create(new { Name = name })` for POST with name
+  - No request body sent when name is null/omitted — preserves backward compatibility (existing clients sending empty POST still work)
+  - Empty string name (`""`) is normalized to null in response — test validates this server behavior
+  - Max length test (200 chars) validates entity constraint without triggering validation error
+  - List endpoint test creates both named and unnamed links, then verifies both appear correctly in response
+  - Public shared endpoint (`/v1/shared/{token}`) does NOT include name in `SharedItemResponse` — name is only for link management UI, not public consumption
+
+### 2026-03-30 · SharedLink Name Feature - Team Integration Update
+
+**Cross-agent coordination completed:**
+- Kaylee (Backend) added optional Name property to SharedLink entity, DTOs, endpoints, and migration (build passed)
+- Wash (Frontend) updated space-api.ts types and added name input in share modal + display in link list
+- Coordinator ensured backward compatibility: `CreateSharedLinkRequest.Name` is nullable, empty strings normalized to null
+- Test suite coverage verified: 4 new + 1 updated test case; all 260 tests passing
+- Backward compatibility validated: existing links without names unaffected
+
+**Session documented in:**
+- `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
+- Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`
+
+## Learnings
+
+- **SharedLink name max-length validation test (2026-03-30):**
+  - Added `CreateSharedLink_WithOverLimitName_Returns400` in `SharedLinkEndpointTests.cs` — sends 201-char name, asserts `HttpStatusCode.BadRequest`.
+  - Mirrors the existing `WithLongName_Succeeds` test (200 chars) as a boundary pair: 200 passes, 201 rejects.
+  - Test is ahead of server validation — depends on Kaylee's server-side 400 response for names > 200 chars.
+  - PR review feedback from Marek prompted this addition; always check that max-length constraints have both passing and failing boundary tests.

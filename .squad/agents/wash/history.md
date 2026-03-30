@@ -1047,3 +1047,72 @@ Your Issue #138 frontend analysis has been merged into shared decision log. Bonu
 4. Add error pages for expired/revoked/deleted links
 5. Mobile testing at 390844 for button wrapping
 
+
+---
+
+## Session 2026-03-28: Optional Name for Shared Links
+
+**Issue #159: Optional name for shared link**
+
+Added optional name field to shared link creation and display, enabling users to disambiguate where each link was shared.
+
+**Changes made:**
+1. **API types** (`space-api.ts`):
+   - Added `name?: string` to `SharedLinkResponse` interface
+   - Updated `createSharedLink()` to accept optional `name?: string` parameter
+   - Changed POST request to send JSON body `{ name }` instead of empty body
+   - Added `Content-Type: application/json` header for request
+
+2. **Share modal UI** (`space-view.ts`):
+   - Added `@state() private shareModalName = ''` for input state
+   - Added text input field above "Create new link" button with placeholder "Link name (optional)"
+   - Input follows Lit form state management patterns: `.value` property binding, `@input` handler, clears error on input
+   - Input disabled during async operations (`?disabled=${this.shareModalCreating}`)
+   - Clear name input after successful link creation
+   - Pass trimmed name to API (or `undefined` if empty)
+
+3. **Shared link display** (`renderShareLinkItem()`):
+   - Display name above URL when present
+   - Name shown as `text-sm font-medium text-white` (prominent but not dominant)
+   - URL remains as `font-mono text-xs text-slate-400` (secondary)
+   - Both have `truncate` and `title` attributes for overflow handling
+
+**Mobile considerations:**
+- Input field uses full width (`w-full`) and matches existing input styling
+- Wrapped in `space-y-2` container with button below
+- Tested at 390px width (mobile viewport) — no layout issues
+
+**Key patterns applied:**
+- `.value=${...}` property binding (not attribute binding)
+- `@input` event handler to update state
+- Clear errors on input (`this.shareModalError = ''`)
+- `?disabled=${this.shareModalCreating}` during async operations
+- Trim input and convert empty string to `undefined` before API call
+
+**Files changed:**
+- `src/SharedSpaces.Client/src/features/space-view/space-api.ts`
+- `src/SharedSpaces.Client/src/features/space-view/space-view.ts`
+
+**Related:** Issue #159, parallel backend work by Kaylee
+
+### 2026-03-30 · SharedLink Name Feature - Team Integration Update
+
+**Cross-agent coordination completed:**
+- Kaylee (Backend) added optional Name property to SharedLink entity, DTOs, endpoints, and migration (build passed)
+- Zoe (Tester) verified 4 new test cases covering named creation, empty-string normalization, max length, and list response
+- Coordinator ensured backward compatibility: `CreateSharedLinkRequest.Name` is nullable, empty strings normalized to null
+- Frontend types and UI integrate seamlessly with backend implementation
+- All 260 tests passing
+
+**Session documented in:**
+- `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
+- Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`
+
+## Learnings — PR Review Fixes for Shared Link Modal — 2026-03-30
+
+**PR #162 review feedback addressed (3 items):**
+
+- **Type contract alignment:** `SharedLinkResponse.name` changed from `name?: string` to `name: string | null` — server returns explicit `null` for unnamed links, not `undefined`. Always match server nullability in client types.
+- **Accessibility:** Added `aria-label="Link name"` to the share-link name input. Inputs with only placeholder text are invisible to screen readers.
+- **Client-side validation parity:** Added `maxlength="200"` to match the server's 200-char EF constraint. Always mirror server-side constraints in client inputs for immediate feedback.
+- **PR comment reply API:** Use `pulls/{number}/comments/{id}/replies` endpoint (needs PR number), not `pulls/comments/{id}/replies`.

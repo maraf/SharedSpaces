@@ -218,6 +218,7 @@ export interface SharedLinkResponse {
   itemId: string;
   createdBy: string;
   createdAt: string;
+  name: string | null;
 }
 
 export async function createSharedLink(
@@ -225,6 +226,7 @@ export async function createSharedLink(
   spaceId: string,
   itemId: string,
   token: string,
+  name?: string,
 ): Promise<SharedLinkResponse> {
   try {
     const base = normalizeUrl(serverUrl);
@@ -232,7 +234,11 @@ export async function createSharedLink(
       `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}/share/`,
       {
         method: 'POST',
-        headers: authHeaders(token),
+        headers: {
+          ...authHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name }),
       },
     );
     await throwForFailed(response);

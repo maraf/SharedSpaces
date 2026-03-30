@@ -52,6 +52,96 @@ public class SharedLinkEndpointTests
         body.ItemId.Should().Be(item.Id);
         body.CreatedBy.Should().Be(member.Id);
         body.CreatedAt.Should().BeOnOrAfter(beforeRequest.AddSeconds(-2));
+        body.Name.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateSharedLink_WithName_Returns201WithName()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Named link item",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token, "My shared link");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        body.Name.Should().Be("My shared link");
+        body.ItemId.Should().Be(item.Id);
+    }
+
+    [Fact]
+    public async Task CreateSharedLink_WithEmptyStringName_ReturnsCreatedWithNullName()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Empty name link",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token, "");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        body.Name.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateSharedLink_WithLongName_Succeeds()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Long name test",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        var longName = new string('A', 200);
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token, longName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        body.Name.Should().Be(longName);
+    }
+
+    [Fact]
+    public async Task CreateSharedLink_WithOverLimitName_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Over limit name test",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        var overLimitName = new string('A', 201);
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token, overLimitName);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -166,6 +256,36 @@ public class SharedLinkEndpointTests
         links.Should().OnlyContain(link => link.SpaceId == space.Id);
         // Tokens should be unique
         links.Select(l => l.Token).Distinct().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task ListSharedLinks_IncludesNameInResponse()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "item with named links",
+            sharedAt: DateTime.UtcNow, fileSize: 0);
+
+        // Create links with different names
+        var namedResponse = await CreateSharedLinkAsync(client, space.Id, item.Id, token, "Email link");
+        namedResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var unnamedResponse = await CreateSharedLinkAsync(client, space.Id, item.Id, token);
+        unnamedResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var response = await ListSharedLinksAsync(client, space.Id, item.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var links = await ReadJsonAsync<List<SharedLinkResponse>>(response);
+        links.Should().HaveCount(2);
+        links.Should().ContainSingle(l => l.Name == "Email link");
+        links.Should().ContainSingle(l => l.Name == null);
     }
 
     [Fact]
@@ -542,11 +662,17 @@ public class SharedLinkEndpointTests
     // ──────────────────────────────────────────────
 
     private static async Task<HttpResponseMessage> CreateSharedLinkAsync(
-        HttpClient client, Guid spaceId, Guid itemId, string? token = null)
+        HttpClient client, Guid spaceId, Guid itemId, string? token = null, string? name = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"/v1/spaces/{spaceId}/items/{itemId}/share");
         AddAuthorizationHeader(request, token);
+        
+        if (name is not null)
+        {
+            request.Content = JsonContent.Create(new { Name = name });
+        }
+        
         return await client.SendAsync(request);
     }
 
@@ -622,7 +748,8 @@ public class SharedLinkEndpointTests
         Guid SpaceId,
         Guid ItemId,
         Guid CreatedBy,
-        DateTime CreatedAt);
+        DateTime CreatedAt,
+        string? Name);
 
     private sealed record SharedItemResponse(
         string ContentType,

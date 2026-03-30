@@ -31,6 +31,7 @@ public static class SharedLinkEndpoints
     private static async Task<IResult> CreateSharedLink(
         Guid spaceId,
         Guid itemId,
+        CreateSharedLinkRequest? request,
         HttpContext httpContext,
         AppDbContext db,
         CancellationToken cancellationToken)
@@ -52,18 +53,26 @@ public static class SharedLinkEndpoints
             return Results.NotFound(new { Error = "Item not found" });
         }
 
+        var normalizedName = string.IsNullOrWhiteSpace(request?.Name) ? null : request.Name.Trim();
+
+        if (normalizedName is not null && normalizedName.Length > 200)
+        {
+            return Results.BadRequest(new { Error = "Name must not exceed 200 characters" });
+        }
+
         var link = new SharedLink
         {
             SpaceId = spaceId,
             ItemId = itemId,
-            CreatedBy = memberId
+            CreatedBy = memberId,
+            Name = normalizedName
         };
 
         db.SharedLinks.Add(link);
         await db.SaveChangesAsync(cancellationToken);
 
         var response = new SharedLinkResponse(
-            link.Id, link.Token, link.SpaceId, link.ItemId, link.CreatedBy, link.CreatedAt);
+            link.Id, link.Token, link.SpaceId, link.ItemId, link.CreatedBy, link.CreatedAt, link.Name);
 
         return Results.Created($"/v1/spaces/{spaceId}/items/{itemId}/share/{link.Id}", response);
     }
@@ -97,7 +106,7 @@ public static class SharedLinkEndpoints
             .Where(link => link.SpaceId == spaceId && link.ItemId == itemId)
             .OrderByDescending(link => link.CreatedAt)
             .Select(link => new SharedLinkResponse(
-                link.Id, link.Token, link.SpaceId, link.ItemId, link.CreatedBy, link.CreatedAt))
+                link.Id, link.Token, link.SpaceId, link.ItemId, link.CreatedBy, link.CreatedAt, link.Name))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(links);

@@ -972,3 +972,41 @@ Your backend feasibility study has been merged into shared decision log. Key fin
 
 **Next:** Implementation checklist + assigned work once token strategy is settled.
 
+### Issue #159: Optional SharedLink Name (2026-03-30)
+
+**Changes:**
+- Added optional `Name` property (string?, max 200 chars) to `SharedLink` entity and EF configuration
+- Created `CreateSharedLinkRequest` record to accept optional name in POST body
+- Updated `SharedLinkResponse` to include `Name` in all shared link responses
+- Created migration `20260330112139_AddSharedLinkName` to add nullable Name column to SharedLinks table
+- Updated all endpoints (create, list) to handle the new Name property
+
+**Pattern reinforced:** When adding nullable properties to existing entities, follow the full vertical slice: entity → configuration → DTOs → endpoint mapping → migration. EF Core migrations capture schema changes after updating fluent configuration.
+
+
+### 2026-03-30 · SharedLink Name Feature - Team Integration Update
+
+**Cross-agent coordination completed:**
+- Wash (Frontend) updated `space-api.ts` types to import new optional `Name` property from backend DTOs
+- Wash (Frontend) added name input in share modal and display in link list
+- Zoe (Tester) verified 4 new test cases covering named creation, empty-string normalization, max length, and list response
+- Coordinator ensured backward compatibility: `CreateSharedLinkRequest.Name` is nullable, empty strings normalized to null
+- All 260 tests passing
+
+**Session documented in:**
+- `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
+- Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`
+
+## PR #162 Review Fix — SharedLink Name Length Validation (2026-03-30)
+
+### Task
+Reviewer flagged that `CreateSharedLink` did not validate `Name` length against the 200-char max from EF Core config. SQLite doesn't enforce `HasMaxLength` at DB level, so endpoint must validate explicitly.
+
+### Changes
+- Added `if (normalizedName is not null && normalizedName.Length > 200)` check in `SharedLinkEndpoints.CreateSharedLink`, returning 400 with `{ Error = "Name must not exceed 200 characters" }`
+- Follows same pattern as `SpaceEndpoints` (line 63-65) and `TokenEndpoints` (line 37-39)
+- Existing test `CreateSharedLink_WithOverLimitName_Returns400` already covered this case; all 25 SharedLink tests pass
+
+### Learnings
+- **SQLite + EF Core gap:** `HasMaxLength` is metadata-only in SQLite — always add explicit server-side length validation in endpoints
+- **Validation pattern:** Project consistently uses `Results.BadRequest(new { Error = "..." })` with capital-E `Error` key

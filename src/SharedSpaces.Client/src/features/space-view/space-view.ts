@@ -101,6 +101,7 @@ export class SpaceView extends BaseElement {
   @state() private shareModalCreating = false;
   @state() private shareModalDeleteConfirmId: string | null = null;
   @state() private shareCopiedLinkId: string | null = null;
+  @state() private shareModalName = '';
   @state() private shareItemCopiedIds = new Set<string>();
 
   private _previewRequestId = 0;
@@ -1021,6 +1022,7 @@ export class SpaceView extends BaseElement {
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
     this.shareCopiedLinkId = null;
+    this.shareModalName = '';
   };
 
   private handleCreateShareLink = async () => {
@@ -1030,13 +1032,16 @@ export class SpaceView extends BaseElement {
     this.shareModalError = '';
 
     try {
+      const name = this.shareModalName.trim() || undefined;
       const link = await createSharedLink(
         this.serverUrl,
         this.spaceId,
         this.shareModalItem.id,
         this.token,
+        name,
       );
       this.shareModalLinks = [...this.shareModalLinks, link];
+      this.shareModalName = '';
 
       // Auto-copy the new link
       const shareUrl = `${window.location.origin}/shared/${link.token}`;
@@ -1946,13 +1951,28 @@ export class SpaceView extends BaseElement {
                     ? html`<p class="py-4 text-center text-sm text-slate-500">No shared links yet.</p>`
                     : this.shareModalLinks.map((link) => this.renderShareLinkItem(link))}
 
-                  <button
-                    @click=${this.handleCreateShareLink}
-                    ?disabled=${this.shareModalCreating}
-                    class="w-full cursor-pointer rounded-md bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    ${this.shareModalCreating ? 'Creating…' : 'Create new link'}
-                  </button>
+                  <div class="space-y-2">
+                    <input
+                      type="text"
+                      .value=${this.shareModalName}
+                      @input=${(e: Event) => {
+                        this.shareModalName = (e.target as HTMLInputElement).value;
+                        this.shareModalError = '';
+                      }}
+                      ?disabled=${this.shareModalCreating}
+                      placeholder="Link name (optional)"
+                      maxlength="200"
+                      aria-label="Link name"
+                      class="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 transition focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <button
+                      @click=${this.handleCreateShareLink}
+                      ?disabled=${this.shareModalCreating}
+                      class="w-full cursor-pointer rounded-md bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      ${this.shareModalCreating ? 'Creating…' : 'Create new link'}
+                    </button>
+                  </div>
                 </div>
               `}
         </div>
@@ -1967,6 +1987,9 @@ export class SpaceView extends BaseElement {
 
     return html`
       <div class="rounded-lg border border-slate-700/60 bg-slate-800/40 p-3">
+        ${link.name
+          ? html`<p class="mb-1 text-sm font-medium text-white truncate" title=${link.name}>${link.name}</p>`
+          : nothing}
         <p class="mb-2 truncate font-mono text-xs text-slate-400" title=${shareUrl}>
           ${shareUrl}
         </p>
