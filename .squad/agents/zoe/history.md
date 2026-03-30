@@ -105,3 +105,11 @@
 **Session documented in:**
 - `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
 - Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`
+
+## Learnings
+
+- **SharedLink name max-length validation test (2026-03-30):**
+  - Added `CreateSharedLink_WithOverLimitName_Returns400` in `SharedLinkEndpointTests.cs` — sends 201-char name, asserts `HttpStatusCode.BadRequest`.
+  - Mirrors the existing `WithLongName_Succeeds` test (200 chars) as a boundary pair: 200 passes, 201 rejects.
+  - Test is ahead of server validation — depends on Kaylee's server-side 400 response for names > 200 chars.
+  - PR review feedback from Marek prompted this addition; always check that max-length constraints have both passing and failing boundary tests.
