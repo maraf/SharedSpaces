@@ -1961,6 +1961,8 @@ export class SpaceView extends BaseElement {
                       }}
                       ?disabled=${this.shareModalCreating}
                       placeholder="Link name (optional)"
+                      maxlength="200"
+                      aria-label="Link name"
                       class="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 transition focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                     <button

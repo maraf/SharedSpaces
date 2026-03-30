@@ -55,6 +55,11 @@ public static class SharedLinkEndpoints
 
         var normalizedName = string.IsNullOrWhiteSpace(request?.Name) ? null : request.Name.Trim();
 
+        if (normalizedName is not null && normalizedName.Length > 200)
+        {
+            return Results.BadRequest(new { Error = "Name must not exceed 200 characters" });
+        }
+
         var link = new SharedLink
         {
             SpaceId = spaceId,

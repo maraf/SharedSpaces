@@ -218,7 +218,7 @@ export interface SharedLinkResponse {
   itemId: string;
   createdBy: string;
   createdAt: string;
-  name?: string;
+  name: string | null;
 }
 
 export async function createSharedLink(
