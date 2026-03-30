@@ -113,3 +113,38 @@
   - Mirrors the existing `WithLongName_Succeeds` test (200 chars) as a boundary pair: 200 passes, 201 rejects.
   - Test is ahead of server validation — depends on Kaylee's server-side 400 response for names > 200 chars.
   - PR review feedback from Marek prompted this addition; always check that max-length constraints have both passing and failing boundary tests.
+
+- **Share link encoding/decoding tests (2026-03-30):**
+  - Created `src/SharedSpaces.Client/src/lib/share-link.test.ts` — 16 Vitest tests covering base64url encode/decode, encodeShareLinkSegment/decodeShareLinkSegment round-trips, backward compatibility (bare GUID → legacy token + fallback URL), edge cases (missing params, invalid base64, empty string), buildShareUrl, and GitHub Pages 404.html redirect contract.
+  - Created `src/SharedSpaces.Client/src/features/shared-item/shared-item-api.test.ts` — 13 Vitest tests for getSharedItem/downloadSharedItem: URL construction with custom API URLs (verifying decoded share link API URL is used, not default), token URL-encoding, trailing slash normalization, error handling (404/500/network).
+  - Added 2 server integration tests to `SharedLinkEndpointTests.cs`: `CreateSharedLink_ResponseIncludesServerUrl` (verifies ServerUrl in creation response) and `GetSharedItem_WithRawGuidToken_ReturnsItem_BackwardCompat` (verifies legacy GUID tokens work).
+  - Updated test `SharedLinkResponse` record to include `string? ServerUrl = null` to match production DTO.
+  - Key test pattern: GitHub Pages SPA redirect contract tests verify the 404.html → index.html → replaceState → app-shell decode pipeline end-to-end using URL encoding/decoding assertions.
+  - All 622 Vitest tests and 209 server integration tests passing.
+
+## Team Update: Share Link Implementation Session (2026-03-30)
+
+**Issue #151 (GitHub Pages SPA routing) + Issue #161 (stateless share links) - Completed**
+
+**Coordinated with:** Kaylee (Backend Dev), Wash (Frontend Dev)
+
+**Your contribution:**
+- Wrote 31 E2E and unit tests covering the share link implementation:
+  - 2 server integration tests: ServerUrl population, backward compatibility for raw GUID tokens
+  - 16 share-link module tests: base64url encode/decode, round-trips, backward compat, edge cases
+  - 13 shared-item-api tests: URL construction with custom API URLs, token URL-encoding, error handling
+- 209 server integration tests passing, 622 client Vitest tests passing
+
+**Cross-agent outcomes:**
+- **Kaylee:** Added nullable ServerUrl field to SharedLinkResponse DTO, populated on creation
+- **Wash:** Implemented 404.html redirect pattern, created share-link.ts module, updated 4 URL construction sites
+
+**Key decisions executed:**
+1. 404.html redirect pattern (no --base ./ change needed)
+2. Base64url encode token + API URL as query string for stateless links
+3. Backward compatibility for legacy GUID tokens
+
+**Session documented in:**
+- .squad/log/2026-03-30T19-19-08-share-link-implementation.md
+- .squad/orchestration-log/2026-03-30T19-19-08-zoe.md
+- Decisions merged into .squad/decisions.md
