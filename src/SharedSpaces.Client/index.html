@@ -10,6 +10,18 @@
     <title>SharedSpaces</title>
   </head>
   <body>
+    <script>
+      // GitHub Pages SPA support: restore the original URL that 404.html redirected here with.
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var ghpath = params.get('ghpath');
+        if (ghpath) {
+          var search = params.get('ghsearch') || '';
+          var hash = params.get('ghhash') || '';
+          history.replaceState({}, '', ghpath + search + hash);
+        }
+      })();
+    </script>
     <app-shell></app-shell>
     <script type="module" src="/src/index.ts"></script>
   </body>
