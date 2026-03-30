@@ -1094,3 +1094,16 @@ Added optional name field to shared link creation and display, enabling users to
 - `src/SharedSpaces.Client/src/features/space-view/space-view.ts`
 
 **Related:** Issue #159, parallel backend work by Kaylee
+
+### 2026-03-30 · SharedLink Name Feature - Team Integration Update
+
+**Cross-agent coordination completed:**
+- Kaylee (Backend) added optional Name property to SharedLink entity, DTOs, endpoints, and migration (build passed)
+- Zoe (Tester) verified 4 new test cases covering named creation, empty-string normalization, max length, and list response
+- Coordinator ensured backward compatibility: `CreateSharedLinkRequest.Name` is nullable, empty strings normalized to null
+- Frontend types and UI integrate seamlessly with backend implementation
+- All 260 tests passing
+
+**Session documented in:**
+- `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
+- Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`

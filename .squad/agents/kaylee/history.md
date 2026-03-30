@@ -983,3 +983,16 @@ Your backend feasibility study has been merged into shared decision log. Key fin
 
 **Pattern reinforced:** When adding nullable properties to existing entities, follow the full vertical slice: entity → configuration → DTOs → endpoint mapping → migration. EF Core migrations capture schema changes after updating fluent configuration.
 
+
+### 2026-03-30 · SharedLink Name Feature - Team Integration Update
+
+**Cross-agent coordination completed:**
+- Wash (Frontend) updated `space-api.ts` types to import new optional `Name` property from backend DTOs
+- Wash (Frontend) added name input in share modal and display in link list
+- Zoe (Tester) verified 4 new test cases covering named creation, empty-string normalization, max length, and list response
+- Coordinator ensured backward compatibility: `CreateSharedLinkRequest.Name` is nullable, empty strings normalized to null
+- All 260 tests passing
+
+**Session documented in:**
+- `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
+- Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`

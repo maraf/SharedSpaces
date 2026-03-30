@@ -92,3 +92,16 @@
   - Max length test (200 chars) validates entity constraint without triggering validation error
   - List endpoint test creates both named and unnamed links, then verifies both appear correctly in response
   - Public shared endpoint (`/v1/shared/{token}`) does NOT include name in `SharedItemResponse` — name is only for link management UI, not public consumption
+
+### 2026-03-30 · SharedLink Name Feature - Team Integration Update
+
+**Cross-agent coordination completed:**
+- Kaylee (Backend) added optional Name property to SharedLink entity, DTOs, endpoints, and migration (build passed)
+- Wash (Frontend) updated space-api.ts types and added name input in share modal + display in link list
+- Coordinator ensured backward compatibility: `CreateSharedLinkRequest.Name` is nullable, empty strings normalized to null
+- Test suite coverage verified: 4 new + 1 updated test case; all 260 tests passing
+- Backward compatibility validated: existing links without names unaffected
+
+**Session documented in:**
+- `.squad/log/2026-03-30T11-15-22Z-shared-link-name.md`
+- Orchestration logs: `2026-03-30T11-15-22Z-kaylee.md`, `2026-03-30T11-15-22Z-wash.md`, `2026-03-30T11-15-22Z-zoe.md`
