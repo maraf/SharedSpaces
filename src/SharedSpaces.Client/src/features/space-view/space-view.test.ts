@@ -1456,11 +1456,11 @@ describe('SpaceView - Delete Confirmation', () => {
     });
   });
 
-  describe('renderDeleteConfirmOverlay', () => {
-    it('contains "Delete" text and the preview label', () => {
+  describe('renderDeleteConfirmActions', () => {
+    it('contains "Delete" and "Cancel" buttons', () => {
       const item = makeItem({ content: 'my note' });
-      const result = (element as any).renderDeleteConfirmOverlay(item);
-      // Lit TemplateResult: the strings should contain "Delete" and we can verify the structure
+      const result = (element as any).renderDeleteConfirmActions(item);
+      // Lit TemplateResult: the strings should contain "Delete" and "Cancel"
       const strings = result.strings ?? result._$litType$?.strings ?? [];
       const flatStrings = Array.from(strings).join('');
       expect(flatStrings).toContain('Delete');
