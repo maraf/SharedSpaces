@@ -1116,3 +1116,51 @@ Added optional name field to shared link creation and display, enabling users to
 - **Accessibility:** Added `aria-label="Link name"` to the share-link name input. Inputs with only placeholder text are invisible to screen readers.
 - **Client-side validation parity:** Added `maxlength="200"` to match the server's 200-char EF constraint. Always mirror server-side constraints in client inputs for immediate feedback.
 - **PR comment reply API:** Use `pulls/{number}/comments/{id}/replies` endpoint (needs PR number), not `pulls/comments/{id}/replies`.
+
+### 2026-03-30 · GitHub Pages SPA Redirect & Share Link URL Encoding (Issues #151, #161)
+
+**Issue #151 — GitHub Pages 404 fix:**
+- Created public/404.html — minimal redirect page that encodes the original path as ?ghpath= query parameter
+- Added inline <script> to index.html that restores the URL via history.replaceState before the app boots
+- No changes to Vite's --base ./ config; purely a 404-redirect approach
+
+**Issue #161 — Share link API URL encoding:**
+- New src/lib/share-link.ts module: ase64UrlEncode/Decode, ncodeShareLinkSegment, decodeShareLinkSegment, uildShareUrl
+- Share link format changed from /shared/{guid} to /shared/{base64url("token={guid}&api={serverUrl}")}
+- pp-shell.ts decodes the segment on route match, extracting 	oken and pi to pass to shared-item-view
+- space-view.ts uses uildShareUrl(link.token, this.serverUrl) at all 4 URL construction sites
+- **Backward compatible:** bare GUID links still work — decodeShareLinkSegment detects GUIDs via regex and falls back to piBaseUrl
+- 7 unit tests covering round-trips, URL-safety, legacy GUID handling, and invalid input fallback
+
+**Key patterns:**
+- base64url uses toa/atob with +→-, /→_, strip = padding
+- Payload is URL-encoded query string: 	oken={encodeURIComponent(guid)}&api={encodeURIComponent(serverUrl)}
+- Decoded with 
+ew URLSearchParams() for clean parsing
+
+## Team Update: Share Link Implementation Session (2026-03-30)
+
+**Issue #151 (GitHub Pages SPA routing) + Issue #161 (stateless share links) - Completed**
+
+**Coordinated with:** Kaylee (Backend Dev), Zoe (Tester)
+
+**Your contribution:**
+- Implemented 404.html redirect pattern for GitHub Pages SPA routing
+- Created share-link.ts module with base64url encode/decode functions
+- Updated 4 URL construction sites to use new share link format
+- Implemented backward compatibility for legacy GUID tokens
+- 7 unit tests for share-link module, all passing
+
+**Cross-agent outcomes:**
+- **Kaylee:** Added nullable ServerUrl field to SharedLinkResponse DTO, populated on creation
+- **Zoe:** Wrote 31 E2E/unit tests (2 server, 16 share-link, 13 shared-item-api)
+
+**Key decisions executed:**
+1. 404.html redirect pattern (no --base ./ change needed)
+2. Base64url encode token + API URL as query string for stateless links
+3. Backward compatibility for legacy GUID tokens
+
+**Session documented in:**
+- .squad/log/2026-03-30T19-19-08-share-link-implementation.md
+- .squad/orchestration-log/2026-03-30T19-19-08-wash.md
+- Decisions merged into .squad/decisions.md

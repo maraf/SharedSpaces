@@ -46,6 +46,7 @@ import {
   queueForOffline,
   processOfflineQueue,
 } from '../../lib/offline-sync';
+import { buildShareUrl } from '../../lib/share-link';
 
 export interface JoinedSpace {
   serverUrl: string;
@@ -946,7 +947,7 @@ export class SpaceView extends BaseElement {
         item.id,
         this.token,
       );
-      const shareUrl = `${window.location.origin}/shared/${link.token}`;
+      const shareUrl = buildShareUrl(link.token, this.serverUrl);
 
       // Try native share first, fall back to clipboard
       if (navigator.share) {
@@ -1044,7 +1045,7 @@ export class SpaceView extends BaseElement {
       this.shareModalName = '';
 
       // Auto-copy the new link
-      const shareUrl = `${window.location.origin}/shared/${link.token}`;
+      const shareUrl = buildShareUrl(link.token, this.serverUrl);
       await this.copyToClipboard(shareUrl);
       this.shareCopiedLinkId = link.id;
       setTimeout(() => {
@@ -1064,7 +1065,9 @@ export class SpaceView extends BaseElement {
   };
 
   private handleCopyShareLink = async (link: SharedLinkResponse) => {
-    const shareUrl = `${window.location.origin}/shared/${link.token}`;
+    const shareUrl = this.serverUrl
+      ? buildShareUrl(link.token, this.serverUrl)
+      : `${window.location.origin}/shared/${link.token}`;
     await this.copyToClipboard(shareUrl);
     this.shareCopiedLinkId = link.id;
     setTimeout(() => {
@@ -1981,7 +1984,9 @@ export class SpaceView extends BaseElement {
   }
 
   private renderShareLinkItem(link: SharedLinkResponse) {
-    const shareUrl = `${window.location.origin}/shared/${link.token}`;
+    const shareUrl = this.serverUrl
+      ? buildShareUrl(link.token, this.serverUrl)
+      : `${window.location.origin}/shared/${link.token}`;
     const isCopied = this.shareCopiedLinkId === link.id;
     const isConfirming = this.shareModalDeleteConfirmId === link.id;
 
