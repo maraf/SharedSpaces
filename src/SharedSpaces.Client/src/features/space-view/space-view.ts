@@ -148,6 +148,11 @@ export class SpaceView extends BaseElement {
       this.openMenuItemId = null;
     }
   };
+  private handleKebabScroll = () => {
+    if (this.openMenuItemId !== null) {
+      this.openMenuItemId = null;
+    }
+  };
 
   override updated(changed: Map<string, unknown>) {
     if (changed.has('spaceId') || changed.has('serverUrl')) {
@@ -184,6 +189,8 @@ export class SpaceView extends BaseElement {
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
     document.addEventListener('click', this.handleKebabClickOutside);
     document.addEventListener('keydown', this.handleKebabKeydown);
+    document.addEventListener('scroll', this.handleKebabScroll, { passive: true, capture: true });
+    globalThis.addEventListener('resize', this.handleKebabScroll);
     this.loadPendingShares();
     this.refreshOfflineQueue();
   }
@@ -201,6 +208,8 @@ export class SpaceView extends BaseElement {
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
     document.removeEventListener('click', this.handleKebabClickOutside);
     document.removeEventListener('keydown', this.handleKebabKeydown);
+    document.removeEventListener('scroll', this.handleKebabScroll, { capture: true });
+    globalThis.removeEventListener('resize', this.handleKebabScroll);
   }
 
   private resolveToken(): string | undefined {
@@ -1639,9 +1648,8 @@ export class SpaceView extends BaseElement {
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
         </button>
         ${isOpen ? html`
-          <div class="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-slate-700 bg-slate-800 py-1 shadow-lg" role="menu">
+          <div class="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-slate-700 bg-slate-800 py-1 shadow-lg">
             <button
-              role="menuitem"
               class="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-slate-100 cursor-pointer"
               @click=${() => { this.openMenuItemId = null; this.openShareModal(item); }}
             >
@@ -1650,7 +1658,6 @@ export class SpaceView extends BaseElement {
             </button>
             ${hasSendTo ? html`
               <button
-                role="menuitem"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-slate-100 cursor-pointer"
                 @click=${() => { this.openMenuItemId = null; this.openTransferModal(item); }}
               >
@@ -1660,7 +1667,6 @@ export class SpaceView extends BaseElement {
             ` : nothing}
             <div class="my-1 border-t border-slate-700"></div>
             <button
-              role="menuitem"
               class="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-slate-700 hover:text-red-300 cursor-pointer"
               @click=${() => { this.handleDeleteRequest(item); }}
             >
