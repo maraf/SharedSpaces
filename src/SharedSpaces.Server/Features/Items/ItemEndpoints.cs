@@ -539,7 +539,7 @@ public static class ItemEndpoints
         {
             return await TransferItemCrossServer(
                 spaceId, itemId, action, request.DestinationToken, jwtToken,
-                httpContext, db, fileStorage, hubNotifier, httpClientFactory, cancellationToken);
+                db, fileStorage, hubNotifier, httpClientFactory, cancellationToken);
         }
 
         return await TransferItemSameServer(
@@ -567,7 +567,6 @@ public static class ItemEndpoints
         string action,
         string destinationToken,
         JwtSecurityToken jwtToken,
-        HttpContext httpContext,
         AppDbContext db,
         IFileStorage fileStorage,
         ISpaceHubNotifier hubNotifier,
@@ -637,7 +636,7 @@ public static class ItemEndpoints
         uploadRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", destinationToken);
         uploadRequest.Content = formContent;
 
-        HttpResponseMessage uploadResponse;
+        HttpResponseMessage? uploadResponse = null;
         try
         {
             uploadResponse = await httpClient.SendAsync(uploadRequest, cancellationToken);
@@ -649,63 +648,70 @@ public static class ItemEndpoints
                 statusCode: StatusCodes.Status502BadGateway);
         }
 
-        if (!uploadResponse.IsSuccessStatusCode)
-        {
-            var errorBody = await uploadResponse.Content.ReadAsStringAsync(cancellationToken);
-            return Results.Json(
-                new { Error = "Destination server rejected the transfer", Details = errorBody },
-                statusCode: (int)uploadResponse.StatusCode);
-        }
-
-        // Parse the response from the destination server
-        SpaceItemResponse? destResponse;
         try
         {
-            destResponse = await uploadResponse.Content.ReadFromJsonAsync<SpaceItemResponse>(cancellationToken);
-        }
-        catch
-        {
-            destResponse = null;
-        }
-
-        // If move, delete source item locally
-        if (action == "move")
-        {
-            var sourceItemTracked = await db.SpaceItems
-                .SingleOrDefaultAsync(item => item.SpaceId == spaceId && item.Id == itemId, cancellationToken);
-
-            if (sourceItemTracked is not null)
+            if (!uploadResponse.IsSuccessStatusCode)
             {
-                db.SpaceItems.Remove(sourceItemTracked);
-                await db.SaveChangesAsync(cancellationToken);
+                var errorBody = await uploadResponse.Content.ReadAsStringAsync(cancellationToken);
+                return Results.Json(
+                    new { Error = "Destination server rejected the transfer", Details = errorBody },
+                    statusCode: (int)uploadResponse.StatusCode);
             }
 
-            var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
-            await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
-
-            if (isFile)
+            // Parse the response from the destination server
+            SpaceItemResponse? destResponse;
+            try
             {
-                try
+                destResponse = await uploadResponse.Content.ReadFromJsonAsync<SpaceItemResponse>(cancellationToken);
+            }
+            catch
+            {
+                destResponse = null;
+            }
+
+            if (destResponse is null)
+            {
+                return Results.Json(
+                    new { Error = "Destination server returned an unexpected response" },
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            // If move, delete source item locally
+            if (action == "move")
+            {
+                var sourceItemTracked = await db.SpaceItems
+                    .SingleOrDefaultAsync(item => item.SpaceId == spaceId && item.Id == itemId, cancellationToken);
+
+                if (sourceItemTracked is not null)
                 {
-                    await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+                    db.SpaceItems.Remove(sourceItemTracked);
+                    await db.SaveChangesAsync(cancellationToken);
                 }
-                catch
+
+                var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
+                await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
+
+                if (isFile)
                 {
-                    // Best-effort cleanup
+                    try
+                    {
+                        await fileStorage.DeleteAsync(spaceId, itemId, cancellationToken);
+                    }
+                    catch
+                    {
+                        // Best-effort cleanup
+                    }
                 }
             }
-        }
 
-        if (destResponse is not null)
-        {
             return Results.Created(
-                $"{destinationServerUrl.TrimEnd('/')}/v1/spaces/{destinationSpaceId}/items/{destResponse.Id}",
+                $"{destinationServerUrl.TrimEnd('/')}/v1/spaces/{destinationSpaceId}/items/{newItemId}",
                 destResponse);
         }
-
-        return Results.Created(
-            $"{destinationServerUrl.TrimEnd('/')}/v1/spaces/{destinationSpaceId}/items/{newItemId}",
-            new SpaceItemResponse(newItemId, destinationSpaceId, Guid.Empty, sourceItem.ContentType, sourceItem.Content, sourceItem.FileSize, DateTime.UtcNow));
+        finally
+        {
+            uploadResponse.Dispose();
+        }
     }
 
     private static async Task<IResult> TransferItemSameServer(

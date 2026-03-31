@@ -327,13 +327,6 @@ public class CrossServerTransferTests
         return await client.SendAsync(request);
     }
 
-    private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
-    {
-        var body = await response.Content.ReadFromJsonAsync<T>();
-        body.Should().NotBeNull();
-        return body!;
-    }
-
     #endregion
 
     #region Test Infrastructure
