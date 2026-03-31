@@ -1521,11 +1521,9 @@ export class SpaceView extends BaseElement {
 
   private renderItemCard(item: SpaceItemResponse) {
     const isFile = item.contentType === 'file';
-    const showOverlay = this.deleteConfirmItemId === item.id;
     const content = isFile ? this.renderFileContent(item) : this.renderTextContent(item);
-    const overlay = showOverlay ? this.renderDeleteConfirmOverlay(item) : undefined;
 
-    return this.renderUnifiedItemCard(content, overlay);
+    return this.renderUnifiedItemCard(content);
   }
 
   private renderCopyButton(item: SpaceItemResponse) {
@@ -1603,6 +1601,7 @@ export class SpaceView extends BaseElement {
 
   private renderTextContent(item: SpaceItemResponse) {
     const icon = getTextItemIcon();
+    const isDeleting = this.deleteConfirmItemId === item.id;
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -1623,10 +1622,14 @@ export class SpaceView extends BaseElement {
       </div>
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
-        ${this.renderCopyButton(item)}
-        ${this.renderManageLinksButton(item)}
-        ${this.renderSendToButton(item)}
-        ${this.renderDeleteButton(item)}
+        ${isDeleting
+          ? this.renderDeleteConfirmActions(item)
+          : html`
+            ${this.renderCopyButton(item)}
+            ${this.renderManageLinksButton(item)}
+            ${this.renderSendToButton(item)}
+            ${this.renderDeleteButton(item)}
+          `}
       </div>
     `;
   }
@@ -1634,6 +1637,7 @@ export class SpaceView extends BaseElement {
   private renderFileContent(item: SpaceItemResponse) {
     const icon = getFileTypeIcon(item.content);
     const canPreview = isPreviewable(item.content);
+    const isDeleting = this.deleteConfirmItemId === item.id;
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -1657,10 +1661,14 @@ export class SpaceView extends BaseElement {
       </div>
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
-        ${this.renderDownloadButton(item)}
-        ${this.renderManageLinksButton(item)}
-        ${this.renderSendToButton(item)}
-        ${this.renderDeleteButton(item)}
+        ${isDeleting
+          ? this.renderDeleteConfirmActions(item)
+          : html`
+            ${this.renderDownloadButton(item)}
+            ${this.renderManageLinksButton(item)}
+            ${this.renderSendToButton(item)}
+            ${this.renderDeleteButton(item)}
+          `}
       </div>
     `;
   }
@@ -1675,33 +1683,20 @@ export class SpaceView extends BaseElement {
     return text.slice(0, maxLen).trimEnd() + '…';
   }
 
-  private renderDeleteConfirmOverlay(item: SpaceItemResponse) {
-    const label = this.getItemPreviewLabel(item);
+  private renderDeleteConfirmActions(item: SpaceItemResponse) {
     return html`
-      <div
-        class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-lg bg-slate-900/95 px-4 py-3 backdrop-blur-sm"
+      <button
+        @click=${() => this.confirmDelete(item)}
+        class="cursor-pointer rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-500"
       >
-        <p class="max-w-full text-center text-sm text-slate-200">
-          Delete
-          <span class="inline-block max-w-[200px] truncate align-bottom font-medium text-white"
-            >${label}</span
-          >?
-        </p>
-        <div class="flex gap-2">
-          <button
-            @click=${() => this.confirmDelete(item)}
-            class="cursor-pointer rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-500"
-          >
-            Delete
-          </button>
-          <button
-            @click=${this.cancelDelete}
-            class="cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
+        Delete
+      </button>
+      <button
+        @click=${this.cancelDelete}
+        class="cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
+      >
+        Cancel
+      </button>
     `;
   }
 
