@@ -2254,7 +2254,6 @@ describe('SpaceView - Unified Item Card Layout', () => {
       expect(card?.classList.contains('px-4')).toBe(true);
       expect(card?.classList.contains('py-3')).toBe(true);
       expect(card?.classList.contains('relative')).toBe(true);
-      expect(card?.classList.contains('overflow-hidden')).toBe(true);
     });
 
     it('renders regular text items with unified card layout', async () => {
@@ -2455,7 +2454,6 @@ describe('SpaceView - Unified Item Card Layout', () => {
         expect(card.classList.contains('px-4')).toBe(true);
         expect(card.classList.contains('py-3')).toBe(true);
         expect(card.classList.contains('relative')).toBe(true);
-        expect(card.classList.contains('overflow-hidden')).toBe(true);
       });
     });
 
@@ -2492,7 +2490,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
       expect(pendingCards.length).toBeGreaterThanOrEqual(1);
 
       // Verify all cards share the same base layout classes
-      const expectedClasses = ['relative', 'overflow-hidden', 'rounded-lg', 'border', 'px-4', 'py-3'];
+      const expectedClasses = ['relative', 'rounded-lg', 'border', 'px-4', 'py-3'];
       [...regularCards, ...pendingCards].forEach(card => {
         expectedClasses.forEach(cls => {
           expect(card.classList.contains(cls)).toBe(true);
