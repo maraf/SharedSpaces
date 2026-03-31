@@ -1527,7 +1527,7 @@ export class SpaceView extends BaseElement {
   ) {
     return html`
       <li
-        class="relative overflow-hidden rounded-lg border ${borderClass} ${bgClass} px-4 py-3"
+        class="relative rounded-lg border ${borderClass} ${bgClass} px-4 py-3"
       >
         <div class="flex items-center gap-3">
           ${content}
