@@ -1164,3 +1164,32 @@ ew URLSearchParams() for clean parsing
 - .squad/log/2026-03-30T19-19-08-share-link-implementation.md
 - .squad/orchestration-log/2026-03-30T19-19-08-wash.md
 - Decisions merged into .squad/decisions.md
+
+### 2026-03-31 · Action Button Consolidation Design Variants (Issue #152)
+
+**Issue #152 — Combine action buttons:**
+- Analyzed current state: 4-5 action buttons per item consuming ~160px on 390px mobile viewport
+- Content truncated to ~8-10 chars on mobile ("architecture...", "Quick though...")
+- Current layout: Copy/Download, Manage Links, Send To, Delete — all icon-only buttons
+- Desktop (1280px) works fine; mobile (390×844) is the problem
+
+**Proposed 4 design variants:**
+1. **Kebab Menu (Recommended)** — Primary action visible + three-dot menu for secondary actions
+2. **Swipe-to-Reveal** — Swipe left on card to expose buttons behind
+3. **Long-Press Context Menu** — Long-press opens native-style action menu
+4. **Slide-Up Bottom Sheet** — Single button opens full-screen action drawer
+
+**Key patterns identified:**
+- Primary actions likely: Copy (text items), Download (file items)
+- Delete is destructive — should not be easiest to reach
+- Manage Links and Send To are infrequent
+- Desktop behavior should remain unchanged (sufficient space)
+- Mobile users expect tap-friendly targets (44×44px minimum)
+
+**Recommendation:** Variant 1 (Kebab Menu)
+- Balances discoverability, efficiency, familiarity, and implementation complexity
+- Progressive disclosure: primary action one tap, secondary behind "..."
+- Industry standard pattern (Gmail, Twitter, Slack)
+- Medium implementation complexity vs. High for swipe/bottom-sheet
+
+**Document created:** .squad/decisions/inbox/wash-action-button-variants.md

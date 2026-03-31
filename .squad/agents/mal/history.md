@@ -30,6 +30,22 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Issue #152: Action Button Consolidation — Responsive Kebab Menu Approved (2026-03-31)
+
+**Status:** Design ideation complete, implementation in progress (Wash).
+
+**Decision:** Responsive kebab menu (three-dot overflow) approved for mobile (<640px). Wash is now implementing the prototype.
+
+- **Wash's UX variants:** Evaluated 4 design patterns (Kebab Menu, Swipe-to-Reveal, Long-Press Context Menu, Bottom Sheet)
+- **Mal's analysis:** Ranked by action frequency, mobile constraints, and implementation complexity
+- **Chosen approach:** Kebab menu on mobile with responsive breakpoint at 640px
+  - ≤640px: Primary action (Copy/Download) + kebab menu for secondary actions
+  - >640px: All buttons visible (unchanged, preserves desktop UX)
+- **Rationale:** Progressive disclosure, familiar affordance (three dots), minimal surface area (~72px savings), moderate complexity, scalable for future actions
+- **Implementation details:** Responsive media query, dropdown menu component, primary/secondary action split based on usage frequency
+
+**Handoff:** Wash proceeding with prototype implementation. Desktop UI remains unchanged; focus is mobile UX improvement.
+
 ### Issue Decomposition Strategy (2026-03-16)
 
 Created 14 GitHub issues (maraf/SharedSpaces#17-#30) breaking down the 5-phase implementation plan:
@@ -404,4 +420,48 @@ Your architectural analysis has been merged into shared decision log. Key findin
 **Team decision pending:** Token strategy (GUID vs. crypto-random). Your GUID approach is simpler and unguessable; Kaylee's crypto-random is theoretically harder to guess but adds complexity. Both are feasible.
 
 **Next:** User/team decision on token strategy, revocation scope, and PII handling.
+
+
+---
+
+## Session 2026-03-28: Issue #152 UX Analysis — Action Button Consolidation
+
+**Status:** ✅ UX recommendation delivered
+
+**Task:** Analyze mobile UX trade-offs for consolidating 4-5 action buttons per item (Copy/Download, Manage Links, Send To, Delete) on 390px width where buttons consume ~160px, truncating content to 8-10 characters.
+
+**Key Findings:**
+
+1. **Action Frequency:** Copy/Download dominate (60% of interactions), Delete ~25%, with Manage Links & Send To as low-frequency secondary actions (<15% combined).
+
+2. **Current State:** Buttons are inline 36px each, fixed layout with NO responsive design. Delete has inline confirmation overlay.
+
+3. **Industry Pattern:** Messaging apps (iMessage, Slack), file managers (Drive, OneDrive), and note apps (Notion) all use: single primary icon + ⋯ menu on mobile, full action set on desktop.
+
+4. **Desktop:** Should NOT consolidate (wide viewports have no constraint; discoverability + efficiency for power users is worth the real estate).
+
+5. **Discoverability vs. Space:** ⋯ menu is universal pattern. Users expect it. Tradeoff accepted: slight friction for ~90px space gain (truncation 8–10 chars → 25–30 chars).
+
+6. **Delete Safety:** Hiding delete in menu is BETTER (slower, more deliberate interaction = fewer accidental taps). Confirmation dialog still fires (net result: safer).
+
+**Recommendation — Responsive Action Layout with ⋯ Menu:**
+
+**Mobile (<640px):**
+- Show: Primary icon (Copy/Download) + ⋯ menu
+- Menu items: Manage Links, Send To (conditional), Delete (red, in menu)
+- Content space freed: ~90px (50% increase)
+
+**Desktop (≥640px):**
+- No change to current layout (all buttons inline)
+
+**Rationale:**
+- Matches industry standard (Gmail, Drive, Slack)
+- Delete safety improved (higher friction = fewer accidents)
+- Space gain solves truncation without reducing feature set
+- Implementation: Simple CSS breakpoint + dropdown component
+
+**Estimate:** 2–3 hours frontend work (responsive layout + dropdown component)
+
+**Key File:** src/SharedSpaces.Client/src/features/space-view/space-view.ts (renderItemCard + button layout at lines 1529–1600)
+
 
