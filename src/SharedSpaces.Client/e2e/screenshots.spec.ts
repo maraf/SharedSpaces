@@ -190,7 +190,7 @@ async function navigateToAdminSignedIn(page: Page) {
   await page.waitForTimeout(500);
 }
 
-async function capture(page: Page, name: string, vp: ViewportSpec, { fullPage = true } = {}) {
+async function capture(page: Page, name: string, vp: ViewportSpec, { fullPage = false } = {}) {
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.waitForTimeout(300);
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
@@ -275,7 +275,13 @@ test.describe('Screenshot Capture', () => {
       // Click the image file item to open preview
       await page.getByRole('button', { name: 'photo.png' }).click();
       await page.waitForSelector('button[aria-label="Close preview"]', { timeout: 5_000 });
-      await page.waitForTimeout(500);
+      // Wait for the image to actually load
+      await page.waitForSelector('img[alt="photo.png"]', { state: 'visible', timeout: 5_000 });
+      await page.waitForFunction(() => {
+        const img = document.querySelector('img[alt="photo.png"]') as HTMLImageElement;
+        return img && img.complete && img.naturalWidth > 0;
+      }, { timeout: 5_000 });
+      await page.waitForTimeout(300);
       await capture(page, 'space-file-preview-image', vp, { fullPage: false });
 
       // Close preview
@@ -603,7 +609,7 @@ test.describe('Screenshot Capture', () => {
     await kebabBtn.waitFor({ state: 'visible', timeout: 10_000 });
     await kebabBtn.click();
     // Wait for the dropdown menu to appear
-    await page.waitForSelector('[data-kebab-menu] [role="menu"]', { timeout: 5_000 });
+    await page.waitForSelector('[data-kebab-menu] div.absolute', { timeout: 5_000 });
     await page.waitForTimeout(300);
     await capture(page, 'space-kebab-menu', mobile);
   });
