@@ -20,6 +20,7 @@ builder.Services.AddOptions<StorageOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.BasePath), "Storage:BasePath must be configured.")
     .ValidateOnStart();
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ISpaceHubNotifier, SpaceHubNotifier>();
 builder.Services.AddSignalR();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
