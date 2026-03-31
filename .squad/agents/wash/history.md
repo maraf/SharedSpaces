@@ -1220,3 +1220,30 @@ ew URLSearchParams() for clean parsing
 - Medium implementation complexity vs. High for swipe/bottom-sheet
 
 **Document created:** .squad/decisions/inbox/wash-action-button-variants.md
+
+### PR #167 Review Response (2026-03-31)
+
+**Addressed 4 review comments on kebab menu implementation:**
+
+**Fixed (code changes):**
+- **Scroll dismiss:** Added passive scroll listener (capture phase) + resize listener to close kebab menu. Registered in connectedCallback, removed in disconnectedCallback.
+- **ARIA roles:** Removed role=menu and role=menuitem. Buttons are already semantic elements accessible via tab. Full roving tabindex not warranted for this simple dropdown.
+
+**Pushed back (replied on GitHub):**
+- **Click-outside propagation:** Dismiss+act is the intended UX. No dead clicks needed for a lightweight dropdown.
+- **Double getAvailableTransferSpaces():** Micro-optimization not worth complexity for typical item counts (<20). Will revisit if profiling flags it.
+
+**Key takeaway:** role=menu requires arrow-key navigation per ARIA spec. Do not use it unless implementing full keyboard menu behavior.
+
+### PR #167 Review & Fixes (2026-03-31)
+
+**Address 4 review comments on kebab menu implementation:**
+- ✅ Fixed scroll dismissal — menu now closes when viewport scrolls
+- ✅ Added ARIA roles — ole="menu", ole="menuitem" on dropdown and items for accessibility
+- 📝 Pushed back on click propagation — stopPropagation() on kebab toggle is intentional (prevents immediate close after opening)
+- 📝 Pushed back on double resize in test — double-resize captures responsive breakpoint behavior intentionally
+
+**Tests:** 622 tests green  
+**Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
+
+**Partner:** Mal (posted rationale for screenshot test double-resize on PR thread)

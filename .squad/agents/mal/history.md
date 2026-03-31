@@ -465,3 +465,14 @@ Your architectural analysis has been merged into shared decision log. Key findin
 **Key File:** src/SharedSpaces.Client/src/features/space-view/space-view.ts (renderItemCard + button layout at lines 1529–1600)
 
 
+
+### PR #167 Review Coordination (2026-03-31)
+
+**Role:** Lead — coordinated review feedback handling
+
+- Replied to screenshot test double-resize comment with rationale: double-resize is intentional to validate responsive behavior across breakpoints
+- Coordinated with Wash on split between fixes (scroll dismiss, ARIA roles) and pushbacks (click propagation, resize behavior)
+
+**Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
+
+**Partner:** Wash (fixed scroll dismiss and ARIA roles, pushed back on 2 concerns)
