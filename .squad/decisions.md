@@ -4864,3 +4864,20 @@ Make PINs globally unique via retry-on-collision, allowing `serverUrl|pin` as th
 - **Unique constraint on  Rejected: DB-level errors on collision instead of graceful retryPin** 
 - **Longer  Rejected: 6 digits is user-friendly; collision negligible at scalePINs** 
 
+## Decision Inbox Entries (Pending Merge)
+
+### 2026-03-30T18:24:00Z: User directive — #151 fix approach
+**By:** Marek Fišera (via Copilot)  
+**What:** For Issue #151 (share link 404 on GitHub Pages), use a redirect-based 404.html pattern:
+1. 404.html redirects to index.html with the original path encoded as a query string parameter
+2. A script in index.html reads the query string, uses history.replaceState to restore the original URL
+3. SPA router then handles the route normally
+4. This means NO change to --base ./ is needed — assets resolve correctly because the browser is actually serving index.html from root
+
+**Why:** User design decision — avoids base path changes, uses proven GitHub Pages SPA redirect pattern
+
+### 2026-03-30T18:25:00Z: User directive — #161 fix approach
+**By:** Marek Fišera (via Copilot)  
+**What:** For Issue #161 (share link missing API URL), encode the API base URL as an extra query parameter in the share link. Combine the link ID and API URL into a query string, base64-encode it, and use that as the share link token/path segment. The client decodes to extract both the token and API URL.
+
+**Why:** User design decision — stateless, no DB migration, self-contained link that carries all info needed to resolve the shared item
