@@ -505,16 +505,20 @@ test.describe('Screenshot Capture', () => {
     });
 
     test(`space view - share modal - ${vp.name}`, async ({ page }) => {
+      // Disable navigator.share so link creation falls back to clipboard copy
+      await page.addInitScript(() => { Object.defineProperty(navigator, 'share', { value: undefined, writable: true }); });
+
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
       await page.reload();
       await page.waitForSelector('app-shell');
+
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
 
-      // Click "Manage shared links" button on the first item
-      const manageBtn = page.locator('button[aria-label="Manage shared links"]').first();
+      // Click "Shared links" button on the first item
+      const manageBtn = page.locator('button[aria-label="Shared links"]').first();
       await manageBtn.click();
       // Wait for the share modal to appear (heading: "Shared links")
       await page.waitForFunction(

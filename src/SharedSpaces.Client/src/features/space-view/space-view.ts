@@ -103,7 +103,6 @@ export class SpaceView extends BaseElement {
   @state() private shareModalDeleteConfirmId: string | null = null;
   @state() private shareCopiedLinkId: string | null = null;
   @state() private shareModalName = '';
-  @state() private shareItemCopiedIds = new Set<string>();
 
   private _previewRequestId = 0;
 
@@ -937,50 +936,6 @@ export class SpaceView extends BaseElement {
 
   // --- Shared link handlers ---
 
-  private handleShareItem = async (item: SpaceItemResponse) => {
-    if (!this.serverUrl || !this.spaceId || !this.token) return;
-
-    try {
-      const link = await createSharedLink(
-        this.serverUrl,
-        this.spaceId,
-        item.id,
-        this.token,
-      );
-      const shareUrl = buildShareUrl(link.token, this.serverUrl);
-
-      // Try native share first, fall back to clipboard
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: item.contentType === 'file' ? item.content : 'Shared text',
-            url: shareUrl,
-          });
-        } catch {
-          // Native share failed or user cancelled — always copy to clipboard as fallback
-          await this.copyToClipboard(shareUrl);
-        }
-      } else {
-        await this.copyToClipboard(shareUrl);
-      }
-
-      // Brief visual feedback on the button
-      this.shareItemCopiedIds = new Set([...this.shareItemCopiedIds, item.id]);
-      setTimeout(() => {
-        const next = new Set(this.shareItemCopiedIds);
-        next.delete(item.id);
-        this.shareItemCopiedIds = next;
-      }, 1500);
-    } catch (error) {
-      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
-        this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
-        return;
-      }
-      // Non-critical; could surface later
-    }
-  };
-
   private async copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1044,15 +999,8 @@ export class SpaceView extends BaseElement {
       this.shareModalLinks = [...this.shareModalLinks, link];
       this.shareModalName = '';
 
-      // Auto-copy the new link
-      const shareUrl = buildShareUrl(link.token, this.serverUrl);
-      await this.copyToClipboard(shareUrl);
-      this.shareCopiedLinkId = link.id;
-      setTimeout(() => {
-        if (this.shareCopiedLinkId === link.id) {
-          this.shareCopiedLinkId = null;
-        }
-      }, 1500);
+      // Open system share dialog for the new link
+      await this.shareOrCopyLink(link);
     } catch (error) {
       if (error instanceof SpaceApiError) {
         this.shareModalError = error.message;
@@ -1068,6 +1016,30 @@ export class SpaceView extends BaseElement {
     const shareUrl = this.serverUrl
       ? buildShareUrl(link.token, this.serverUrl)
       : `${window.location.origin}/shared/${link.token}`;
+    await this.copyToClipboard(shareUrl);
+    this.shareCopiedLinkId = link.id;
+    setTimeout(() => {
+      if (this.shareCopiedLinkId === link.id) {
+        this.shareCopiedLinkId = null;
+      }
+    }, 1500);
+  };
+
+  private shareOrCopyLink = async (link: SharedLinkResponse) => {
+    const shareUrl = this.serverUrl
+      ? buildShareUrl(link.token, this.serverUrl)
+      : `${window.location.origin}/shared/${link.token}`;
+    const title = link.name || this.getItemPreviewLabel(this.shareModalItem!) || 'Shared item';
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url: shareUrl });
+        return;
+      } catch {
+        // User cancelled or share failed — fall back to clipboard
+      }
+    }
+
     await this.copyToClipboard(shareUrl);
     this.shareCopiedLinkId = link.id;
     setTimeout(() => {
@@ -1572,31 +1544,15 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderShareButton(item: SpaceItemResponse) {
-    const shared = this.shareItemCopiedIds.has(item.id);
-    return html`
-      <button
-        @click=${() => this.handleShareItem(item)}
-        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-violet-400"
-        title=${shared ? 'Link copied!' : 'Share link'}
-        aria-label=${shared ? 'Share link copied' : 'Create and copy share link'}
-      >
-        ${shared
-          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
-          : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`}
-      </button>
-    `;
-  }
-
   private renderManageLinksButton(item: SpaceItemResponse) {
     return html`
       <button
         @click=${() => this.openShareModal(item)}
         class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-violet-400"
-        title="Manage shared links"
-        aria-label="Manage shared links"
+        title="Shared links"
+        aria-label="Shared links"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
       </button>
     `;
   }
@@ -1668,7 +1624,6 @@ export class SpaceView extends BaseElement {
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderCopyButton(item)}
-        ${this.renderShareButton(item)}
         ${this.renderManageLinksButton(item)}
         ${this.renderSendToButton(item)}
         ${this.renderDeleteButton(item)}
@@ -1703,7 +1658,6 @@ export class SpaceView extends BaseElement {
       <!-- Right: Actions -->
       <div class="-mr-2 flex shrink-0 items-center gap-1">
         ${this.renderDownloadButton(item)}
-        ${this.renderShareButton(item)}
         ${this.renderManageLinksButton(item)}
         ${this.renderSendToButton(item)}
         ${this.renderDeleteButton(item)}
@@ -1991,16 +1945,56 @@ export class SpaceView extends BaseElement {
     const isConfirming = this.shareModalDeleteConfirmId === link.id;
 
     return html`
-      <div class="rounded-lg border border-slate-700/60 bg-slate-800/40 p-3">
-        ${link.name
-          ? html`<p class="mb-1 text-sm font-medium text-white truncate" title=${link.name}>${link.name}</p>`
-          : nothing}
-        <p class="mb-2 truncate font-mono text-xs text-slate-400" title=${shareUrl}>
-          ${shareUrl}
-        </p>
+      <div class="relative overflow-hidden rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2.5">
+        <div class="flex items-center gap-3">
+          <!-- Left: Link icon -->
+          <div class="shrink-0 text-sky-400" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+          </div>
+          <!-- Center: Name + URL -->
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium text-slate-200" title=${link.name || shareUrl}>
+              ${link.name || 'Unnamed link'}
+            </p>
+            <p class="truncate text-xs text-slate-500" title=${shareUrl}>
+              ${shareUrl} · <time datetime=${link.createdAt}>${this.formatTime(link.createdAt)}</time>
+            </p>
+          </div>
+          <!-- Right: Actions -->
+          <div class="-mr-1 flex shrink-0 items-center gap-0.5">
+            <button
+              @click=${() => this.shareOrCopyLink(link)}
+              class="cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-sky-400"
+              title="Share"
+              aria-label="Share link"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+            </button>
+            <button
+              @click=${() => this.handleCopyShareLink(link)}
+              class="cursor-pointer rounded p-1.5 transition ${isCopied
+                ? 'text-emerald-400'
+                : 'text-slate-500 hover:text-slate-300'}"
+              title=${isCopied ? 'Copied!' : 'Copy link URL'}
+              aria-label=${isCopied ? 'Copied to clipboard' : 'Copy link URL'}
+            >
+              ${isCopied
+                ? html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+                : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+            </button>
+            <button
+              @click=${() => { this.shareModalDeleteConfirmId = link.id; }}
+              class="cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-red-400"
+              title="Delete link"
+              aria-label="Delete shared link"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+          </div>
+        </div>
         ${isConfirming
           ? html`
-              <div class="flex items-center justify-between gap-2">
+              <div class="absolute inset-0 z-10 flex items-center justify-center gap-3 rounded-lg bg-slate-900/95 px-3 py-2.5 backdrop-blur-sm">
                 <p class="text-xs text-slate-300">Delete this link?</p>
                 <div class="flex gap-2">
                   <button
@@ -2014,24 +2008,7 @@ export class SpaceView extends BaseElement {
                 </div>
               </div>
             `
-          : html`
-              <div class="flex gap-2">
-                <button
-                  @click=${() => this.handleCopyShareLink(link)}
-                  class="flex-1 cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium transition ${isCopied
-                    ? 'border-emerald-500/50 text-emerald-300'
-                    : 'text-slate-300 hover:border-slate-500 hover:text-white'}"
-                >
-                  ${isCopied ? '✓ Copied' : 'Copy URL'}
-                </button>
-                <button
-                  @click=${() => { this.shareModalDeleteConfirmId = link.id; }}
-                  class="cursor-pointer rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-red-500/50 hover:text-red-300"
-                >
-                  Delete
-                </button>
-              </div>
-            `}
+          : nothing}
       </div>
     `;
   }
