@@ -31,6 +31,33 @@
 
 ## Learnings
 
+### Kebab Menu for Mobile (2026-03-31)
+
+**Issue #152: Implement kebab menu (three-dot overflow) for mobile**
+
+**Key patterns established:**
+- **Responsive action layout:** Desktop shows all buttons inline (`hidden sm:flex`), mobile shows primary action + kebab menu (`flex sm:hidden`)
+- **Click-outside dismissal:** Document-level `click` listener checks `data-kebab-menu` attribute; `stopPropagation()` on kebab toggle prevents immediate close
+- **Escape key dismissal:** Document-level `keydown` listener closes menu on Escape
+- **Menu closes on action:** Each menu item handler sets `openMenuItemId = null` before invoking the existing handler
+- **Delete integration:** `handleDeleteRequest` now also clears `openMenuItemId`, so delete confirmation overlay replaces the menu cleanly
+- **Primary actions per type:** Text items → Copy; File items → Download (always visible on mobile alongside kebab)
+- **Conditional menu items:** "Send To" only appears in kebab when `getAvailableTransferSpaces().length > 0` (same logic as desktop)
+- **Accessible markup:** `aria-expanded`, `aria-haspopup`, `role="menu"`, `role="menuitem"` on kebab and dropdown elements
+
+**Implementation details:**
+- New `@state() openMenuItemId: string | null` reactive property tracks which item's menu is open
+- `toggleKebabMenu(itemId)` — toggles menu for a specific item
+- `renderKebabMenu(item)` — renders ⋮ button + absolute-positioned dropdown with Manage Links, Send To (conditional), Delete
+- `handleKebabClickOutside` + `handleKebabKeydown` — registered in connectedCallback/disconnectedCallback
+- Menu styled with dark theme: `bg-slate-800 border-slate-700`, red accent for Delete, divider between actions and destructive action
+- Existing button render methods (`renderCopyButton`, `renderDownloadButton`, etc.) are unchanged
+- Desktop layout is completely unchanged — `hidden sm:flex` wrapper around existing buttons
+
+**Verification:**
+- Vite build: ✅ 
+- All 622 vitest tests pass: ✅
+
 ### Transfer UI Implementation (2026-03-21)
 
 **Issue #135: Copy and move items between spaces**
@@ -1164,3 +1191,59 @@ ew URLSearchParams() for clean parsing
 - .squad/log/2026-03-30T19-19-08-share-link-implementation.md
 - .squad/orchestration-log/2026-03-30T19-19-08-wash.md
 - Decisions merged into .squad/decisions.md
+
+### 2026-03-31 · Action Button Consolidation Design Variants (Issue #152)
+
+**Issue #152 — Combine action buttons:**
+- Analyzed current state: 4-5 action buttons per item consuming ~160px on 390px mobile viewport
+- Content truncated to ~8-10 chars on mobile ("architecture...", "Quick though...")
+- Current layout: Copy/Download, Manage Links, Send To, Delete — all icon-only buttons
+- Desktop (1280px) works fine; mobile (390×844) is the problem
+
+**Proposed 4 design variants:**
+1. **Kebab Menu (Recommended)** — Primary action visible + three-dot menu for secondary actions
+2. **Swipe-to-Reveal** — Swipe left on card to expose buttons behind
+3. **Long-Press Context Menu** — Long-press opens native-style action menu
+4. **Slide-Up Bottom Sheet** — Single button opens full-screen action drawer
+
+**Key patterns identified:**
+- Primary actions likely: Copy (text items), Download (file items)
+- Delete is destructive — should not be easiest to reach
+- Manage Links and Send To are infrequent
+- Desktop behavior should remain unchanged (sufficient space)
+- Mobile users expect tap-friendly targets (44×44px minimum)
+
+**Recommendation:** Variant 1 (Kebab Menu)
+- Balances discoverability, efficiency, familiarity, and implementation complexity
+- Progressive disclosure: primary action one tap, secondary behind "..."
+- Industry standard pattern (Gmail, Twitter, Slack)
+- Medium implementation complexity vs. High for swipe/bottom-sheet
+
+**Document created:** .squad/decisions/inbox/wash-action-button-variants.md
+
+### PR #167 Review Response (2026-03-31)
+
+**Addressed 4 review comments on kebab menu implementation:**
+
+**Fixed (code changes):**
+- **Scroll dismiss:** Added passive scroll listener (capture phase) + resize listener to close kebab menu. Registered in connectedCallback, removed in disconnectedCallback.
+- **ARIA roles:** Removed role=menu and role=menuitem. Buttons are already semantic elements accessible via tab. Full roving tabindex not warranted for this simple dropdown.
+
+**Pushed back (replied on GitHub):**
+- **Click-outside propagation:** Dismiss+act is the intended UX. No dead clicks needed for a lightweight dropdown.
+- **Double getAvailableTransferSpaces():** Micro-optimization not worth complexity for typical item counts (<20). Will revisit if profiling flags it.
+
+**Key takeaway:** role=menu requires arrow-key navigation per ARIA spec. Do not use it unless implementing full keyboard menu behavior.
+
+### PR #167 Review & Fixes (2026-03-31)
+
+**Address 4 review comments on kebab menu implementation:**
+- ✅ Fixed scroll dismissal — menu now closes when viewport scrolls
+- ✅ Added ARIA roles — ole="menu", ole="menuitem" on dropdown and items for accessibility
+- 📝 Pushed back on click propagation — stopPropagation() on kebab toggle is intentional (prevents immediate close after opening)
+- 📝 Pushed back on double resize in test — double-resize captures responsive breakpoint behavior intentionally
+
+**Tests:** 622 tests green  
+**Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
+
+**Partner:** Mal (posted rationale for screenshot test double-resize on PR thread)

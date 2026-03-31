@@ -582,4 +582,29 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'admin-invite', vp);
     });
   }
+
+  // Mobile-only: kebab overflow menu doesn't exist on desktop
+  const mobile = Viewports.find((v) => v.name === 'mobile')!;
+
+  test(`space view - kebab menu open - ${mobile.name}`, async ({ page }) => {
+    await page.goto(CLIENT_URL);
+    await injectTokens(page, tokenMap);
+    await page.reload();
+    await page.waitForSelector('app-shell');
+    // Navigate into the first space
+    await page.click('nav button:first-child');
+    await page.waitForSelector('space-view');
+    await page.waitForTimeout(500);
+    // Set mobile viewport so the kebab button is visible
+    await page.setViewportSize({ width: mobile.width, height: mobile.height });
+    await page.waitForTimeout(300);
+    // Click the kebab (⋮) button on the first item to open the overflow menu
+    const kebabBtn = page.locator('[data-kebab-menu] button[aria-label="More actions"]').first();
+    await kebabBtn.waitFor({ state: 'visible', timeout: 10_000 });
+    await kebabBtn.click();
+    // Wait for the dropdown menu to appear
+    await page.waitForSelector('[data-kebab-menu] [role="menu"]', { timeout: 5_000 });
+    await page.waitForTimeout(300);
+    await capture(page, 'space-kebab-menu', mobile);
+  });
 });

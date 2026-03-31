@@ -4881,3 +4881,222 @@ Make PINs globally unique via retry-on-collision, allowing `serverUrl|pin` as th
 **What:** For Issue #161 (share link missing API URL), encode the API base URL as an extra query parameter in the share link. Combine the link ID and API URL into a query string, base64-encode it, and use that as the share link token/path segment. The client decodes to extract both the token and API URL.
 
 **Why:** User design decision — stateless, no DB migration, self-contained link that carries all info needed to resolve the shared item
+---
+
+# Decision: Action Button Consolidation Design (Issue #152)
+
+**Issue:** #152
+**Author:** Wash (Frontend Dev)
+**Date:** 2026-03-31
+**Status:** Decided
+
+## Context
+
+Mobile space constraint — 4-5 action buttons per item consume ~160px of 390px viewport, leaving only ~8-10 chars for content. Need to consolidate action buttons while maintaining discoverability and usability.
+
+## Design Variants for Action Button Consolidation (Issue #152)
+
+**Date:** 2026-03-31  
+**Author:** Wash (Frontend Dev)  
+**Context:** Mobile space constraint — 4-5 action buttons per item consume ~160px of 390px viewport, leaving only ~8-10 chars for content
+
+---
+
+## Variant 1: Kebab Menu (Three-Dot Overflow)
+
+### How it works
+- **Mobile (≤640px):** Primary action (Copy/Download) always visible + kebab menu (three vertical dots) for secondary actions
+- **Desktop (>640px):** All buttons visible inline, as current behavior
+
+### Primary action
+- **Text items:** Copy button (most common action)
+- **File items:** Download button (most common action)
+
+### Secondary actions
+- Manage Links, Send To, Delete → moved into a dropdown menu triggered by kebab icon
+- Menu appears as a floating popover positioned below the button, with proper z-index layering
+
+### Interaction
+- User taps kebab icon → menu slides down with 3 options (each labeled with icon + text)
+- Tapping outside or selecting an option closes the menu
+- Delete option opens existing confirmation overlay (replaces primary button + kebab with Delete/Cancel)
+
+### Pros
+- **Familiar pattern:** Users expect "..." to mean "more actions"
+- **Minimal surface area:** Single icon button (~36px) vs 3 buttons (~108px) → saves ~72px
+- **Keeps primary action one-tap:** Copy/Download remains immediately accessible
+- **Desktop unchanged:** Existing behavior preserved where space allows
+- **Scalable:** Easy to add more actions in future without UI bloat
+
+### Cons
+- **Hidden affordance:** Users might not discover secondary actions immediately
+- **Extra tap:** Secondary actions require 2 taps instead of 1
+- **Menu implementation:** Requires dropdown component with proper positioning, backdrop, and dismiss logic
+- **Delete confirmation overlap:** Delete overlay still needed, but now triggered from within menu
+
+### Implementation complexity
+**Medium**
+- Create reusable dropdown menu component (or use Web Component `<details>` with custom styling)
+- Add responsive media query to toggle between inline buttons (desktop) and primary + kebab (mobile)
+- Position menu with proper z-index and viewport boundary detection
+- Wire up menu options to existing handlers
+
+---
+
+## Variant 2: Swipe-to-Reveal Actions
+
+### How it works
+- **Mobile (≤640px):** Swipe left on item card to reveal action buttons behind the card
+- **Desktop (>640px):** All buttons visible inline, as current behavior
+
+### Primary action
+- All actions start hidden behind the card
+- Swipe gesture reveals buttons in a horizontal strip (Copy/Download, Manage Links, Send To, Delete)
+
+### Secondary actions
+- All actions are technically "secondary" since they require a swipe gesture
+- Could make Copy/Download partially visible (e.g., edge peek) to hint at swipe affordance
+
+### Interaction
+- User swipes item card left → card slides to reveal buttons underneath
+- Buttons appear in order from right: Delete (red), Send To, Manage Links, Copy/Download
+- Tapping button executes action; tapping card or swiping right hides actions again
+- Delete opens existing confirmation overlay
+
+### Pros
+- **Zero UI footprint when idle:** Entire row available for content display
+- **Muscle memory from email apps:** iOS Mail, Gmail use this pattern — users know it
+- **All actions accessible with one gesture:** No nested menus
+- **Visual hierarchy:** Destructive action (Delete) appears last/furthest
+
+### Cons
+- **Discoverability:** No visible affordance that actions exist until user swipes
+- **Gesture conflicts:** May conflict with horizontal scrolling or carousel patterns
+- **Complexity:** Requires touch event handling, swipe detection, animation state management
+- **Desktop unchanged but inconsistent:** Desktop has visible buttons, mobile requires swipe — breaks pattern consistency
+- **Accidental triggers:** Users might swipe when trying to scroll
+- **Accessibility:** Screen readers and keyboard navigation require fallback UI
+
+### Implementation complexity
+**High**
+- Implement touch event handlers (`touchstart`, `touchmove`, `touchend`)
+- Calculate swipe distance, velocity, and threshold for reveal
+- Animate card position with smooth transitions (CSS transforms)
+- Handle state management for which item is currently swiped open
+- Close open item when another is swiped or when scrolling
+- Provide accessible fallback (long-press menu?)
+
+---
+
+## Variant 3: Long-Press Context Menu
+
+### How it works
+- **Mobile (≤640px):** No visible action buttons. Long-press on item card opens native-style context menu with all actions
+- **Desktop (>640px):** All buttons visible inline, as current behavior (or use right-click context menu)
+
+### Primary action
+- Copy (text) / Download (file) could appear at top of menu for quick access
+
+### Secondary actions
+- All actions appear in context menu: Copy/Download, Manage Links, Send To, Delete
+
+### Interaction
+- User long-presses anywhere on the item card → context menu appears as modal overlay
+- Menu shows labeled options with icons (similar to iOS share sheet or Android long-press menus)
+- Tapping option executes action and closes menu
+- Tapping outside menu dismisses it
+- Delete triggers confirmation dialog
+
+### Pros
+- **Maximum content space:** Zero buttons visible → entire 390px available for content
+- **Mobile-native pattern:** Long-press is common on mobile for "more options"
+- **Unified action discovery:** All actions in one place, no primary/secondary split
+- **Clean aesthetic:** Minimal UI, reduces visual noise
+
+### Cons
+- **Zero discoverability:** No visual affordance that actions exist at all
+- **Uncommon in web apps:** More common in native mobile, less expected in PWA/web context
+- **Learning curve:** Users need to discover the interaction themselves
+- **Slow interaction:** Long-press requires ~500ms hold before menu appears
+- **Accessibility:** Difficult for users with motor impairments; requires alternative input method
+- **Desktop inconsistency:** Long-press doesn't exist on desktop (could use right-click, but inconsistent UX)
+
+### Implementation complexity
+**Medium**
+- Implement `touchstart` + timer to detect long-press (typically 500-700ms)
+- Cancel long-press on `touchmove` (drag) or `touchend` before threshold
+- Create modal context menu component with backdrop
+- Position menu near touch point or centered on screen
+- Handle menu dismiss logic and action routing
+
+---
+
+## Variant 4: Single Primary Button + Slide-Up Sheet
+
+### How it works
+- **Mobile (≤640px):** Single icon button (e.g., three horizontal dots or "Actions" text) opens bottom sheet with all actions
+- **Desktop (>640px):** All buttons visible inline, as current behavior
+
+### Primary action
+- None visible initially — all actions accessed via single button
+
+### Secondary actions
+- All actions (Copy/Download, Manage Links, Send To, Delete) appear in bottom sheet (slide-up drawer)
+
+### Interaction
+- User taps "Actions" button → bottom sheet slides up from bottom of screen
+- Sheet shows large, tap-friendly buttons (similar to iOS share sheet)
+- Each button labeled with icon + text for clarity
+- Tapping action executes it and closes sheet
+- Tapping backdrop (outside sheet) dismisses it
+- Delete opens confirmation UI within the sheet
+
+### Pros
+- **Maximum tap targets:** Bottom sheet buttons can be larger and more accessible
+- **Clear labeling:** Text labels alongside icons reduce confusion
+- **Mobile-optimized:** Bottom sheets are standard mobile pattern (iOS, Android)
+- **Flexible layout:** Room for additional context or explanations if needed
+
+### Cons
+- **All actions buried:** Even primary actions require 2 taps
+- **Modal interaction:** Sheet covers content, breaks flow
+- **Implementation overhead:** Bottom sheet component with animation, backdrop, body scroll-lock
+- **Slower task completion:** Every action requires opening sheet first
+- **Not ideal for rapid actions:** If users frequently copy multiple items, this adds friction
+
+### Implementation complexity
+**Medium-High**
+- Create bottom sheet component with slide-up animation
+- Manage open/close state and backdrop clicks
+- Lock body scroll when sheet is open (prevent scrolling background)
+- Position sheet at viewport bottom with proper z-index
+- Animate entry/exit with smooth transitions
+- Ensure sheet is dismissible with swipe-down gesture (optional but expected)
+
+---
+
+## Recommendation
+
+**Variant 1: Kebab Menu** is the optimal choice for this use case.
+
+**Reasoning:**
+1. **Balances discoverability and space efficiency:** Primary action (Copy/Download) remains one tap, secondary actions discoverable via familiar "..." icon
+2. **Progressive disclosure:** Shows most important action immediately, hides less-used options
+3. **Desktop compatibility:** Clean responsive breakpoint — no behavior change on desktop
+4. **Moderate complexity:** Reusable dropdown component, no gesture detection or complex animation
+5. **Industry standard:** Used by Gmail, Twitter, Slack, and most web apps — users expect it
+
+**Why not the others?**
+- **Variant 2 (Swipe):** High complexity, low discoverability, accessibility concerns, gesture conflicts
+- **Variant 3 (Long-press):** Poor discoverability, uncommon in web, slow interaction, accessibility issues
+- **Variant 4 (Bottom sheet):** Buries even primary actions, adds modal friction for every interaction
+
+**Next steps:**
+1. Validate with Marek that primary actions (Copy for text, Download for files) align with usage patterns
+2. Confirm desktop behavior should remain unchanged (all buttons visible)
+3. Prototype Variant 1 with responsive breakpoint at 640px
+4. Test on mobile devices (especially tap target size and menu positioning)
+
+
+
+# Kebab Menu: Mobile Action Overflow Pattern  **Date:** 2026-03-31   **Author:** Wash (Frontend Dev)   **Issue:** #152  ## Decision  Mobile (< 640px) shows only the **primary action button** plus a **kebab menu (⋮)** that consolidates secondary actions. Desktop (≥ 640px) remains unchanged with all buttons inline.  ## Pattern  - **Responsive split:** `hidden sm:flex` for desktop buttons, `flex sm:hidden` for mobile layout - **Primary actions:** Copy (text items), Download (file items) — always visible - **Kebab contains:** Manage Links, Send To (conditional), Delete (with divider) - **State:** Single `openMenuItemId` reactive property — only one menu open at a time - **Dismissal:** Click outside (`data-kebab-menu` attribute check), Escape key, or selecting an action - **Delete flow:** Kebab menu closes, then standard delete confirmation overlay appears  ## Rationale  Four inline icon buttons on a 390px viewport caused cramped touch targets and visual clutter. The kebab pattern keeps the most-used action instantly accessible while consolidating less-frequent actions behind one tap.  ## Impact  - Establishes the kebab overflow pattern for future mobile action menus - No changes to existing button render methods or desktop layout - Delete confirmation flow unchanged on both mobile and desktop
