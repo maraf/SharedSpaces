@@ -199,9 +199,7 @@ export class SharedItemView extends BaseElement {
             </div>
             <p class="text-xs text-slate-500">Shared text</p>
           </div>
-          <p class="whitespace-pre-wrap break-words text-sm text-slate-200">
-            ${this.item.content}
-          </p>
+          <p class="whitespace-pre-wrap break-words text-sm text-slate-200">${this.item.content}</p>
         </div>
         <div class="flex justify-center">
           <button
@@ -224,7 +222,7 @@ export class SharedItemView extends BaseElement {
     return html`
       <div class="w-full max-w-lg space-y-4">
         <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-          <div class="mb-4 flex items-center gap-3">
+          <div class="${isPreviewable(this.item.content) || this.previewLoading ? 'mb-4 ' : ''}flex items-center gap-3">
             <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
               ${icon.svg}
             </div>
