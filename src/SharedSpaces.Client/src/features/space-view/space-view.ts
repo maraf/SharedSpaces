@@ -103,6 +103,7 @@ export class SpaceView extends BaseElement {
   @state() private shareModalDeleteConfirmId: string | null = null;
   @state() private shareCopiedLinkId: string | null = null;
   @state() private shareModalName = '';
+  @state() private openMenuItemId: string | null = null;
 
   private _previewRequestId = 0;
 
@@ -133,6 +134,18 @@ export class SpaceView extends BaseElement {
     }
     if (event.data?.type === 'offline-queue-sync-requested') {
       this.syncOfflineQueue();
+    }
+  };
+  private handleKebabClickOutside = (event: MouseEvent) => {
+    if (this.openMenuItemId === null) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest('[data-kebab-menu]')) {
+      this.openMenuItemId = null;
+    }
+  };
+  private handleKebabKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && this.openMenuItemId !== null) {
+      this.openMenuItemId = null;
     }
   };
 
@@ -169,6 +182,8 @@ export class SpaceView extends BaseElement {
     document.addEventListener('dragover', this.handleDragOver);
     document.addEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
+    document.addEventListener('click', this.handleKebabClickOutside);
+    document.addEventListener('keydown', this.handleKebabKeydown);
     this.loadPendingShares();
     this.refreshOfflineQueue();
   }
@@ -184,6 +199,8 @@ export class SpaceView extends BaseElement {
     document.removeEventListener('dragover', this.handleDragOver);
     document.removeEventListener('drop', this.handleDocumentDrop);
     navigator.serviceWorker?.removeEventListener('message', this.handleSwMessage);
+    document.removeEventListener('click', this.handleKebabClickOutside);
+    document.removeEventListener('keydown', this.handleKebabKeydown);
   }
 
   private resolveToken(): string | undefined {
@@ -733,6 +750,7 @@ export class SpaceView extends BaseElement {
   };
 
   private handleDeleteRequest = (item: SpaceItemResponse) => {
+    this.openMenuItemId = null;
     this.deleteConfirmItemId = item.id;
   };
 
@@ -1599,6 +1617,62 @@ export class SpaceView extends BaseElement {
     `;
   }
 
+  private toggleKebabMenu(itemId: string) {
+    this.openMenuItemId = this.openMenuItemId === itemId ? null : itemId;
+  }
+
+  private renderKebabMenu(item: SpaceItemResponse) {
+    const isOpen = this.openMenuItemId === item.id;
+    const availableSpaces = this.getAvailableTransferSpaces();
+    const hasSendTo = availableSpaces.length > 0;
+
+    return html`
+      <div class="relative" data-kebab-menu>
+        <button
+          @click=${(e: Event) => { e.stopPropagation(); this.toggleKebabMenu(item.id); }}
+          class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300"
+          title="More actions"
+          aria-label="More actions"
+          aria-expanded=${isOpen}
+          aria-haspopup="true"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+        </button>
+        ${isOpen ? html`
+          <div class="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-slate-700 bg-slate-800 py-1 shadow-lg" role="menu">
+            <button
+              role="menuitem"
+              class="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-slate-100 cursor-pointer"
+              @click=${() => { this.openMenuItemId = null; this.openShareModal(item); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+              Manage Links
+            </button>
+            ${hasSendTo ? html`
+              <button
+                role="menuitem"
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-slate-100 cursor-pointer"
+                @click=${() => { this.openMenuItemId = null; this.openTransferModal(item); }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                Send To
+              </button>
+            ` : nothing}
+            <div class="my-1 border-t border-slate-700"></div>
+            <button
+              role="menuitem"
+              class="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-slate-700 hover:text-red-300 cursor-pointer"
+              @click=${() => { this.handleDeleteRequest(item); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+              Delete
+            </button>
+          </div>
+        ` : nothing}
+      </div>
+    `;
+  }
+
   private renderTextContent(item: SpaceItemResponse) {
     const icon = getTextItemIcon();
     const isDeleting = this.deleteConfirmItemId === item.id;
@@ -1625,10 +1699,18 @@ export class SpaceView extends BaseElement {
         ${isDeleting
           ? this.renderDeleteConfirmActions(item)
           : html`
-            ${this.renderCopyButton(item)}
-            ${this.renderManageLinksButton(item)}
-            ${this.renderSendToButton(item)}
-            ${this.renderDeleteButton(item)}
+            <!-- Desktop: all buttons inline -->
+            <div class="hidden sm:flex items-center gap-1">
+              ${this.renderCopyButton(item)}
+              ${this.renderManageLinksButton(item)}
+              ${this.renderSendToButton(item)}
+              ${this.renderDeleteButton(item)}
+            </div>
+            <!-- Mobile: primary + kebab -->
+            <div class="flex sm:hidden items-center gap-1">
+              ${this.renderCopyButton(item)}
+              ${this.renderKebabMenu(item)}
+            </div>
           `}
       </div>
     `;
@@ -1664,10 +1746,18 @@ export class SpaceView extends BaseElement {
         ${isDeleting
           ? this.renderDeleteConfirmActions(item)
           : html`
-            ${this.renderDownloadButton(item)}
-            ${this.renderManageLinksButton(item)}
-            ${this.renderSendToButton(item)}
-            ${this.renderDeleteButton(item)}
+            <!-- Desktop: all buttons inline -->
+            <div class="hidden sm:flex items-center gap-1">
+              ${this.renderDownloadButton(item)}
+              ${this.renderManageLinksButton(item)}
+              ${this.renderSendToButton(item)}
+              ${this.renderDeleteButton(item)}
+            </div>
+            <!-- Mobile: primary + kebab -->
+            <div class="flex sm:hidden items-center gap-1">
+              ${this.renderDownloadButton(item)}
+              ${this.renderKebabMenu(item)}
+            </div>
           `}
       </div>
     `;

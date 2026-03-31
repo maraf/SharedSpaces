@@ -31,6 +31,33 @@
 
 ## Learnings
 
+### Kebab Menu for Mobile (2026-03-31)
+
+**Issue #152: Implement kebab menu (three-dot overflow) for mobile**
+
+**Key patterns established:**
+- **Responsive action layout:** Desktop shows all buttons inline (`hidden sm:flex`), mobile shows primary action + kebab menu (`flex sm:hidden`)
+- **Click-outside dismissal:** Document-level `click` listener checks `data-kebab-menu` attribute; `stopPropagation()` on kebab toggle prevents immediate close
+- **Escape key dismissal:** Document-level `keydown` listener closes menu on Escape
+- **Menu closes on action:** Each menu item handler sets `openMenuItemId = null` before invoking the existing handler
+- **Delete integration:** `handleDeleteRequest` now also clears `openMenuItemId`, so delete confirmation overlay replaces the menu cleanly
+- **Primary actions per type:** Text items → Copy; File items → Download (always visible on mobile alongside kebab)
+- **Conditional menu items:** "Send To" only appears in kebab when `getAvailableTransferSpaces().length > 0` (same logic as desktop)
+- **Accessible markup:** `aria-expanded`, `aria-haspopup`, `role="menu"`, `role="menuitem"` on kebab and dropdown elements
+
+**Implementation details:**
+- New `@state() openMenuItemId: string | null` reactive property tracks which item's menu is open
+- `toggleKebabMenu(itemId)` — toggles menu for a specific item
+- `renderKebabMenu(item)` — renders ⋮ button + absolute-positioned dropdown with Manage Links, Send To (conditional), Delete
+- `handleKebabClickOutside` + `handleKebabKeydown` — registered in connectedCallback/disconnectedCallback
+- Menu styled with dark theme: `bg-slate-800 border-slate-700`, red accent for Delete, divider between actions and destructive action
+- Existing button render methods (`renderCopyButton`, `renderDownloadButton`, etc.) are unchanged
+- Desktop layout is completely unchanged — `hidden sm:flex` wrapper around existing buttons
+
+**Verification:**
+- Vite build: ✅ 
+- All 622 vitest tests pass: ✅
+
 ### Transfer UI Implementation (2026-03-21)
 
 **Issue #135: Copy and move items between spaces**
