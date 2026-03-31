@@ -103,7 +103,6 @@ export class SpaceView extends BaseElement {
   @state() private shareModalDeleteConfirmId: string | null = null;
   @state() private shareCopiedLinkId: string | null = null;
   @state() private shareModalName = '';
-  @state() private shareItemCopiedIds = new Set<string>();
 
   private _previewRequestId = 0;
 
@@ -937,50 +936,6 @@ export class SpaceView extends BaseElement {
 
   // --- Shared link handlers ---
 
-  private handleShareItem = async (item: SpaceItemResponse) => {
-    if (!this.serverUrl || !this.spaceId || !this.token) return;
-
-    try {
-      const link = await createSharedLink(
-        this.serverUrl,
-        this.spaceId,
-        item.id,
-        this.token,
-      );
-      const shareUrl = buildShareUrl(link.token, this.serverUrl);
-
-      // Try native share first, fall back to clipboard
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: item.contentType === 'file' ? item.content : 'Shared text',
-            url: shareUrl,
-          });
-        } catch {
-          // Native share failed or user cancelled — always copy to clipboard as fallback
-          await this.copyToClipboard(shareUrl);
-        }
-      } else {
-        await this.copyToClipboard(shareUrl);
-      }
-
-      // Brief visual feedback on the button
-      this.shareItemCopiedIds = new Set([...this.shareItemCopiedIds, item.id]);
-      setTimeout(() => {
-        const next = new Set(this.shareItemCopiedIds);
-        next.delete(item.id);
-        this.shareItemCopiedIds = next;
-      }, 1500);
-    } catch (error) {
-      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
-        this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
-        return;
-      }
-      // Non-critical; could surface later
-    }
-  };
-
   private async copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1585,22 +1540,6 @@ export class SpaceView extends BaseElement {
         ${copied
           ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
           : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
-      </button>
-    `;
-  }
-
-  private renderShareButton(item: SpaceItemResponse) {
-    const shared = this.shareItemCopiedIds.has(item.id);
-    return html`
-      <button
-        @click=${() => this.handleShareItem(item)}
-        class="cursor-pointer rounded p-2 text-slate-500 transition hover:text-violet-400"
-        title=${shared ? 'Link copied!' : 'Share link'}
-        aria-label=${shared ? 'Share link copied' : 'Create and copy share link'}
-      >
-        ${shared
-          ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
-          : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`}
       </button>
     `;
   }
