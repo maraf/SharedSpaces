@@ -99,6 +99,120 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
 - Server container publishing uses .NET SDK container support (`EnableSdkContainerSupport`) in `.csproj`, targeting `ghcr.io/maraf/sharedspaces-server` with tag format `{VersionPrefix}-{RuntimeIdentifier}`.
 
+## Screenshot Determinism Analysis (2026-03-31)
+
+**Task:** Research backend options for stabilizing screenshot data when E2E tests pull live API responses.
+
+**Key Finding:** Five server-generated timestamps and IDs cause screenshot churn:
+1. `Space.CreatedAt` — set to `DateTime.UtcNow` (line 7 in Space.cs)
+2. `SpaceMember.JoinedAt` — set to `DateTime.UtcNow` (line 8 in SpaceMember.cs)
+3. `SpaceItem.SharedAt` — set to `DateTime.UtcNow` (line 30 in SpaceItem.cs)
+4. `SharedLink.CreatedAt` — set to `DateTime.UtcNow` (line 10 in SharedLink.cs)
+5. All IDs (Space, SpaceMember, SpaceItem, SharedLink, SpaceInvitation) — `Guid.NewGuid()` on entity construction
+
+**API Response Fields Affected (via entity snapshots in Models.cs):**
+- `SpaceResponse.CreatedAt` (line 5, Spaces/Models.cs) — renders as `.toLocaleString()` in admin view (desktop only)
+- `MemberResponse.JoinedAt` (line 7, Spaces/Models.cs) — renders as `.toLocaleString()` in admin members modal
+- `SpaceItemResponse.SharedAt` (line 22, Items/Models.cs) — renders as relative time ("Today", "Yesterday", etc.) in space-view.ts
+- `SpaceDetailsResponse.CreatedAt` (line 13, Items/Models.cs) — used on item detail page
+- `SharedLinkResponse.CreatedAt` (line 12, SharedLinks/Models.cs) — renders timestamp in shared link UI
+- All UUID fields in responses — impact low (monospace, fixed-width) but visible in screenshots
+
+**Current Screenshot Capture Flow (e2e/screenshots.spec.ts):**
+- `seedSpace(name)` calls live API endpoints sequentially
+- Creates Space (`POST /v1/spaces`) — seed gets `space.CreatedAt = DateTime.UtcNow`
+- Creates Invitation (`POST /v1/spaces/{spaceId}/invitations`) — always generates fresh `SpaceInvitation.Id`
+- Creates SpaceMember (via `POST /v1/tokens`) — seed gets `member.JoinedAt = DateTime.UtcNow`
+- Creates SpaceItems (via `PUT /v1/spaces/{spaceId}/items/{itemId}`) — each gets `item.SharedAt = DateTime.UtcNow`
+- No test-only seed endpoints or overrides exist
+
+**Backend Options for Determinism (Non-Implementation Analysis):**
+
+### Option 1: Accept Monthly Re-baselining (Lowest Backend Risk)
+- **Approach:** Client-side fixture determinism (Zoe's Tier 1). Keep backend as-is.
+- **Backend change:** None.
+- **Pros:** Zero product-code risk, backwards-compatible.
+- **Cons:** Re-baseline quarterly or when calendar month changes (maintenance cost).
+- **Timeline:** 0 min (backend)
+- **Recommendation:** Ship this first; add backend options only if re-baselining becomes painful.
+
+### Option 2: Test-Only Seeding Hook with Fixed Timestamps
+- **Approach:** Add optional `?testMode=true` or `X-Test-Seed` header that seeds entities with fixed timestamps instead of `DateTime.UtcNow`.
+- **Implementation points:**
+  - Middleware or endpoint filter checks header in development/test environment
+  - If present, inject a test-scoped `IDateTimeProvider` that returns fixed time (e.g., `new DateTime(2025, 3, 19, 12, 0, 0, DateTimeKind.Utc)`)
+  - Entities use `IDateTimeProvider.Now` instead of `DateTime.UtcNow` (requires small refactor in 5 entity classes)
+- **Backend code locations:**
+  - Inject into `Program.cs` only in non-production environments
+  - Create `Infrastructure/Clock/IDateTimeProvider` interface
+  - Update entity initializers (Space.cs:7, SpaceMember.cs:8, SpaceItem.cs:30, SharedLink.cs:10)
+  - Add test header check in `JwtAuthenticationExtensions.cs` or middleware
+- **Pros:** Permanent determinism, highly controlled, UI captures real timestamps (no mocking).
+- **Cons:** Requires entity refactoring (5 files), middleware addition.
+- **Timeline:** 1–2 hours (backend)
+- **Risk:** Low — changes isolated to test paths and optional provider injection; no product behavior changed.
+
+### Option 3: Admin Seed Endpoint (`POST /admin/seed`)
+- **Approach:** New admin-protected endpoint that creates a complete test space with all entities pre-seeded at a fixed timestamp.
+- **Implementation points:**
+  - `Features/Admin/SeedEndpoints.cs` — new feature folder
+  - Accept request with `{ "timestamp": "2025-03-19T12:00:00Z" }`
+  - Creates Space, Invitation, SpaceMember, SpaceItems all at that timestamp
+  - Returns full response structure (space ID, token, items)
+  - Protected by `AdminAuthenticationFilter` (X-Admin-Secret header)
+- **Backend code locations:**
+  - New endpoint file (50–80 lines)
+  - Optionally reuse/refactor entity creation logic from TokenEndpoints.cs and ItemEndpoints.cs
+- **Pros:** Explicit, easy to document, test harness can call once and reuse all IDs.
+- **Cons:** Requires new endpoint logic, doesn't help with existing item creation patterns (screenshot test still PUT items individually).
+- **Timeline:** 1 hour (backend)
+- **Risk:** Low — isolated endpoint, admin-protected.
+
+### Option 4: Clock Abstraction with DI + Test Override
+- **Approach:** Server-side version of Zoe's "Mock Clock" (Tier 2).
+  - Create `ISystemClock` interface returning `DateTimeOffset` (more testable than static `DateTime.UtcNow`)
+  - Register in DI container (dev/test: inject test clock; production: inject `SystemClock` → `DateTimeOffset.UtcNow`)
+  - Constructor-inject into entities, services, or pass to helper functions
+  - Test configuration sets frozen time at app startup
+- **Implementation points:**
+  - `Infrastructure/Clock/ISystemClock.cs` and `SystemClock.cs`
+  - Register in `Program.cs`
+  - Inject into entity creation flow (endpoints, domain services)
+  - TestWebApplicationFactory overrides clock in `ConfigureServices()`
+- **Pros:** Fully deterministic, server-side controlled, integrates with EF interceptors if needed later.
+- **Cons:** Pervasive DI change (inject into most endpoints), requires test factory updates.
+- **Timeline:** 2–3 hours (backend)
+- **Risk:** Medium — changes touch many endpoints; well-tested pattern but larger surface area.
+
+### Option 5: EF Core Value Converter + Test Configuration
+- **Approach:** Configure EF Core `ValueConverter` on datetime properties to use test time when in test environment.
+- **Implementation points:**
+  - `Infrastructure/Persistence/Configurations/` — update entity configurations (Space.cs, SpaceMember.cs, etc.)
+  - Add converter logic: `builder.Property(s => s.CreatedAt).HasConversion(v => v, v => TestClock.Now ?? v)`
+  - Set `TestClock.Now` in TestWebApplicationFactory startup
+- **Pros:** Minimal code footprint, all entities affected uniformly, works transparently in SaveChangesAsync.
+- **Cons:** EF-specific pattern, less visible to future developers, harder to debug.
+- **Timeline:** 1.5 hours (backend)
+- **Risk:** Medium — EF interceptor behavior can be subtle; test setup complexity.
+
+---
+
+**Proposed Backend Approach:**
+1. **Ship Option 1** (client-side fixtures) immediately. Zoe's skill doc already covers it. No backend work needed.
+2. **Evaluate Option 2** after 1–2 months. If re-baselining becomes painful, add `IDateTimeProvider` to entity initializers. Minimal risk, permanent.
+3. **Hold Options 3–5** as future enhancements if broader test infrastructure is needed.
+
+**Why not full mock clock yet?** The harness (Playwright) and backend are independent; Zoe's Tier 1 (fixed seed dates in test fixtures) solves 90% of the problem without backend changes. Server-side determinism becomes relevant only if:
+- Tests need to control time during long-running operations (not applicable here: simple POST/PUT).
+- Multiple test runs need exact same timestamps (already solved by fixed fixture dates).
+- API contracts require timestamp stability at the millisecond level (not a stated requirement).
+
+**Actionable Summary for Backend:**
+- `Space.CreatedAt`, `SpaceMember.JoinedAt`, `SpaceItem.SharedAt`, `SharedLink.CreatedAt` are the four churn points.
+- No backend code changes needed today; client-side fixture discipline solves it.
+- If backend determinism is needed later, `IDateTimeProvider` injection (Option 2) is the lowest-risk, highest-clarity approach.
+- All options are isolated to non-product code paths (test environment or optional headers).
+
 ## Team Updates (2026-03-27)
 
 **Issue #135 completed (Copy and move items between spaces):**
@@ -1038,3 +1152,13 @@ Reviewer flagged that `CreateSharedLink` did not validate `Name` length against 
 - .squad/log/2026-03-30T19-19-08-share-link-implementation.md
 - .squad/orchestration-log/2026-03-30T19-19-08-kaylee.md
 - Decisions merged into .squad/decisions.md
+
+
+## Cross-Agent Update: Deterministic Screenshot Data (2026-04-01)
+
+**From Mal (Lead):**
+After your research on server-generated timestamps, Mal evaluated the deterministic data strategies and recommended the factory-layer timestamp override approach. The decision is to extend the seed/factory layer to allow fixed timestamps for screenshot-created entities, rather than adding API override paths or response interception.
+
+**Next step:** Implement timestamp override capability in the seed/factory layer so screenshot tests can pass fixed timestamps when creating entities.
+
+**Reference:** `.squad/log/2026-04-01T11-40-15Z-deterministic-api-research.md`

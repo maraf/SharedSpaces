@@ -30,6 +30,34 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Screenshot Determinism Architecture Decision (2026-03-31)
+
+**Decision:** Use **DB seed layer** (extend test factories) for deterministic screenshot data.
+
+**Analysis Summary:**
+- Evaluated 4 approaches: API override, DB seed layer, middleware interceptor, DB-level defaults
+- Server timestamps are all generated in .NET code at request time (`DateTime.UtcNow`), not at DB layer
+- APIs do NOT accept `createdAt`/`sharedAt` overrides — client cannot control seed times
+- Test infrastructure already has partial support (SpaceItem factories accept `sharedAt` parameter)
+
+**Why DB Seed Layer (winner):**
+- **Lowest risk**: Only test code changes; zero production impact
+- **Reuses existing pattern**: Extend existing factory methods (already partially in place)
+- **Maintains realism**: Captures actual timestamp rendering (no masking)
+- **Scales to Tier 2 (mock clock)** if monthly re-baselining becomes painful
+- Test can call `CreateSpaceAsync(..., createdAt: fixedDate)` explicitly
+
+**Rejected alternatives:**
+- **API override**: Medium risk (guards needed), prod complexity leaks
+- **Middleware interceptor**: High complexity, fragile, race conditions with EF
+- **DB-level defaults**: Breaks existing test seeding, ambiguous semantics
+
+**Handoff:** Kaylee to extend factories (Space.createdAt, SpaceMember.joinedAt parameters); Zoe to integrate into screenshot tests.
+
+**Decision doc:** `.squad/decisions/inbox/mal-deterministic-api-data.md`
+
+---
+
 ### Issue #152: Action Button Consolidation — Responsive Kebab Menu Approved (2026-03-31)
 
 **Status:** Design ideation complete, implementation in progress (Wash).
@@ -508,3 +536,16 @@ Your architectural analysis has been merged into shared decision log. Key findin
 - \.squad/decisions.md\ — Merged Wash + Zoe decisions (appended)
 
 **Next Steps:** Implementation assignment (Kaylee or Wash); validation + documentation update in SKILL.md.
+
+
+## Cross-Agent Update: Deterministic Screenshot Data (2026-04-01)
+
+**Team Decision on Screenshot Determinism:**
+After reviewing Kaylee's research on server-generated timestamps, you decided to extend the seed/factory layer to support fixed timestamps for entities created during screenshot capture. This approach keeps changes localized to test infrastructure and avoids API-level complexity.
+
+**Implementation path:**
+1. Modify factories to accept optional fixed timestamps
+2. Update seeding code to pass timestamps when creating screenshot entities
+3. Validate snapshot tests capture deterministic data
+
+**Reference:** `.squad/log/2026-04-01T11-40-15Z-deterministic-api-research.md`
