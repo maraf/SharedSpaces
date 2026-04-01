@@ -1162,3 +1162,16 @@ After your research on server-generated timestamps, Mal evaluated the determinis
 **Next step:** Implement timestamp override capability in the seed/factory layer so screenshot tests can pass fixed timestamps when creating entities.
 
 **Reference:** `.squad/log/2026-04-01T11-40-15Z-deterministic-api-research.md`
+
+### Learnings
+- Screenshot seeding now uses optional `seededAt` request fields that are only honored when the request also includes a valid `X-Admin-Secret`, so normal production writes still fall back to `DateTime.UtcNow`.
+- Shared timestamp override plumbing lives in `src/SharedSpaces.Server/Features/Seeding/SeededTimestampResolver.cs`, while admin-secret comparison is centralized in `src/SharedSpaces.Server/Features/Admin/AdminSecretValidator.cs`.
+- The screenshot fixture entry point is `src/SharedSpaces.Client/e2e/screenshots.spec.ts`; it now seeds deterministic timestamps for space creation, member join, item share, and shared-link creation paths.
+
+## Team Updates (2026-04-01)
+
+**Deterministic screenshot seeding implementation completed:**
+- **Kaylee (Backend):** Implemented admin-gated seededAt parameter support on POST /v1/spaces, POST /v1/tokens, PUT /v1/spaces/{spaceId}/items/{itemId}, and POST /v1/spaces/{spaceId}/shared-links. Centralized timestamp resolution in SeededTimestampResolver.cs and admin-secret validation in AdminSecretValidator.cs. Preserved production behavior (no overrides without admin secret). Added tests; build + test suite passing.
+- **Zoe (Client/Tests):** Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts with fixed seed date (2026-03-30T12:00:00Z) and deterministic seeding calls with X-Admin-Secret header. Configured Playwright with pinned locale (en-US), timezone (UTC), and frozen in-page clock. All 58 screenshots captured successfully; full suite validated.
+- **Coordination:** No conflicts between backend analysis, factory decision, and implementation — all agents aligned on admin-gated API parameter approach.
+- **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.

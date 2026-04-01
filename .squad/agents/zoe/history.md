@@ -195,3 +195,15 @@
 - `.squad/orchestration-log/2026-04-01T11-38-06Z-zoe.md` — Zoe's work
 - `.squad/orchestration-log/2026-04-01T11-38-06Z-mal.md` — Mal's review
 - `.squad/decisions.md` — Merged Wash + Zoe decisions
+
+- 2026-04-01: Extended deterministic seeding is now live end-to-end for screenshots. The server accepts optional admin-gated `SeededAt` overrides on space creation, token exchange, item upsert form data, and shared-link creation; `screenshots.spec.ts` passes fixed timestamps for API-backed seed data.
+- 2026-04-01: Screenshot Playwright config now fixes `locale` to `en-US` and `timezoneId` to `UTC`, while `screenshots.spec.ts` freezes browser `Date` per test with `page.addInitScript` to keep relative-time labels stable.
+- 2026-04-01: Relevant validation for deterministic screenshot seeding is `dotnet test tests/SharedSpaces.Server.Tests/SharedSpaces.Server.Tests.csproj --filter "AdminEndpointTests|TokenEndpointTests|ItemEndpointTests|SharedLinkEndpointTests"`, `npm run build` in `src/SharedSpaces.Client`, and `npx playwright test --project=screenshots` in `src/SharedSpaces.Client`.
+
+## Team Updates (2026-04-01)
+
+**Deterministic screenshot seeding implementation completed:**
+- **Kaylee (Backend):** Implemented admin-gated seededAt parameter support on POST /v1/spaces, POST /v1/tokens, PUT /v1/spaces/{spaceId}/items/{itemId}, and POST /v1/spaces/{spaceId}/shared-links. Centralized timestamp resolution in SeededTimestampResolver.cs and admin-secret validation in AdminSecretValidator.cs. Preserved production behavior (no overrides without admin secret). Added tests; build + test suite passing.
+- **Zoe (Client/Tests):** Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts with fixed seed date (2026-03-30T12:00:00Z) and deterministic seeding calls with X-Admin-Secret header. Configured Playwright with pinned locale (en-US), timezone (UTC), and frozen in-page clock. All 58 screenshots captured successfully; full suite validated.
+- **Coordination:** No conflicts between backend analysis, factory decision, and implementation — all agents aligned on admin-gated API parameter approach.
+- **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.

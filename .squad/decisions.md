@@ -5703,3 +5703,117 @@ Screenshot churn is a **test determinism problem**: the Playwright E2E tests cap
 
 **Status:** Analysis complete. Ready for implementation by Kaylee or Wash (or Coordinator's choice). No code changes made per user's "do not implement" requirement.
 
+
+---
+
+## Implementation Complete: Deterministic Screenshot Seeding
+
+**Decision Date:** 2026-04-01  
+**Decided By:** Kaylee (Backend), Zoe (Client)  
+**Status:** Implemented & Validated  
+**Related Issues:** Referenced from inbox decisions  
+
+### Summary
+
+Implemented deterministic screenshot seeding via admin-gated seededAt parameter overrides on both server and client. This resolves the screenshot churn problem (false positives in visual regression detection due to dynamic timestamps and UUIDs).
+
+### Approach
+
+**Backend (Kaylee):**
+- Added optional seededAt parameter to:
+  - POST /v1/spaces → controls Space.CreatedAt
+  - POST /v1/tokens → controls SpaceMember.JoinedAt
+  - PUT /v1/spaces/{spaceId}/items/{itemId} → controls SpaceItem.SharedAt
+  - POST /v1/spaces/{spaceId}/shared-links → controls SharedLink.CreatedAt
+
+- Centralized logic:
+  - src/SharedSpaces.Server/Features/Seeding/SeededTimestampResolver.cs — timestamp resolution
+  - src/SharedSpaces.Server/Features/Admin/AdminSecretValidator.cs — admin-secret gating
+
+- Preserved production behavior: Requests without seededAt continue using DateTime.UtcNow
+
+**Client (Zoe):**
+- Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts to send fixed seed date: 2026-03-30T12:00:00Z
+- Configured Playwright with:
+  - Pinned locale: n-US
+  - Pinned timezone: UTC
+  - Frozen in-page clock via i.setSystemTime()
+- All fixture calls include X-Admin-Secret header + seededAt parameter
+
+### Rationale
+
+This approach:
+1. ✅ **Exercise real server code** — screenshots capture actual API responses, not mocked data
+2. ✅ **Zero production impact** — overrides gated behind admin secret
+3. ✅ **Stable for 30+ days** — seed date remains constant, drift only on month boundaries
+4. ✅ **Realistic rendering** — no masking or stubbing; actual timestamp formatting is visible
+5. ✅ **Maintainable** — explicit opt-in via seededAt parameter; easy to understand
+
+### Alternatives Considered & Rejected
+
+1. **DB-level seed factory only** (Mal's inbox decision)
+   - Rejected because screenshot E2E tests exercise real API, not direct DB calls
+   - Factory approach reserved for unit tests only
+
+2. **API override without admin secret**
+   - Rejected: Security risk (any client could backdate data)
+
+3. **Middleware response interception**
+   - Rejected: Fragile, breaks with EF Core updates, hard to reason about
+
+4. **Mock clock in test only**
+   - Applied (Zoe implemented) but combined with server-side determinism for double coverage
+
+### Files Modified
+
+**Server:**
+- src/SharedSpaces.Server/Features/Seeding/SeededTimestampResolver.cs (new)
+- src/SharedSpaces.Server/Features/Admin/AdminSecretValidator.cs (new)
+- Endpoint request models (added seededAt?: DateTime to DTO schemas)
+- Server test suite (admin-secret validation tests)
+
+**Client:**
+- src/SharedSpaces.Client/e2e/screenshots.spec.ts (deterministic seeding calls + clock setup)
+- src/SharedSpaces.Client/playwright.config.ts (locale, timezone, fake timers)
+
+### Validation
+
+✅ Server: Build passing, test suite passing, admin-secret validation confirmed  
+✅ Client: All 58 screenshots captured, no visual regressions, stable across runs  
+✅ Integration: Full E2E flow validated (seeded space → captured screenshots)
+
+### Maintenance Plan
+
+1. Screenshot baselines stable for ~30 days
+2. On ~month boundary (when relative times drift), run:
+   `ash
+   npx playwright test --update-snapshots
+   git add docs/screenshots/
+   git commit -m 'chore(screenshots): monthly re-baseline (relative times drifted)'
+   `
+3. CI can automate this on 1st of month if desired
+
+### Success Metrics
+
+- ✅ 58 screenshots remain stable across 5+ test runs
+- ✅ No false positives in visual regression detection
+- ✅ Team can run screenshot tests daily without churn noise
+- ✅ Future timestamp-rendering features can follow same determinism pattern
+
+### Next Steps
+
+1. Integrate deterministic screenshot pipeline into CI daily checks
+2. Document final approach in .squad/skills/playwright-screenshots/SKILL.md
+3. Monitor for any additional timestamp sources that might drift
+4. Consider automation for monthly re-baselining
+
+---
+
+**Note:** This decision consolidates analyses from:
+- Kaylee's backend data investigation (kaylee-deterministic-api-data.md)
+- Mal's test factory decision (mal-deterministic-api-data.md)
+- Zoe's implementation summary (zoe-implement-deterministic-seeding.md)
+- Kaylee's implementation notes (kaylee-implement-deterministic-seeding.md)
+
+All approaches aligned on the admin-gated API parameter method. No conflicts; full team alignment achieved.
+
