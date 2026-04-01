@@ -59,6 +59,9 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
+        // Opt member into journaling
+        await GetJournalAsync(client, space.Id, token);
+
         var item = await factory.CreateItemAsync(
             space.Id, member.Id,
             contentType: "text",
@@ -215,6 +218,9 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
+        // Opt member into journaling by calling journal endpoint
+        await GetJournalAsync(client, space.Id, token);
+
         var item = await factory.CreateItemAsync(
             space.Id, member.Id,
             contentType: "text",
@@ -244,6 +250,9 @@ public class JournalEndpointTests
         var sourceSpace = await factory.CreateSpaceAsync("Source");
         var sourceMember = await factory.CreateMemberAsync(sourceSpace.Id, "Zoe");
         var sourceToken = GenerateTestJwt(sourceMember.Id, sourceSpace.Id, sourceMember.DisplayName);
+
+        // Opt source member into journaling
+        await GetJournalAsync(client, sourceSpace.Id, sourceToken);
 
         // Destination space and member
         var destSpace = await factory.CreateSpaceAsync("Destination");
@@ -281,6 +290,9 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
+        // Opt member into journaling
+        await GetJournalAsync(client, space.Id, token);
+
         // Create 6 items to delete (will exceed the max of 5)
         var items = new List<SpaceItem>();
         for (var i = 0; i < 6; i++)
@@ -309,6 +321,35 @@ public class JournalEndpointTests
 
             var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
             s.JournalPrunedBefore.Should().NotBeNull();
+        });
+    }
+
+    [Fact]
+    public async Task DeleteItem_DoesNotCreateDeletedItemRecord_WhenNoMemberOptedIn()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        // Do NOT opt into journaling (no journal call)
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "deleted without journal",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        var deleteResponse = await DeleteItemAsync(client, space.Id, item.Id, token);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var deletedItem = await db.DeletedItems.SingleOrDefaultAsync(d => d.ItemId == item.Id);
+            deletedItem.Should().BeNull();
         });
     }
 
@@ -434,7 +475,6 @@ public class JournalEndpointTests
 
         private readonly string _databaseName = $"sharedspaces-journal-tests-{Guid.NewGuid()}";
         private readonly long _maxSpaceQuotaBytes = maxSpaceQuotaBytes ?? 104_857_600;
-        private readonly int _journalMaxEntries = journalMaxEntries ?? 1000;
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -442,14 +482,20 @@ public class JournalEndpointTests
 
             builder.ConfigureAppConfiguration((_, configBuilder) =>
             {
-                configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                var config = new Dictionary<string, string?>
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
                     ["Storage:BasePath"] = "./artifacts/storage-journal-tests",
-                    ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString(),
-                    ["Journal:MaxEntriesPerSpace"] = _journalMaxEntries.ToString()
-                });
+                    ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString()
+                };
+
+                if (journalMaxEntries.HasValue)
+                {
+                    config["Journal:MaxEntriesPerSpace"] = journalMaxEntries.Value.ToString();
+                }
+
+                configBuilder.AddInMemoryCollection(config);
             });
 
             builder.ConfigureServices(services =>

@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
+using SharedSpaces.Server.Features.Journal;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -394,7 +395,7 @@ public static class ItemEndpoints
         AppDbContext db,
         IFileStorage fileStorage,
         ISpaceHubNotifier hubNotifier,
-        IConfiguration configuration,
+        IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
@@ -415,17 +416,27 @@ public static class ItemEndpoints
 
         db.SpaceItems.Remove(item);
 
-        db.DeletedItems.Add(new DeletedItem
+        // Only write journal tombstone if at least one member has opted into journaling
+        var hasJournalSubscribers = await db.SpaceMembers
+            .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
+
+        if (hasJournalSubscribers)
         {
-            ItemId = item.Id,
-            SpaceId = item.SpaceId,
-            DeletedAt = DateTime.UtcNow
-        });
+            db.DeletedItems.Add(new DeletedItem
+            {
+                ItemId = item.Id,
+                SpaceId = item.SpaceId,
+                DeletedAt = DateTime.UtcNow
+            });
+        }
 
         await db.SaveChangesAsync(cancellationToken);
 
-        // Prune old journal entries if over the limit
-        await PruneDeletedItemsAsync(db, spaceId, configuration, cancellationToken);
+        // Prune old journal entries if configured
+        if (hasJournalSubscribers)
+        {
+            await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
+        }
 
         var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
         await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
@@ -502,6 +513,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IOptions<JournalOptions> journalOptions,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         CancellationToken cancellationToken)
@@ -551,12 +563,12 @@ public static class ItemEndpoints
         {
             return await TransferItemCrossServer(
                 spaceId, itemId, action, request.DestinationToken, jwtToken,
-                db, fileStorage, hubNotifier, httpClientFactory, cancellationToken);
+                db, fileStorage, hubNotifier, httpClientFactory, journalOptions, cancellationToken);
         }
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, configuration, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, configuration, journalOptions, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
@@ -583,6 +595,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         ISpaceHubNotifier hubNotifier,
         IHttpClientFactory httpClientFactory,
+        IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
     {
         var destinationServerUrl = jwtToken.Claims
@@ -697,6 +710,21 @@ public static class ItemEndpoints
                 if (sourceItemTracked is not null)
                 {
                     db.SpaceItems.Remove(sourceItemTracked);
+
+                    // Only write journal tombstone if at least one member has opted into journaling
+                    var hasJournalSubscribers = await db.SpaceMembers
+                        .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
+
+                    if (hasJournalSubscribers)
+                    {
+                        db.DeletedItems.Add(new DeletedItem
+                        {
+                            ItemId = sourceItemTracked.Id,
+                            SpaceId = sourceItemTracked.SpaceId,
+                            DeletedAt = DateTime.UtcNow
+                        });
+                    }
+
                     await db.SaveChangesAsync(cancellationToken);
                 }
 
@@ -737,6 +765,7 @@ public static class ItemEndpoints
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
         IConfiguration configuration,
+        IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
     {
         // Validate destination token with signature verification (same server = same signing key)
@@ -890,12 +919,19 @@ public static class ItemEndpoints
                 {
                     db.SpaceItems.Remove(sourceItemTracked);
 
-                    db.DeletedItems.Add(new DeletedItem
+                    // Only write journal tombstone if at least one member has opted into journaling
+                    var hasJournalSubscribers = await db.SpaceMembers
+                        .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
+
+                    if (hasJournalSubscribers)
                     {
-                        ItemId = sourceItemTracked.Id,
-                        SpaceId = sourceItemTracked.SpaceId,
-                        DeletedAt = DateTime.UtcNow
-                    });
+                        db.DeletedItems.Add(new DeletedItem
+                        {
+                            ItemId = sourceItemTracked.Id,
+                            SpaceId = sourceItemTracked.SpaceId,
+                            DeletedAt = DateTime.UtcNow
+                        });
+                    }
                 }
             }
 
@@ -939,8 +975,8 @@ public static class ItemEndpoints
                     }
                 }
 
-                // Prune old journal entries if over the limit
-                await PruneDeletedItemsAsync(db, spaceId, configuration, cancellationToken);
+                // Prune old journal entries if configured
+                await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
             }
 
             var response = new SpaceItemResponse(
@@ -994,10 +1030,13 @@ public static class ItemEndpoints
     private static async Task PruneDeletedItemsAsync(
         AppDbContext db,
         Guid spaceId,
-        IConfiguration configuration,
+        JournalOptions journalOptions,
         CancellationToken cancellationToken)
     {
-        var maxEntries = configuration.GetValue("Journal:MaxEntriesPerSpace", 1000);
+        if (journalOptions.MaxEntriesPerSpace is not { } maxEntries)
+        {
+            return;
+        }
 
         var count = await db.DeletedItems
             .CountAsync(d => d.SpaceId == spaceId, cancellationToken);
