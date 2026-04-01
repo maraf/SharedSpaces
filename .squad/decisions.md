@@ -627,6 +627,78 @@ Copilot reviewer raised feedback on PR #37 addressing SignalR hub integration de
 
 ---
 
+### AppHost Screenshot Deterministic Time Opt-In
+
+**Decision Date:** 2026-04-01  
+**Decided By:** Kaylee (Backend Dev), Zoe (Tester)  
+**Coordinated By:** Marek Fišera  
+**Status:** Active
+
+#### Context
+
+Screenshot tests require deterministic timestamps to prevent false-positive visual regressions when relative time strings ("Today", "Yesterday") change daily. Normal AppHost runs should preserve wall-clock behavior for realistic development experience.
+
+#### Decision
+
+Keep deterministic server time **disabled by default** in `src/AppHost.cs`. AppHost only forwards `DeterministicTime__*` environment variables when started with `--Screenshots:UseDeterministicTime=true`.
+
+#### Implementation
+
+- **Normal runs:** `dotnet run .\AppHost.cs` — uses `DateTime.UtcNow` (wall-clock time)
+- **Screenshot runs:** `dotnet run .\AppHost.cs -- --Screenshots:UseDeterministicTime=true` — uses seeded time from environment
+- `src/AppHost.cs` checks for the flag and conditionally sets environment variables
+- No changes to production server code; feature toggle applied at orchestration layer
+
+#### Rationale
+
+- **Default behavior:** Preserves realistic timestamps during development, allows developers to see real creation times
+- **Screenshot opt-in:** Explicit flag makes behavior obvious at startup; eliminates accidental determinism in normal runs
+- **Validation:** Both normal and screenshot modes validated with build, server tests, and real Playwright screenshot capture
+
+#### Validation
+
+✅ `dotnet build .\src\AppHost.cs` passes  
+✅ `dotnet test SharedSpaces.sln --nologo` — 46/46 tests pass  
+✅ SystemClockFactoryTests added to lock default real-clock behavior  
+✅ One real Playwright screenshot run verified deterministic time flows through  
+
+#### Impact
+
+- Developers get realistic timestamps when working locally
+- Screenshot tests become stable and reproducible
+- Foundation for future screenshot determinism improvements
+- Pattern: Use environment variables for feature toggles, not production code changes
+
+#### Alternatives Considered
+
+1. **Always use deterministic time** — Rejected: breaks realistic development workflow
+2. **Config file toggle** — Rejected: less obvious than explicit CLI parameter
+3. **Separate screenshot AppHost** — Rejected: unnecessary complexity; single AppHost with flag is simpler
+
+---
+
+### Coordinator Directive: Screenshot Determinism (2026-04-01)
+
+**Directive Date:** 2026-04-01T16:40:16Z  
+**Issued By:** Marek Fišera  
+**Status:** Active
+
+#### Directive
+
+Keep deterministic fixed-time behavior **disabled for normal user runs** and enable it **only for screenshot runs** by passing an extra parameter into `AppHost.cs`.
+
+#### Implementation
+
+- Normal `dotnet run` uses wall-clock time
+- Screenshot runs pass `--Screenshots:UseDeterministicTime=true` to enable deterministic time
+- Validation: Screenshot tests pass with stable timestamps, normal runs show real timestamps
+
+#### Rationale
+
+User preference: Normal development should feel realistic; screenshot determinism is an opt-in testing concern, not a default behavior.
+
+---
+
 ### Issue #23 Frontend Client Bootstrap
 
 **Decision Date:** 2026-03-18  

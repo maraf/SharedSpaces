@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -51,7 +52,8 @@ public static class SpaceEndpoints
     private static async Task<IResult> CreateSpace(
         CreateSpaceRequest request,
         AppDbContext db,
-        IOptions<StorageOptions> storageOptions)
+        IOptions<StorageOptions> storageOptions,
+        ISystemClock systemClock)
     {
         var trimmedName = request.Name?.Trim() ?? string.Empty;
 
@@ -83,7 +85,8 @@ public static class SpaceEndpoints
         var space = new Space
         {
             Name = trimmedName,
-            MaxUploadSize = request.MaxUploadSize
+            MaxUploadSize = request.MaxUploadSize,
+            CreatedAt = systemClock.UtcNow
         };
 
         db.Spaces.Add(space);

@@ -22,6 +22,21 @@ if (!string.IsNullOrEmpty(storagePath))
     server.WithEnvironment("Storage__BasePath", storagePath);
 }
 
+var useDeterministicScreenshotTime = bool.TryParse(
+    builder.Configuration["Screenshots:UseDeterministicTime"],
+    out var deterministicTimeEnabled)
+    && deterministicTimeEnabled;
+if (useDeterministicScreenshotTime)
+{
+    var deterministicSeededUtcNow = builder.Configuration["DeterministicTime:SeededUtcNow"]
+        ?? "2025-03-19T12:00:00Z";
+    server.WithEnvironment("DeterministicTime__SeededUtcNow", deterministicSeededUtcNow);
+
+    var deterministicAutoAdvanceSeconds = builder.Configuration["DeterministicTime:AutoAdvanceSeconds"]
+        ?? "60";
+    server.WithEnvironment("DeterministicTime__AutoAdvanceSeconds", deterministicAutoAdvanceSeconds);
+}
+
 var client = builder.AddNpmApp("client", "./SharedSpaces.Client", "dev")
     .WithHttpEndpoint(port: 5173, env: "PORT")
     .WithEnvironment("BROWSER", "none")

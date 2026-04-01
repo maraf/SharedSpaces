@@ -118,14 +118,14 @@ git commit -m "test(e2e): re-baseline screenshots for April"
 
 ### Implemented server-backed pattern
 
-When screenshots are seeded through the live API, keep determinism at the seed point instead of adding a dedicated test endpoint:
+When screenshots are seeded through the live API, keep determinism behind internal runtime configuration instead of widening request contracts:
 
-- Send optional `seededAt` values from `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
-- Honor them in the server only when the request includes a valid `X-Admin-Secret`
-- Reuse a shared resolver at `src/SharedSpaces.Server/Features/Seeding/SeededTimestampResolver.cs`
-- Apply the same pattern to every server-generated timestamp that is visibly rendered (`space.CreatedAt`, `member.JoinedAt`, `item.SharedAt`, `sharedLink.CreatedAt`)
+- Freeze browser time in `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
+- Drive server timestamps through `src/SharedSpaces.Server/Features/Seeding/SystemClock.cs`
+- Let `src/AppHost.cs` set deterministic-time config for screenshot-oriented runs
+- Preserve normal production behavior when the deterministic config is absent
 
-This keeps production behavior unchanged for normal callers while making screenshot fixture data deterministic end-to-end.
+This keeps screenshot fixture data deterministic end-to-end without adding public `seededAt` request fields.
 
 ---
 
@@ -247,11 +247,11 @@ Use masking only if timestamp content is **not** testable (e.g., you need to cap
 
 ## Implemented Pattern (2026-04-01)
 
-The screenshot harness now uses the extended deterministic seeding path:
+The screenshot harness now uses the smaller deterministic-time path:
 
-1. Send `seededAt` on API-backed fixture creation for spaces, token exchange, item uploads, and shared-link creation.
-2. Include `X-Admin-Secret` whenever a seeded timestamp is supplied so the server accepts the override.
-3. Freeze browser time with `page.addInitScript()` and pin Playwright `locale` / `timezoneId` so relative and absolute dates stay stable.
+1. AppHost supplies deterministic server-time config (`DeterministicTime:SeededUtcNow`, optional `DeterministicTime:AutoAdvanceSeconds`) for screenshot-oriented runs.
+2. The server resolves visible timestamps through `ISystemClock` instead of request DTO overrides.
+3. Browser time is frozen with `page.addInitScript()`, and Playwright pins `locale` / `timezoneId` so relative and absolute dates stay stable.
 
 This keeps screenshots realistic (real server responses, real UI formatting) while removing timestamp drift from visual baselines.
 

@@ -207,3 +207,11 @@
 - **Zoe (Client/Tests):** Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts with fixed seed date (2026-03-30T12:00:00Z) and deterministic seeding calls with X-Admin-Secret header. Configured Playwright with pinned locale (en-US), timezone (UTC), and frozen in-page clock. All 58 screenshots captured successfully; full suite validated.
 - **Coordination:** No conflicts between backend analysis, factory decision, and implementation — all agents aligned on admin-gated API parameter approach.
 - **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.
+
+## Learnings
+
+- **AppHost deterministic time is screenshot-only opt-in (2026-04-01):**
+  - Reviewed the AppHost change that gates DeterministicTime__SeededUtcNow and DeterministicTime__AutoAdvanceSeconds behind Screenshots:UseDeterministicTime=true.
+  - End-to-end validation: plain dotnet run .\src\AppHost.cs created spaces with wall-clock createdAt, while dotnet run .\src\AppHost.cs -- --Screenshots:UseDeterministicTime=true created spaces at the seeded 2025-03-19T12:00:00Z.
+  - Added 	ests/SharedSpaces.Server.Tests/SystemClockFactoryTests.cs to lock the fallback/default behavior (SystemClock with no seeded config) and deterministic auto-advance behavior (default 1 second and explicit 60 seconds).
+  - Focused validation passed: full SharedSpaces.Server.Tests project green, plus the 3 new SystemClockFactoryTests.

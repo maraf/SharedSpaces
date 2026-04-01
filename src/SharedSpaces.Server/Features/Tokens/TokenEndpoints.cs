@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Invitations;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
 namespace SharedSpaces.Server.Features.Tokens;
@@ -21,7 +22,8 @@ public static class TokenEndpoints
         CreateTokenRequest request,
         AppDbContext db,
         IConfiguration configuration,
-        HttpRequest httpRequest)
+        HttpRequest httpRequest,
+        ISystemClock systemClock)
     {
         if (string.IsNullOrWhiteSpace(request.Pin))
         {
@@ -63,7 +65,7 @@ public static class TokenEndpoints
         {
             SpaceId = invitation.SpaceId,
             DisplayName = displayName,
-            JoinedAt = DateTime.UtcNow,
+            JoinedAt = systemClock.UtcNow,
             IsRevoked = false
         };
 

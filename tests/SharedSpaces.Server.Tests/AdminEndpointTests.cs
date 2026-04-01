@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
 namespace SharedSpaces.Server.Tests;
@@ -42,6 +43,25 @@ public class AdminEndpointTests
         var spaceInDb = await factory.WithDbContextAsync(db => db.Spaces.SingleOrDefaultAsync(s => s.Id == space.Id));
         spaceInDb.Should().NotBeNull();
         spaceInDb!.Name.Should().Be(spaceName);
+    }
+
+    [Fact]
+    public async Task CreateSpace_WithDeterministicTimeConfig_UsesConfiguredTimestamp()
+    {
+        const string seededUtcNow = "2025-03-19T12:00:00Z";
+        var expectedTimestamp = DateTimeOffset.Parse(seededUtcNow).UtcDateTime;
+        await using var factory = new TestWebApplicationFactory(seededUtcNow);
+        using var client = factory.CreateClient();
+
+        var response = await CreateSpaceAsync(client, "Seeded Space", TestWebApplicationFactory.AdminSecret);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var space = await ReadJsonAsync<SpaceResponse>(response);
+        space.Should().NotBeNull();
+        space!.CreatedAt.Should().Be(expectedTimestamp);
+
+        var savedSpace = await factory.WithDbContextAsync(db => db.Spaces.SingleAsync(s => s.Id == space.Id));
+        savedSpace.CreatedAt.Should().Be(expectedTimestamp);
     }
 
     [Fact]
@@ -1460,7 +1480,7 @@ public class AdminEndpointTests
 
     // ========== Test Infrastructure ==========
 
-    private sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class TestWebApplicationFactory(string? seededUtcNow = null) : WebApplicationFactory<Program>
     {
         public const string AdminSecret = "test-admin-secret";
         public const string JwtSigningKey = "test-signing-key-1234567890abcdef";
@@ -1479,7 +1499,8 @@ public class AdminEndpointTests
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
                     ["Cors:Origins:0"] = "https://localhost:5173",
-                    ["Storage:BasePath"] = "./artifacts/storage-tests"
+                    ["Storage:BasePath"] = "./artifacts/storage-tests",
+                    [SystemClockFactory.SeededUtcNowConfigKey] = seededUtcNow
                 });
             });
 

@@ -30,6 +30,22 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Deterministic Screenshot Time: Keep It Off Public Contracts (2026-04-01)
+
+**Decision:** For screenshot determinism, prefer an **internal server config/clock override** over additive public request fields like `seededAt`.
+
+**Why:**
+- SharedSpaces already uses AppHost-to-server config propagation for isolated screenshot infrastructure (`src/AppHost.cs` forwards DB/storage settings)
+- The current `seededAt` approach reaches four request contracts plus multipart form parsing (`src/SharedSpaces.Server/Features/Spaces/Models.cs`, `Tokens/Models.cs`, `SharedLinks/Models.cs`, `Items/Models.cs`)
+- A single AppHost-provided timestamp is too coarse for the current screenshot fixture set in `src/SharedSpaces.Client/e2e/screenshots.spec.ts`, which intentionally staggers space/member/item/share times for realistic ordering and UI coverage
+
+**Architectural recommendation:**
+- Do **not** lean on AppHost-only argument plumbing as the whole solution; that is too Aspire-specific for this repo because screenshot startup has a direct-server fallback
+- If we clean this up, move to a server-side config key / clock override consumable from Aspire **or** direct server env vars, while keeping Playwright's browser clock frozen
+- Avoid test-only concerns in public API contracts unless we explicitly accept that trade-off
+
+**User preference:** Marek prefers smaller production-code changes and pushed back on public API-shape changes for test determinism.
+
 ### Screenshot Determinism Architecture Decision (2026-03-31)
 
 **Decision:** Use **DB seed layer** (extend test factories) for deterministic screenshot data.

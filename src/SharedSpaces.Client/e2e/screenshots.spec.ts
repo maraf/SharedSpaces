@@ -10,6 +10,7 @@ const SERVER_URL = process.env.SERVER_URL || 'http://localhost:5165';
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
+const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
 
 interface ViewportSpec {
   name: string;
@@ -143,7 +144,7 @@ async function seedSpace(name: string) {
 
   // Add sample text items — enough to overflow and show the scrollbar
   let firstTextItemId = '';
-  for (const content of [
+  for (const [index, content] of [
     'Welcome to SharedSpaces! 🚀',
     'This is a shared note visible to all members.',
     'Here are the docs for the new API: https://api.example.com/v2/docs',
@@ -152,7 +153,7 @@ async function seedSpace(name: string) {
     'The deployment went through — staging is green ✅',
     'Updated the color tokens in the design system. Check Figma for the latest.',
     'Quick thought: we should add rate limiting before launch.',
-  ]) {
+  ].entries()) {
     const itemId = crypto.randomUUID();
     if (!firstTextItemId) firstTextItemId = itemId;
     const form = new FormData();
@@ -167,10 +168,10 @@ async function seedSpace(name: string) {
   }
 
   // Add sample file items (text-like)
-  for (const file of [
+  for (const [index, file] of [
     { name: 'meeting-notes.txt', content: '# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM' },
     { name: 'architecture.md', content: '# System Architecture\n\nClient → API Gateway → Services → Database' },
-  ]) {
+  ].entries()) {
     const fileItemId = crypto.randomUUID();
     const fileForm = new FormData();
     fileForm.append('id', fileItemId);
@@ -253,18 +254,34 @@ test.describe('Screenshot Capture', () => {
   let shareTextUrl: string;
   let shareFileUrl: string;
 
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript((isoNow) => {
+      const fixedTime = new Date(isoNow).valueOf();
+      const RealDate = Date;
+
+      class FixedDate extends RealDate {
+        constructor(...args: any[]) {
+          if (args.length === 0) {
+            super(fixedTime);
+            return;
+          }
+
+          super(...args);
+        }
+
+        static now() {
+          return fixedTime;
+        }
+      }
+
+      FixedDate.UTC = RealDate.UTC;
+      FixedDate.parse = RealDate.parse;
+      // @ts-expect-error Deterministic screenshots require overriding the global Date constructor in-page.
+      globalThis.Date = FixedDate;
+    }, FROZEN_SCREENSHOT_NOW);
+  });
+
   test.beforeAll(async () => {
-    const space1 = await seedSpace('Project Alpha');
-    const space2 = await seedSpace('Design Team');
-
-    invitationString = space1.invitation.invitationString;
-
-    tokenMap = {
-      [`${SERVER_URL}:${space1.space.id}`]: space1.token,
-      [`${SERVER_URL}:${space2.space.id}`]: space2.token,
-    };
-
-    // Empty space for empty-state screenshot
     const emptySpace = await apiCall(`${SERVER_URL}/v1/spaces`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
@@ -282,6 +299,16 @@ test.describe('Screenshot Capture', () => {
       body: JSON.stringify({ pin: emptyPin, displayName: 'Alice' }),
     });
     emptySpaceTokenMap = { [`${SERVER_URL}:${emptySpace.id}`]: emptyToken.token };
+
+    const space2 = await seedSpace('Design Team');
+    const space1 = await seedSpace('Project Alpha');
+
+    invitationString = space1.invitation.invitationString;
+
+    tokenMap = {
+      [`${SERVER_URL}:${space1.space.id}`]: space1.token,
+      [`${SERVER_URL}:${space2.space.id}`]: space2.token,
+    };
 
     // Create shared links for shared-item-view screenshots
     const textShareLink = await apiCall(

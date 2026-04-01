@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -137,6 +138,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        ISystemClock systemClock,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -295,7 +297,7 @@ public static class ItemEndpoints
             item.ContentType = normalizedContentType;
             item.Content = content;
             item.FileSize = fileSize;
-            item.SharedAt = DateTime.UtcNow;
+            item.SharedAt = systemClock.UtcNow;
 
             if (existingItem is null)
             {
@@ -490,6 +492,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        ISystemClock systemClock,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         CancellationToken cancellationToken)
@@ -544,7 +547,7 @@ public static class ItemEndpoints
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, configuration, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, systemClock, configuration, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
@@ -724,6 +727,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        ISystemClock systemClock,
         IConfiguration configuration,
         CancellationToken cancellationToken)
     {
@@ -849,7 +853,7 @@ public static class ItemEndpoints
                 ContentType = sourceItem.ContentType,
                 Content = sourceItem.Content,
                 FileSize = sourceItem.FileSize,
-                SharedAt = DateTime.UtcNow
+                SharedAt = systemClock.UtcNow
             };
 
             db.SpaceItems.Add(destinationItem);

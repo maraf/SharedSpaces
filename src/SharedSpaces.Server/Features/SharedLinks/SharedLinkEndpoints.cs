@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.EntityFrameworkCore;
 using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -34,6 +35,7 @@ public static class SharedLinkEndpoints
         CreateSharedLinkRequest? request,
         HttpContext httpContext,
         AppDbContext db,
+        ISystemClock systemClock,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -65,7 +67,8 @@ public static class SharedLinkEndpoints
             SpaceId = spaceId,
             ItemId = itemId,
             CreatedBy = memberId,
-            Name = normalizedName
+            Name = normalizedName,
+            CreatedAt = systemClock.UtcNow
         };
 
         db.SharedLinks.Add(link);

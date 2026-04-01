@@ -57,6 +57,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+- Screenshot determinism now hangs off the internal `DeterministicTime:SeededUtcNow` / `DeterministicTime:AutoAdvanceSeconds` config plus the browser-side frozen `Date`; avoid widening public server request DTOs for test-only timestamps.
+- `src/AppHost.cs` seeds deterministic server time for screenshot-oriented runs, while direct startup of `src/SharedSpaces.Server` stays normal unless the same config keys are supplied explicitly.
 - A baseline GitHub Actions CI workflow should validate `SharedSpaces.sln` on `ubuntu-latest` with .NET 9 using `dotnet restore`, `dotnet build --no-restore`, and `dotnet test --no-build` for PRs/pushes to `main`.
 - Per-space quota overrides use a nullable `long? MaxUploadSize` on the Space entity; null means "use server default from `StorageOptions.MaxSpaceQuotaBytes`". The effective quota is resolved as `space.MaxUploadSize ?? serverDefault` at both API response time and upload enforcement.
 - When generating EF Core migrations, always build first (don't use `--no-build`) to ensure the model snapshot picks up property changes.
@@ -94,6 +96,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Aspire local orchestration now lives in the single-file app `src/AppHost.cs`, which replaces the old `src/SharedSpaces.AppHost/` project and keeps local orchestration outside `SharedSpaces.sln`.
 - The file-based AppHost uses `Aspire.AppHost.Sdk@13.0.2`, `Aspire.Hosting.NodeJs@9.5.2`, and a `#:project` directive to `src/SharedSpaces.Server/SharedSpaces.Server.csproj`.
 - The Vite client is registered from `./SharedSpaces.Client` with `AddNpmApp("client", "./SharedSpaces.Client", "dev")`, waits for the server, wires `Server__DefaultClientAppUrl`, and should be started with `dotnet run src/AppHost.cs`.
+- Screenshot runs should opt into deterministic server time at the AppHost layer with `--Screenshots:UseDeterministicTime=true`; normal `dotnet run src/AppHost.cs` should stay on real wall-clock time.
+- Playwright screenshot capture now boots AppHost itself, wipes `artifacts/screenshots.db*` plus `artifacts/screenshots-storage`, and passes isolated DB/storage overrides so screenshot seeds stay deterministic and disposable.
 - Admin space management lives in `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`, where both `POST /v1/spaces` and `GET /v1/spaces` use `AdminAuthenticationFilter`, and listing returns `SpaceResponse` ordered newest-first for admin space selection.
 - Admin space management now also covers `/v1/spaces/{spaceId}/members` and `/v1/spaces/{spaceId}/invitations`: member listings return `MemberResponse` newest-first, revocation is idempotent via `POST .../members/{memberId}/revoke`, and invitation listings/deletes never expose hashed PIN values.
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
