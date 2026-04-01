@@ -422,12 +422,7 @@ public static class ItemEndpoints
 
         if (hasJournalSubscribers)
         {
-            db.DeletedItems.Add(new DeletedItem
-            {
-                ItemId = item.Id,
-                SpaceId = item.SpaceId,
-                DeletedAt = DateTime.UtcNow
-            });
+            await UpsertDeletedItemAsync(db, item.Id, item.SpaceId, cancellationToken);
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -717,15 +712,15 @@ public static class ItemEndpoints
 
                     if (hasJournalSubscribers)
                     {
-                        db.DeletedItems.Add(new DeletedItem
-                        {
-                            ItemId = sourceItemTracked.Id,
-                            SpaceId = sourceItemTracked.SpaceId,
-                            DeletedAt = DateTime.UtcNow
-                        });
+                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, cancellationToken);
                     }
 
                     await db.SaveChangesAsync(cancellationToken);
+
+                    if (hasJournalSubscribers)
+                    {
+                        await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
+                    }
                 }
 
                 var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
@@ -909,6 +904,8 @@ public static class ItemEndpoints
                     : sourceItem.Content;
             }
 
+            var hasJournalSubscribers = false;
+
             // If move, delete source item
             if (action == "move")
             {
@@ -920,17 +917,12 @@ public static class ItemEndpoints
                     db.SpaceItems.Remove(sourceItemTracked);
 
                     // Only write journal tombstone if at least one member has opted into journaling
-                    var hasJournalSubscribers = await db.SpaceMembers
+                    hasJournalSubscribers = await db.SpaceMembers
                         .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
 
                     if (hasJournalSubscribers)
                     {
-                        db.DeletedItems.Add(new DeletedItem
-                        {
-                            ItemId = sourceItemTracked.Id,
-                            SpaceId = sourceItemTracked.SpaceId,
-                            DeletedAt = DateTime.UtcNow
-                        });
+                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, cancellationToken);
                     }
                 }
             }
@@ -976,7 +968,10 @@ public static class ItemEndpoints
                 }
 
                 // Prune old journal entries if configured
-                await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
+                if (hasJournalSubscribers)
+                {
+                    await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
+                }
             }
 
             var response = new SpaceItemResponse(
@@ -1024,6 +1019,31 @@ public static class ItemEndpoints
             {
                 await quotaLock.DisposeAsync();
             }
+        }
+    }
+
+    private static async Task UpsertDeletedItemAsync(
+        AppDbContext db,
+        Guid itemId,
+        Guid spaceId,
+        CancellationToken cancellationToken)
+    {
+        var existing = await db.DeletedItems
+            .SingleOrDefaultAsync(d => d.ItemId == itemId, cancellationToken);
+
+        if (existing is not null)
+        {
+            existing.SpaceId = spaceId;
+            existing.DeletedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            db.DeletedItems.Add(new DeletedItem
+            {
+                ItemId = itemId,
+                SpaceId = spaceId,
+                DeletedAt = DateTime.UtcNow
+            });
         }
     }
 

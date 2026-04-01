@@ -111,6 +111,33 @@ public class JournalEndpointTests
     }
 
     [Fact]
+    public async Task GetJournal_ReturnsFullSyncRequired_WhenSinceEqualsWatermark()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var watermark = DateTime.UtcNow.AddMinutes(-10);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
+            s.JournalPrunedBefore = watermark;
+            await db.SaveChangesAsync();
+        });
+
+        // Query with since == watermark — boundary should require full sync
+        var response = await GetJournalAsync(client, space.Id, token, since: watermark);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.FullSyncRequired.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task GetJournal_ReturnsFullSyncRequiredFalse_WhenJournalCoversWindow()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -390,12 +417,12 @@ public class JournalEndpointTests
     // --- Helpers ---
 
     private static async Task<HttpResponseMessage> GetJournalAsync(
-        HttpClient client, Guid spaceId, string? token = null, DateTime? since = null)
+        HttpClient client, Guid spaceId, string? token = null, DateTimeOffset? since = null)
     {
         var url = $"/v1/spaces/{spaceId}/journal";
         if (since.HasValue)
         {
-            url += $"?since={since.Value:O}";
+            url += $"?since={since.Value.UtcDateTime:O}";
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);

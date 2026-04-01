@@ -23,18 +23,12 @@ public static class JournalEndpoints
         HttpContext httpContext,
         AppDbContext db,
         CancellationToken cancellationToken,
-        DateTime? since = null)
+        DateTimeOffset? since = null)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
         if (authorizationResult is not null)
         {
             return authorizationResult;
-        }
-
-        // Treat Unspecified as UTC; reject ambiguous local-time offsets
-        if (since.HasValue && since.Value.Kind == DateTimeKind.Local)
-        {
-            return Results.BadRequest(new { Error = "The 'since' parameter must be in UTC (use Z suffix or no offset)." });
         }
 
         var space = await db.Spaces
@@ -46,10 +40,8 @@ public static class JournalEndpoints
             return Results.NotFound(new { Error = "Space not found" });
         }
 
-        var sinceUtc = since.HasValue
-            ? DateTime.SpecifyKind(since.Value, DateTimeKind.Utc)
-            : DateTime.MinValue;
-        var fullSyncRequired = space.JournalPrunedBefore.HasValue && sinceUtc < space.JournalPrunedBefore.Value;
+        var sinceUtc = since?.UtcDateTime ?? DateTime.MinValue;
+        var fullSyncRequired = space.JournalPrunedBefore.HasValue && sinceUtc <= space.JournalPrunedBefore.Value;
 
         var addedOrUpdated = await db.SpaceItems
             .AsNoTracking()
