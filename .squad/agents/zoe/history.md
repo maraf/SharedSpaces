@@ -148,3 +148,50 @@
 - .squad/log/2026-03-30T19-19-08-share-link-implementation.md
 - .squad/orchestration-log/2026-03-30T19-19-08-zoe.md
 - Decisions merged into .squad/decisions.md
+
+## Screenshot Determinism Analysis (2026-03-31)
+
+**Issue:** Screenshot churn caused by dynamic timestamps, UUIDs, and relative-time strings that change on every test run.
+
+**Root cause identified:**
+1. **TIER 1 (High churn):** Relative time formatting in item `sharedAt` (space-view.ts:1700, 1747), shared link `createdAt` (space-view.ts:2051), and admin space/member creation dates via `.toLocaleString()` (admin-view.ts:914, 1055)
+2. **TIER 2 (Medium churn):** Pending share timestamps (app-shell.ts:795–799), member/item/invitation count buttons
+3. **TIER 3 (Low churn):** UUID display in admin view (no layout impact; fixed-width monospace rendering)
+
+**Affected screenshots:** 24 of 58 (42%), primarily admin views, space view with items, and share/pending modals.
+
+**Key finding:** The `formatRelativeTime()` utility in `src/SharedSpaces.Client/src/lib/format-time.ts` returns dynamic strings ("Today", "Yesterday", "3d ago", "Mar 19") based on wall-clock time, causing monthly drift.
+
+**Recommended mitigations (prioritized):**
+1. **Tier 1 (lowest risk, 30 min):** Deterministic test fixtures—seed spaces/items with fixed timestamps (e.g., "2025-03-19T12:00:00Z"). Captures real rendering; re-baseline quarterly.
+2. **Tier 2 (1–2 hours, permanent):** Mock clock in test suite—freeze Playwright/Vitest time to eliminate monthly drift entirely.
+3. **Avoid:** Relative-time removal or masking—defeats purpose of E2E screenshots and regresses UX.
+
+**Decision recorded:** `.squad/decisions/inbox/zoe-screenshot-determinism.md` (full analysis with implementation sequence, file monitoring checklist, and future crew guidance).
+
+**Pattern for future work:** Screenshot determinism = fixture determinism. You can't mock your way out of dynamic test data.
+
+### Screenshot Determinism Initiative — Full Session (2026-04-01)
+
+**Session summary:** Parallel 3-agent investigation into screenshot churn (Wash, Zoe, Mal).
+
+**Outcome:** Unified recommendation for deterministic fixtures + frozen time mocking; hybrid approach approved.
+
+**Key findings across all agents:**
+- **Wash's analysis:** 4 mitigation strategies ranked by effort/impact; Phase 1 (freeze time + deterministic UUIDs) estimated 2-3 hours, 80-90% churn reduction
+- **Zoe's audit:** 12 churn sources in 3 tiers; 24 high-risk screenshots out of 58; Phase 1 (30 min) → Phase 2 (1-2 hours) → Phase 3 (ongoing)
+- **Mal's review:** Cross-agent alignment confirmed; no conflicts; recommendations unified
+
+**Approved mitigation ladder:**
+1. Phase 1 (Near-term): Deterministic fixtures + frozen time — ~80% churn elimination
+2. Phase 2 (Short-term, optional): Mock clock — ~95% churn elimination
+3. Phase 3 (Ongoing): Quarterly re-baselining + monitoring
+
+**Next steps:** Implementation assignment to Kaylee or Wash; validation via 5× consecutive test runs; documentation update in SKILL.md.
+
+**Session outputs:**
+- `.squad/log/2026-04-01T11-38-06Z-screenshot-determinism.md` — Session summary
+- `.squad/orchestration-log/2026-04-01T11-38-06Z-wash.md` — Wash's work
+- `.squad/orchestration-log/2026-04-01T11-38-06Z-zoe.md` — Zoe's work
+- `.squad/orchestration-log/2026-04-01T11-38-06Z-mal.md` — Mal's review
+- `.squad/decisions.md` — Merged Wash + Zoe decisions

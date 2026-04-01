@@ -5100,3 +5100,606 @@ Mobile space constraint — 4-5 action buttons per item consume ~160px of 390px 
 
 
 # Kebab Menu: Mobile Action Overflow Pattern  **Date:** 2026-03-31   **Author:** Wash (Frontend Dev)   **Issue:** #152  ## Decision  Mobile (< 640px) shows only the **primary action button** plus a **kebab menu (⋮)** that consolidates secondary actions. Desktop (≥ 640px) remains unchanged with all buttons inline.  ## Pattern  - **Responsive split:** `hidden sm:flex` for desktop buttons, `flex sm:hidden` for mobile layout - **Primary actions:** Copy (text items), Download (file items) — always visible - **Kebab contains:** Manage Links, Send To (conditional), Delete (with divider) - **State:** Single `openMenuItemId` reactive property — only one menu open at a time - **Dismissal:** Click outside (`data-kebab-menu` attribute check), Escape key, or selecting an action - **Delete flow:** Kebab menu closes, then standard delete confirmation overlay appears  ## Rationale  Four inline icon buttons on a 390px viewport caused cramped touch targets and visual clutter. The kebab pattern keeps the most-used action instantly accessible while consolidating less-frequent actions behind one tap.  ## Impact  - Establishes the kebab overflow pattern for future mobile action menus - No changes to existing button render methods or desktop layout - Delete confirmation flow unchanged on both mobile and desktop
+
+
+---
+
+## Screenshot Determinism Mitigation (Wash)
+
+# Screenshot Determinism Mitigation — Decision & Recommendations
+
+**Date:** 2025-01-15  
+**Owner:** Wash (Frontend Dev)  
+**Status:** Complete Analysis, Awaiting Implementation Decision  
+**Related:** Screenshot capture spec at `src/SharedSpaces.Client/e2e/screenshots.spec.ts`  
+
+---
+
+## Problem Statement
+
+The Playwright screenshot tests in `screenshots.spec.ts` suffer from **non-deterministic content** that causes visual diff churn every test run. Specifically:
+
+1. **Relative timestamps** rendered in admin view, space view, and share modals change daily based on system date
+2. **Dynamic share tokens** embedded in URLs differ with every test execution
+3. **Random UUIDs** generated during seeding break reproducibility
+4. **Locale-specific date formatting** varies by system configuration
+5. **Invitation tokens** server-generated with different values each run
+
+**Impact:** Screenshot baselines update unexpectedly, making it hard to detect real visual regressions.
+
+---
+
+## Root Cause Analysis
+
+### Time-Dependent Rendering (PRIMARY CHURN SOURCE)
+
+The `formatRelativeTime()` function in `format-time.ts` calculates relative time **from the current system time**, not from a fixed reference:
+
+```typescript
+// format-time.ts:8-29
+const now = new Date();  // ← CURRENT TIME, ALWAYS DIFFERENT
+const todayUtcMidnightMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+const dateUtcMidnightMs = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+const diffDays = Math.floor((todayUtcMidnightMs - dateUtcMidnightMs) / (1000 * 60 * 60 * 24));
+
+if (diffDays === 0) return 'Today';         // ← Changes at midnight
+if (diffDays === 1) return 'Yesterday';     // ← Changes at midnight
+if (diffDays >= 2 && diffDays < 7) return `${diffDays}d ago`;  // ← Changes daily
+```
+
+**Example Failure Scenario:**
+- Run 1 (Wed, Jan 15): Item created 14:00, screenshot at 14:10 → renders "Today"
+- Run 2 (Thu, Jan 16): Same item created 14:00, screenshot at 14:10 → renders "Yesterday" ❌ VISUAL DIFF
+
+### Where This Appears in Rendered UI
+
+| View | Field | Location | Frequency |
+|------|-------|----------|-----------|
+| **Admin Spaces** | "Created {date}" | admin-view.ts:914 | Daily churn |
+| **Admin Members Modal** | "Joined {date}" | admin-view.ts:1055 | Daily churn |
+| **Space View Items** | Timestamp | space-view.ts:1700, 1747 | Daily churn |
+| **Space Share Modal** | Link creation time | space-view.ts:2051 | Daily churn |
+| **Pending Uploads** | Upload timestamp | Internal only (not visible) | N/A |
+
+---
+
+## Recommended Solutions (Prioritized)
+
+### **STRATEGY 1: Freeze System Time (RECOMMENDED)**
+
+**Approach:** Mock `Date.now()` and `new Date()` to a fixed moment before test execution.
+
+**Pros:**
+- ✅ Eliminates ALL time-dependent churn with single change
+- ✅ Deterministic relative time rendering ("Today" always)
+- ✅ No component code changes required
+- ✅ Playwright has native support via `page.addInitScript()`
+- ✅ Low effort (10-15 lines in beforeAll)
+
+**Cons:**
+- ❌ Screenshots show fixed relative times (always "Today")
+- ❌ Doesn't help with share token churn
+
+**Implementation:**
+```typescript
+test.beforeAll(async ({ context }) => {
+  const frozenTime = new Date('2025-01-15T14:00:00Z').getTime();
+  
+  await context.addInitScript(() => {
+    const mockTime = new Date('2025-01-15T14:00:00Z').getTime();
+    const RealDate = Date;
+    
+    global.Date = class extends RealDate {
+      constructor(...args: any[]) {
+        super(...args);
+        if (args.length === 0) return new RealDate(mockTime);
+        return super(...args);
+      }
+      
+      static now() {
+        return mockTime;
+      }
+    } as any;
+  });
+});
+```
+
+**Cost:** Very Low (10-15 lines)  
+**Effort:** 2-3 hours (includes testing on different dates)  
+**Churn Reduction:** ~80% ✅
+
+---
+
+### **STRATEGY 2: Deterministic UUIDs in Seeding**
+
+**Approach:** Replace `crypto.randomUUID()` calls with fixed, predictable IDs.
+
+**Pros:**
+- ✅ Reproducible item IDs across test runs
+- ✅ Simplifies debugging ("item-001" vs random GUID)
+- ✅ Works with existing formatters
+
+**Cons:**
+- ❌ Doesn't fix timestamp churn alone
+- ❌ Requires seeding logic changes
+
+**Implementation:**
+```typescript
+const FIXED_ITEM_IDS = {
+  textItem1: '00000000-0000-0000-0000-000000000001',
+  fileItemMarkdown: '00000000-0000-0000-0000-000000000010',
+  fileItemPng: '00000000-0000-0000-0000-000000000012',
+};
+
+async function seedSpace(name: string) {
+  // Replace crypto.randomUUID() with FIXED_ITEM_IDS[key]
+  const itemId = FIXED_ITEM_IDS.textItem1;
+  // ...
+}
+```
+
+**Cost:** Very Low (replace 4-5 lines)  
+**Effort:** 1-2 hours  
+**Churn Reduction:** ~20% (mainly helping reproducibility)
+
+---
+
+### **STRATEGY 3: Mock Share Token Generation**
+
+**Approach:** Override share token generation to produce deterministic values.
+
+**Pros:**
+- ✅ Makes share URLs stable across runs
+- ✅ Works at test setup level
+- ✅ Visible in screenshots
+
+**Cons:**
+- ❌ Requires intercepting API responses
+- ❌ Medium complexity
+
+**Implementation:**
+```typescript
+const mockShareTokens = [
+  'test-share-token-001',
+  'test-share-token-002',
+  'test-share-token-003',
+];
+
+let tokenIndex = 0;
+
+async function apiCall(url: string, options: RequestInit = {}) {
+  if (url.includes('/share') && options.method === 'POST') {
+    return {
+      token: mockShareTokens[tokenIndex++],
+      // ... other fields
+    };
+  }
+  const res = await fetch(url, options);
+  return res.json();
+}
+```
+
+**Cost:** Low (requires understanding current apiCall pattern)  
+**Effort:** 2-3 hours  
+**Churn Reduction:** ~30%
+
+---
+
+### **STRATEGY 4: CSS Masking for Dynamic Fields (QUICK WIN)**
+
+**Approach:** Hide dynamic content (timestamps, URLs) with test-only CSS before screenshot capture.
+
+**Pros:**
+- ✅ Zero code changes to components
+- ✅ Works immediately
+- ✅ Playwright supports via `addStyleTag()`
+
+**Cons:**
+- ❌ Doesn't validate timestamps actually render
+- ❌ Loses ability to visually test date formatting
+
+**Implementation:**
+```typescript
+async function capture(page: Page, name: string, vp: ViewportSpec) {
+  await page.addStyleTag({
+    content: `
+      time { display: none; }
+      input[readonly] { filter: blur(5px); }
+      .share-url { display: none; }
+    `
+  });
+  // ... take screenshot
+}
+```
+
+**Cost:** Very Low (~8 lines)  
+**Effort:** 1 hour  
+**Churn Reduction:** ~85% (but hides real content)
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Quick Wins (3-4 hours total)
+
+1. **Strategy 1: Freeze Time** (2-3 hours)
+   - Add date mocking in `beforeAll()`
+   - Choose frozen moment: `2025-01-15T14:00:00Z`
+   - Run tests 3× to verify zero churn
+   - Run tests on different dates (next day, week later) to confirm stability
+
+2. **Strategy 2: Deterministic UUIDs** (1-2 hours)
+   - Replace `crypto.randomUUID()` calls with fixed table
+   - Verify share URLs are now stable
+
+### Phase 2: Polish (2-3 hours)
+
+3. **Strategy 3: Mock Share Tokens** (2-3 hours, optional)
+   - Makes URLs even more predictable
+   - Can be deferred if Strategy 1+2 achieves <10% churn
+
+4. **Strategy 6: Override `toLocaleString()`** (1-2 hours, optional for CI/CD)
+   - Ensures consistent date formatting across locales
+   - Good for CI/CD that may run on different regional settings
+
+---
+
+## Success Criteria
+
+- [ ] Run tests 5× consecutively → 0% visual diffs
+- [ ] Run tests on different calendar dates → 0% visual diffs  
+- [ ] Run tests with different system locales → 0% visual diffs
+- [ ] Frozen time value documented in code comments
+- [ ] All 40+ screenshot tests pass without updates
+- [ ] Mobile (390×844) and desktop (1280×800) viewports verified
+
+---
+
+## Key Files to Modify
+
+| File | Changes | Lines |
+|------|---------|-------|
+| `screenshots.spec.ts` | Add date mock in beforeAll; fix UUID generation | 5-15 |
+| No component changes needed | formatTime, formatDate, formatRelativeTime already work | 0 |
+
+---
+
+## Decision Log
+
+**Recommended Approach:** Implement **Strategy 1 (Freeze Time) + Strategy 2 (Deterministic UUIDs)**
+
+- **Why Phase 1 combo:**
+  - Minimal code changes (15-20 lines total)
+  - Eliminates 80-90% of churn
+  - No architectural changes needed
+  - High confidence in success
+  - Establishes pattern for future test infrastructure improvements
+
+- **Defer Strategy 3+:** Only if Phase 1 doesn't achieve <10% churn
+
+---
+
+## Resources
+
+- **Full analysis:** `SCREENSHOT_DETERMINISM_RECOMMENDATIONS.md`
+- **Current tests:** `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
+- **Time formatting:** `src/SharedSpaces.Client/src/lib/format-time.ts`
+- **Admin date rendering:** `src/SharedSpaces.Client/src/features/admin/admin-view.ts:98-100`
+- **Space view timestamps:** `src/SharedSpaces.Client/src/features/space-view/space-view.ts:1690-1750`
+
+---
+
+## Questions for Coordinator
+
+1. **Playwright version:** Are we on Playwright v1.40+? (affects date mocking API availability)
+2. **Baseline strategy:** Should we regenerate baselines after implementing changes?
+3. **CI/CD locale:** Does CI use a specific locale? (affects toLocaleString variance)
+
+---
+
+**Next Steps:** Approval from Mal/Coordinator → Phase 1 implementation → Validation testing
+
+
+---
+
+## Screenshot Determinism Analysis (Zoe)
+
+# Screenshot Determinism Analysis
+**Date:** 2026-03-31  
+**Agent:** Zoe (Tester)  
+**Status:** Research complete, no implementation  
+
+---
+
+## Executive Summary
+
+Screenshot churn is a **test determinism problem**: the Playwright E2E tests capture dynamic content (timestamps, UUIDs, relative time strings) that change on every test run, causing pixel diffs even when UI logic is unchanged.
+
+**Root cause:** Test fixtures have fresh timestamps on each run, and components render relative time ("Today", "Yesterday", "3d ago") that depends on wall-clock time.
+
+**Impact:** 58 screenshots (29 scenes × 2 viewports) undergo monthly drift due to:
+1. Item `sharedAt` timestamps rendered as relative time
+2. Space/member `createdAt`/`joinedAt` timestamps displayed with `.toLocaleString()`
+3. Shared link `createdAt` timestamps
+4. Pending share `timestamp` fields
+5. Invitation/space IDs rendered in monospace
+6. Member/item/invitation counts that change with test data
+
+---
+
+## Noise Sources (Prioritized by Severity)
+
+### **TIER 1: High Churn** (Changes every test run; affects visual reflow)
+
+| Source | Location | Format | Impact | Frequency |
+|--------|----------|--------|--------|-----------|
+| **Item share timestamps** | `space-view.ts:1700, 1747` | "Today", "Yesterday", "3d ago", "Mar 19" | 8 items × 2 timestamps (shared time + in modal) = 16 renderings per space screenshot | Every 24 hours or monthly |
+| **Shared link creation times** | `space-view.ts:2051` | "Today", "Yesterday", "3d ago", "Mar 19" | 2 links × relative time = visual drift in share modal | Every test run |
+| **Admin space creation dates** | `admin-view.ts:914` | Full locale string: "3/19/2025, 2:47:12 PM" | Regenerated spaces = fresh `.toLocaleString()` | Every test run |
+| **Member join dates** | `admin-view.ts:1055` | Full locale string: "3/30/2025, 10:15:33 AM" | Regenerated members = fresh timestamps | Every test run |
+
+**Why severe:** Text width/positioning varies with relative time string length ("Today" vs "Yesterday" vs "6d ago" vs "Mar 19" vs "Feb 18"). Month abbreviations shift pixel positions. Full locale strings in admin modal expand/contract unpredictably.
+
+---
+
+### **TIER 2: Medium Churn** (Changes occasionally; minor visual impact)
+
+| Source | Location | Format | Impact | Frequency |
+|--------|----------|--------|--------|-----------|
+| **Pending share timestamps** | `app-shell.ts:795-799` | "Today", "Yesterday", "3d ago" | Pending items list timestamp column misalignment | Every test run |
+| **Member/item/invitation counts** | `admin-view.ts:927, 936` | Integer: "(5)", "(12)", "(8)" | Button text width varies; affects modal layout on narrow screens | When test data setup changes |
+| **Item counts in space header** | `space-view.ts:1517` | Integer: "(8)", "(15)" | Pill bar text reflow when count crosses 10/100 boundary | When test data setup changes |
+
+**Why medium:** Affects spacing/alignment but typically stays within single-digit/double-digit bounds; less dramatic than Tier 1 text reflow.
+
+---
+
+### **TIER 3: Low Churn** (Changes rarely; cosmetic impact)
+
+| Source | Location | Format | Impact | Frequency |
+|--------|----------|--------|--------|-----------|
+| **Space IDs** | `admin-view.ts:912` | UUID in monospace: "f7c8d2a1-4e9b-..." | ID display in space card (admin view) | Every test run (fresh seed) |
+| **Invitation IDs** | `admin-view.ts:1120-1121` | UUID in monospace: "abc12345-def6-..." | ID display in invitations modal (admin view) | Every test run (fresh seed) |
+| **Member IDs (internal)** | `admin-view.ts` (line 1058 in member list) | Stored in `member.id` property, used for revoke action but not displayed | No visual impact | Not rendered |
+| **Item IDs (internal)** | `space-view.ts` (line 1641 in kebab menu) | Stored in `item.id` property, used for menu toggle but not displayed | No visual impact | Not rendered |
+
+**Why low:** UUIDs are rendered consistently (monospace font, fixed width) and don't cause text reflow. They're pixel-identical when converted to string—only the value differs. No functional impact on layout.
+
+---
+
+## Screenshots Most Affected
+
+### **High Risk (4 screenshots)**
+- **admin-spaces** (both viewports): Space creation dates in `.toLocaleString()` format—full timestamp visible, maximum width variation
+- **admin-members** (both viewports): Member join dates visible in list, plus counts button reflow
+- **admin-invitations** (both viewports): Invitation dates + IDs visible, plus count button reflow
+
+### **Medium Risk (12 screenshots)**
+- **space** (desktop + mobile): 8 items × 2 timestamps = heavy relative-time rendering
+- **space-file-preview-image/text** (desktop + mobile): Item timestamp + preview title
+- **space-text-modal** (desktop + mobile): Item full content + timestamp header
+- **space-share-modal** (desktop + mobile): 2 shared links with creation timestamps
+- **pending-shares** (desktop + mobile): Pending items with timestamps
+- **space-empty**: Item count "(0)" vs "(1)" might expand layout
+- **admin-invite** (desktop + mobile): Generated invitation timestamp in output
+
+### **Low Risk (12 screenshots)**
+- **home**, **home-empty**, **join**, **join-prefilled**, **join-error**, **shared-item-***,  **space-offline**, **space-dead-auth**, **space-server-unreachable***, **space-pending-uploads**, **space-delete-confirm**, **space-transfer-button/modal**: UUIDs in data but not visually rendered, or data is deterministic (error messages, empty states)
+
+---
+
+## Mitigation Strategies (Prioritized by Risk/Reward)
+
+### **🟢 LOWEST-RISK FIX: Deterministic Test Fixtures**
+**Difficulty:** ⭐ (Trivial)  
+**Coverage:** ~70% of churn (timestamps still vary, but predictably)  
+**Implementation time:** <30 min  
+
+**Approach:**
+- Modify `seedSpace()` in `screenshots.spec.ts` to use **fixed seed timestamps** instead of `Date.now()`
+- Example: Space always created at `new Date('2025-03-15T10:00:00Z')`, members at `2025-03-15T10:05:00Z`, items at `2025-03-15T10:10:00Z`
+- Fix the relative-time calculation point by mocking test environment time
+- **Impact:** Screenshots run on a fixed calendar day (e.g., always "Mar 15"), so relative times stabilize ("Today", "3d ago")
+
+**Pros:**
+- No component code changes
+- No utilities need mocking
+- Captures real UI rendering
+- Can detect genuine layout bugs (misaligned timestamps)
+
+**Cons:**
+- Relative-time strings still drift monthly (on Mar 19, "Mar 15" becomes "4d ago")
+- Requires test date management (seasonal test updates)
+
+**Recommended:** **Yes—implement first** as quick win. Re-baseline quarterly (monthly at worst).
+
+---
+
+### **🟡 MEDIUM-RISK FIX: Mock Clock for Test Suite**
+**Difficulty:** ⭐⭐ (Moderate)  
+**Coverage:** ~90% of churn (all timestamps become predictable)  
+**Implementation time:** 1–2 hours  
+
+**Approach:**
+1. Add `vi.useFakeTimers()` (or Playwright's clock) in `test.beforeAll()` to freeze time at a fixed date (e.g., "2025-03-19T12:00:00Z")
+2. Seed fixtures with frozen time
+3. Components render stable relative times ("Today", "Yesterday", etc.)
+4. **Bonus:** Ensures deterministic behavior across all timezone contexts
+
+**Pros:**
+- **Permanent fix**—screenshots never drift after seeding
+- Catches time-dependent bugs in UI logic
+- Compatible with relative-time formatting
+
+**Cons:**
+- Requires Playwright clock API (or manual date mock)
+- Tests become timezone-agnostic (good for CI, but hides local time issues)
+- Adds test setup complexity
+- Must ensure all async operations respect fake time
+
+**Recommended:** **Yes—implement after Tier 1** for long-term stability.
+
+---
+
+### **🔴 HIGH-RISK FIX: Replace Relative Time with Absolute Format**
+**Difficulty:** ⭐⭐⭐⭐ (Major refactor)  
+**Coverage:** 100% (no dynamic time strings)  
+**Implementation time:** 4–6 hours + review  
+
+**Approach:**
+1. Replace `formatRelativeTime()` in space-view/app-shell with ISO 8601 strings or fixed format (e.g., "2025-03-19")
+2. Remove `.toLocaleString()` from admin-view; use fixed format
+3. Update all component templates to render fixed-width timestamps
+4. **Result:** No time-dependent drift; identical pixel output every run
+
+**Pros:**
+- **True permanent fix**—zero churn
+- Easier to read timestamps (especially for debugging)
+- No mocking/freezing logic needed
+
+**Cons:**
+- **UX regression:** Relative time ("Today") is friendlier than absolute dates
+- Requires UI review and possibly design approval
+- Breaks existing user expectations
+- Not a testing fix—it's a feature removal
+
+**Recommended:** **No—avoid.** This changes the product for test convenience. Users prefer "Today" over "Mar 19".
+
+---
+
+### **🔵 ALTERNATIVE: Selective Blurring/Masking**
+**Difficulty:** ⭐⭐ (Moderate)  
+**Coverage:** ~60% (timestamps still drift, but visually masked)  
+**Implementation time:** 2–3 hours  
+
+**Approach:**
+1. Playwright's `screenshot({ mask: [locators] })` to blur or hide timestamp elements before capture
+2. Mask all `.` rendering `.createdAt` or `.sharedAt` fields in DOM
+3. Take screenshot with masked regions
+4. **Result:** Timestamps still render/function, but not visible in test artifacts
+
+**Pros:**
+- Non-invasive—no component changes
+- Screenshots become pixel-identical
+
+**Cons:**
+- **Hides real bugs:** Misaligned timestamps, text overflow won't be caught
+- Defeats purpose of E2E screenshots (visual regression detection)
+- Maintenance burden—must maintain mask list as UI evolves
+- False confidence if timestamps are later rendered incorrectly
+
+**Recommended:** **No—avoid.** This defeats the point of screenshot testing. We want to catch timestamp display bugs.
+
+---
+
+### **🟣 BONUS: Deterministic Admin Member Order**
+**Difficulty:** ⭐ (Trivial)  
+**Coverage:** ~5% (admin members modal only)  
+**Implementation time:** <15 min  
+
+**Approach:**
+- Server-side API likely already returns members sorted by `joinedAt` DESC
+- Verify consistent sort order in `admin-view.ts` line 1055 (the members list render loop)
+- If members list is unsorted, add `.sort((a, b) => a.joinedAt.localeCompare(b.joinedAt))` in admin component before rendering
+- **Result:** Member order doesn't jump around on subsequent runs
+
+**Pros:**
+- Eliminates member reordering churn
+- Easy to verify (check API response docs)
+
+**Cons:**
+- Only affects admin view; minor impact
+
+**Recommended:** **Yes—implement with Tier 1** if server doesn't guarantee sort order.
+
+---
+
+## Recommended Implementation Sequence
+
+### **Phase 1: Low-Risk Stabilization (30 min)**
+1. **Deterministic test fixtures** (Tier 1 mitigation)
+   - Modify `seedSpace()` to use fixed timestamps
+   - Seeds spaces at `2025-03-19T12:00:00Z`
+   - Seeds members 5 min later
+   - Seeds items 10 min later
+   - **Result:** Screenshots freeze on a fixed calendar day; re-baseline when day rolls over (monthly or quarterly)
+
+2. **Run tests and re-baseline** (`npx playwright test`)
+   - Capture new stable screenshots
+   - Commit with timestamp-locked test fixtures
+
+### **Phase 2: Permanent Stabilization (1–2 hours, optional)**
+1. **Mock clock in test suite** (Tier 2 mitigation)
+   - Add Playwright `test.use({ clock: { ... } })` configuration
+   - Or use `vi.useFakeTimers()` in `test.beforeAll()`
+   - Freeze time globally at `2025-03-19T12:00:00Z`
+   - Seeds automatically run with consistent wall time
+
+2. **Re-run and re-baseline** (should be identical to Phase 1)
+   - Verify mock clock works across timezones
+   - Commit mocked time setup
+
+### **Phase 3: Ongoing Maintenance**
+- **Quarterly review:** Run `npx playwright test` on first of month
+  - If relative times have drifted ("4d ago" instead of "3d ago"), re-baseline
+  - Update `fixture` dates if month changed
+- **Monitor:** Grep for `.toLocaleString()` and `formatRelativeTime()` calls in new features; apply same determinism discipline
+
+---
+
+## Files to Monitor for Future Changes
+
+1. **`src/SharedSpaces.Client/src/lib/format-time.ts`** — Core relative-time formatter
+   - **Why:** Any changes to relative-time logic should be reflected in test data
+   
+2. **`src/SharedSpaces.Client/src/features/admin/admin-view.ts`** — Admin space/member/invitation timestamps (lines 914, 1055, 1120)
+   - **Why:** Displays full `.toLocaleString()` dates; most churn-prone
+   
+3. **`src/SharedSpaces.Client/src/features/space-view/space-view.ts`** — Item and shared link timestamps (lines 1700, 1747, 2051)
+   - **Why:** Most-viewed content in regular screenshots
+   
+4. **`src/SharedSpaces.Client/e2e/screenshots.spec.ts`** — Test fixture seeding (lines 96–213)
+   - **Why:** Entry point for timestamp control
+   
+5. **`src/SharedSpaces.Client/src/app-shell.ts`** — Pending shares timestamp rendering (lines 795–799)
+   - **Why:** Secondary screen with timestamp display
+
+---
+
+## Key Decisions for Future Crews
+
+1. **Relative time strings are intentional UX, not a bug.** Don't remove them to "fix" screenshots. Users expect "Today", not "Mar 19".
+
+2. **UUID/GUID display is cosmetic churn.** Because they're monospace and fixed-width, they don't cause layout reflow. Accept as low-risk visual noise.
+
+3. **Test determinism requires fixture determinism.** You can't mock your way out of dynamic test data. Lock fixtures to a calendar date.
+
+4. **Monthly re-baselining is acceptable.** If Tier 2 (mock clock) is too complex, quarterly screenshot updates are a reasonable maintenance cost. Document in SKILL.md.
+
+5. **Screenshot masking is a last resort.** It creates false confidence and hides real bugs. Only use if the timestamp rendering is genuinely not testable content.
+
+---
+
+## Test Coverage Assessment
+
+**Current screenshots:** 58 (29 scenes × 2 viewports)  
+**Dynamic content detected:** 12 major sources  
+**Affected screenshots:** ~24 (42% of total)  
+**Mitigation effectiveness:**
+- **Tier 1 alone:** ~70% of churn eliminated
+- **Tier 1 + 2:** ~95% of churn eliminated
+- **Tier 1 + 2 + bonus:** ~99% of churn eliminated (only UUIDs vary, no layout impact)
+
+---
+
+## Next Steps
+
+1. **Immediate:** Implement Phase 1 (deterministic fixtures). Should take <30 min and have immediate impact.
+2. **Short-term:** Test Phase 2 (mock clock) with a staging branch. Assess complexity vs. benefit.
+3. **Medium-term:** If Phase 2 is feasible, merge and commit to permanent stability.
+4. **Ongoing:** Document final approach in `.squad/skills/playwright-screenshots/SKILL.md`.
+
+---
+
+**Status:** Analysis complete. Ready for implementation by Kaylee or Wash (or Coordinator's choice). No code changes made per user's "do not implement" requirement.
+

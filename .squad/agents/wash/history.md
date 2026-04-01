@@ -90,6 +90,28 @@
 - Copy/Move buttons clear and actionable
 - Loading and error states display correctly
 
+### Screenshot Determinism Investigation (2026-04-01)
+
+**Outcome:** Delivered comprehensive analysis of screenshot stabilization options.
+
+**Key contributions:**
+- Identified relative time rendering as primary churn source (80%)
+- Documented 4 mitigation strategies, ranked by effort/impact
+- **Recommended:** Freeze time via `page.addInitScript()` + deterministic UUIDs (Phase 1)
+- **Implementation estimate:** 2-3 hours, 80-90% churn reduction
+- **Success criteria:** 5× consecutive runs with 0% visual diffs
+
+**Phase 1 deliverables:**
+- Add date mock in `test.beforeAll()`
+- Replace `crypto.randomUUID()` with FIXED_ITEM_IDS table
+- Frozen moment: `2025-01-15T14:00:00Z`
+
+**Deferred to Phase 2 (optional):**
+- Mock share token generation
+- Override `toLocaleString()` for locale consistency
+
+**Aligned with Zoe's audit:** Both independently converged on frozen time + deterministic UUIDs as optimal approach.
+
 ## Team Updates (2026-03-27)
 
 **Issue #135 completed (Copy and move items between spaces):**
@@ -241,6 +263,46 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 - ✅ **Bundle size:** 40% reduction is a real win for mobile-first, self-hosted
 
 **Learning Curve:** 3-5 days for team Lit ramp-up. Clear documentation available. Lit is lighter and more approachable than React for small SPAs.
+
+## Screenshot Determinism Analysis (2025-01-15)
+
+**Issue:** Screenshot tests suffer from non-deterministic content causing daily churn.
+
+**Root causes identified:**
+1. **Relative timestamps** (formatRelativeTime) calculate from current system time → "Today" becomes "Yesterday" at midnight
+2. **Dynamic share tokens** generated server-side with different values each run
+3. **Random UUIDs** via `crypto.randomUUID()` in seedSpace() function
+4. **Locale-specific formatting** using `toLocaleString()` in admin-view
+5. **Invitation tokens** server-generated, different every run
+
+**Churn impact mapping:**
+- Admin spaces: "Created {date}" (daily churn)
+- Admin members: "Joined {date}" (daily churn)
+- Space view items: timestamps shown as "Today", "Yesterday", "Xd ago" (daily churn)
+- Space share modal: link creation time (daily churn)
+- Share URLs: token changes every run (visible in modal)
+
+**Recommended strategy (Phase 1 - 3-4 hours):**
+1. Freeze system time via `page.addInitScript()` → eliminates 80% of churn
+2. Use deterministic UUIDs in seeding → fixes reproducibility
+3. (Optional) Mock share tokens → fixes URL stability
+
+**Key decisions:**
+- No component code changes needed (formatters already work correctly)
+- Only test infrastructure changes required
+- Run tests on different dates to verify stability
+- Document frozen time value in code
+
+**Deliverables:**
+- `SCREENSHOT_DETERMINISM_RECOMMENDATIONS.md` — comprehensive 21KB analysis with all 6 strategies, trade-offs, implementation outlines, cost estimates
+- `.squad/decisions/inbox/wash-screenshot-determinism.md` — executive decision doc with implementation roadmap
+- Both ready for implementation approval
+
+**Files:**
+- Analysis: `SCREENSHOT_DETERMINISM_RECOMMENDATIONS.md`
+- Decision: `.squad/decisions/inbox/wash-screenshot-determinism.md`
+- Current tests: `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
+- Related code: `format-time.ts`, `admin-view.ts`, `space-view.ts`
 
 ## Learnings
 

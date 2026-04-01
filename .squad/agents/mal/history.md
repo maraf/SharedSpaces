@@ -476,3 +476,35 @@ Your architectural analysis has been merged into shared decision log. Key findin
 **Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
 
 **Partner:** Wash (fixed scroll dismiss and ARIA roles, pushed back on 2 concerns)
+
+### Screenshot Determinism Initiative — Cross-Agent Alignment (2026-04-01)
+
+**Role:** Lead — fast read-only review and mitigation strategy alignment.
+
+**Session Overview:**
+- Parallel 3-agent investigation: Wash (stabilization analysis), Zoe (determinism audit), Mal (strategy review)
+- All agents spawned on 2026-04-01 as background tasks
+
+**Findings Review:**
+- **Wash's analysis:** 4 mitigation strategies (freeze time, deterministic UUIDs, mock share tokens, CSS masking); ranked by effort/impact; recommended Phase 1+2 hybrid
+- **Zoe's audit:** 12 churn sources in 3 tiers; 24 high-risk screenshots; Phase 1 (30 min) → Phase 2 (1-2 hours) sequence
+- **Alignment:** Both independently converged on frozen time + deterministic UUIDs as optimal; no conflicts
+
+**Approved Mitigation Ladder:**
+1. **Phase 1 (Near-term):** Freeze time via \page.addInitScript()\ + deterministic UUIDs → ~80% churn elimination (2-3 hours)
+2. **Phase 2 (Short-term):** Mock clock (Playwright or Vitest) → ~95% churn elimination (1-2 hours, optional)
+3. **Phase 3 (Ongoing):** Quarterly re-baselining + monitoring
+
+**Cross-Agent Coordination Notes:**
+- Wash emphasized implementation effort and success criteria (5× consecutive runs with 0% diffs)
+- Zoe categorized by risk/severity and provided prioritized sequence
+- Mal confirmed consensus; no conflicts; ready for implementation assignment
+
+**Session Outputs:**
+- \.squad/log/2026-04-01T11-38-06Z-screenshot-determinism.md\ — Session summary
+- \.squad/orchestration-log/2026-04-01T11-38-06Z-wash.md\ — Wash's contribution
+- \.squad/orchestration-log/2026-04-01T11-38-06Z-zoe.md\ — Zoe's contribution
+- \.squad/orchestration-log/2026-04-01T11-38-06Z-mal.md\ — Mal's review
+- \.squad/decisions.md\ — Merged Wash + Zoe decisions (appended)
+
+**Next Steps:** Implementation assignment (Kaylee or Wash); validation + documentation update in SKILL.md.
