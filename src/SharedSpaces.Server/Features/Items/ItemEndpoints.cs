@@ -394,6 +394,7 @@ public static class ItemEndpoints
         AppDbContext db,
         IFileStorage fileStorage,
         ISpaceHubNotifier hubNotifier,
+        IConfiguration configuration,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
@@ -413,7 +414,18 @@ public static class ItemEndpoints
         var isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase);
 
         db.SpaceItems.Remove(item);
+
+        db.DeletedItems.Add(new DeletedItem
+        {
+            ItemId = item.Id,
+            SpaceId = item.SpaceId,
+            DeletedAt = DateTime.UtcNow
+        });
+
         await db.SaveChangesAsync(cancellationToken);
+
+        // Prune old journal entries if over the limit
+        await PruneDeletedItemsAsync(db, spaceId, configuration, cancellationToken);
 
         var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
         await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
@@ -877,6 +889,13 @@ public static class ItemEndpoints
                 if (sourceItemTracked is not null)
                 {
                     db.SpaceItems.Remove(sourceItemTracked);
+
+                    db.DeletedItems.Add(new DeletedItem
+                    {
+                        ItemId = sourceItemTracked.Id,
+                        SpaceId = sourceItemTracked.SpaceId,
+                        DeletedAt = DateTime.UtcNow
+                    });
                 }
             }
 
@@ -919,6 +938,9 @@ public static class ItemEndpoints
                         // Best-effort cleanup
                     }
                 }
+
+                // Prune old journal entries if over the limit
+                await PruneDeletedItemsAsync(db, spaceId, configuration, cancellationToken);
             }
 
             var response = new SpaceItemResponse(
@@ -967,6 +989,48 @@ public static class ItemEndpoints
                 await quotaLock.DisposeAsync();
             }
         }
+    }
+
+    private static async Task PruneDeletedItemsAsync(
+        AppDbContext db,
+        Guid spaceId,
+        IConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        var maxEntries = configuration.GetValue("Journal:MaxEntriesPerSpace", 1000);
+
+        var count = await db.DeletedItems
+            .CountAsync(d => d.SpaceId == spaceId, cancellationToken);
+
+        if (count <= maxEntries)
+        {
+            return;
+        }
+
+        var excess = count - maxEntries;
+
+        var oldestEntries = await db.DeletedItems
+            .Where(d => d.SpaceId == spaceId)
+            .OrderBy(d => d.DeletedAt)
+            .Take(excess)
+            .ToListAsync(cancellationToken);
+
+        if (oldestEntries.Count == 0)
+        {
+            return;
+        }
+
+        var watermark = oldestEntries.Max(d => d.DeletedAt);
+
+        db.DeletedItems.RemoveRange(oldestEntries);
+
+        var space = await db.Spaces.SingleOrDefaultAsync(s => s.Id == spaceId, cancellationToken);
+        if (space is not null)
+        {
+            space.JournalPrunedBefore = watermark;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static IResult? TryAuthorizeSpaceRequest(HttpContext httpContext, Guid routeSpaceId, out Guid memberId)

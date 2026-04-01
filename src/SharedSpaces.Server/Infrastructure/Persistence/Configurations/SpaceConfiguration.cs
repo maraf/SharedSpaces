@@ -24,5 +24,8 @@ public class SpaceConfiguration : IEntityTypeConfiguration<Space>
 
         builder.Property(space => space.MaxUploadSize)
             .IsRequired(false);
+
+        builder.Property(space => space.JournalPrunedBefore)
+            .IsRequired(false);
     }
 }

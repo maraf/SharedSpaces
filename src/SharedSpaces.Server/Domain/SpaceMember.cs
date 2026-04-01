@@ -7,6 +7,7 @@ public class SpaceMember
     public string DisplayName { get; set; } = string.Empty;
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
     public bool IsRevoked { get; set; }
+    public DateTime? LastSyncAt { get; set; }
     public Space Space { get; set; } = null!;
     public ICollection<SpaceItem> Items { get; set; } = [];
 }

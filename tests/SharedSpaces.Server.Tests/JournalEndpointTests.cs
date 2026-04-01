@@ -1,0 +1,596 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text;
+using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.IdentityModel.Tokens;
+using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Infrastructure.FileStorage;
+using SharedSpaces.Server.Infrastructure.Persistence;
+
+namespace SharedSpaces.Server.Tests;
+
+public class JournalEndpointTests
+{
+    [Fact]
+    public async Task GetJournal_ReturnsAddedItemsSinceTimestamp()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var beforeCreate = DateTime.UtcNow.AddSeconds(-1);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "hello journal",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        var response = await GetJournalAsync(client, space.Id, token, since: beforeCreate);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.FullSyncRequired.Should().BeFalse();
+        body.AddedOrUpdated.Should().ContainSingle(r => r.Id == item.Id);
+        body.Deleted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetJournal_ReturnsDeletedItemIdsSinceTimestamp()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "to be deleted",
+            sharedAt: DateTime.UtcNow.AddMinutes(-5),
+            fileSize: 0);
+
+        var beforeDelete = DateTime.UtcNow.AddSeconds(-1);
+
+        // Delete the item via API
+        var deleteResponse = await DeleteItemAsync(client, space.Id, item.Id, token);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var response = await GetJournalAsync(client, space.Id, token, since: beforeDelete);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.FullSyncRequired.Should().BeFalse();
+        body.Deleted.Should().Contain(item.Id);
+    }
+
+    [Fact]
+    public async Task GetJournal_ReturnsFullSyncRequired_WhenSinceIsBeforePrunedWatermark()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        // Set the JournalPrunedBefore watermark directly
+        await factory.WithDbContextAsync(async db =>
+        {
+            var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
+            s.JournalPrunedBefore = DateTime.UtcNow.AddMinutes(-10);
+            await db.SaveChangesAsync();
+        });
+
+        // Query with a since before the watermark
+        var response = await GetJournalAsync(client, space.Id, token, since: DateTime.UtcNow.AddMinutes(-30));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.FullSyncRequired.Should().BeTrue();
+        body.Deleted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetJournal_ReturnsFullSyncRequiredFalse_WhenJournalCoversWindow()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        // No pruning has happened — JournalPrunedBefore is null
+        var response = await GetJournalAsync(client, space.Id, token, since: DateTime.UtcNow.AddMinutes(-5));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.FullSyncRequired.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetJournal_UpdatesMemberLastSyncAt()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        // Verify LastSyncAt is initially null
+        await factory.WithDbContextAsync(async db =>
+        {
+            var m = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            m.LastSyncAt.Should().BeNull();
+        });
+
+        var beforeCall = DateTime.UtcNow;
+        var response = await GetJournalAsync(client, space.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var m = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            m.LastSyncAt.Should().NotBeNull();
+            m.LastSyncAt!.Value.Should().BeOnOrAfter(beforeCall);
+        });
+    }
+
+    [Fact]
+    public async Task GetJournal_EmptyJournal_ReturnsEmptyArrays()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var response = await GetJournalAsync(client, space.Id, token, since: DateTime.UtcNow);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.FullSyncRequired.Should().BeFalse();
+        body.AddedOrUpdated.Should().BeEmpty();
+        body.Deleted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetJournal_WithoutJwt_Returns401()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+
+        var response = await GetJournalAsync(client, space.Id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetJournal_NonExistentSpace_Returns404()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var nonExistentSpaceId = Guid.NewGuid();
+
+        // Create a member in a real space but use the token for the non-existent space
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, nonExistentSpaceId, member.DisplayName);
+
+        var response = await GetJournalAsync(client, nonExistentSpaceId, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeleteItem_CreatesDeletedItemRecord()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "about to be deleted",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        var deleteResponse = await DeleteItemAsync(client, space.Id, item.Id, token);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var deletedItem = await db.DeletedItems.SingleOrDefaultAsync(d => d.ItemId == item.Id);
+            deletedItem.Should().NotBeNull();
+            deletedItem!.SpaceId.Should().Be(space.Id);
+            deletedItem.DeletedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+        });
+    }
+
+    [Fact]
+    public async Task TransferItem_WithMoveAction_CreatesDeletedItemRecord()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        // Source space and member
+        var sourceSpace = await factory.CreateSpaceAsync("Source");
+        var sourceMember = await factory.CreateMemberAsync(sourceSpace.Id, "Zoe");
+        var sourceToken = GenerateTestJwt(sourceMember.Id, sourceSpace.Id, sourceMember.DisplayName);
+
+        // Destination space and member
+        var destSpace = await factory.CreateSpaceAsync("Destination");
+        var destMember = await factory.CreateMemberAsync(destSpace.Id, "Wash");
+        var destToken = GenerateTestJwt(destMember.Id, destSpace.Id, destMember.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            sourceSpace.Id, sourceMember.Id,
+            contentType: "text",
+            content: "moving item",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        var transferResponse = await TransferItemAsync(
+            client, sourceSpace.Id, item.Id, sourceToken,
+            destinationToken: destToken, action: "move");
+        transferResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var deletedItem = await db.DeletedItems.SingleOrDefaultAsync(d => d.ItemId == item.Id);
+            deletedItem.Should().NotBeNull();
+            deletedItem!.SpaceId.Should().Be(sourceSpace.Id);
+        });
+    }
+
+    [Fact]
+    public async Task Pruning_TrimsToConfiguredMaxAndUpdatesWatermark()
+    {
+        // Set max to 5 entries
+        await using var factory = new TestWebApplicationFactory(journalMaxEntries: 5);
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        // Create 6 items to delete (will exceed the max of 5)
+        var items = new List<SpaceItem>();
+        for (var i = 0; i < 6; i++)
+        {
+            var item = await factory.CreateItemAsync(
+                space.Id, member.Id,
+                contentType: "text",
+                content: $"item-{i}",
+                sharedAt: DateTime.UtcNow.AddMinutes(-30 + i),
+                fileSize: 0);
+            items.Add(item);
+        }
+
+        // Delete all items — each deletion adds a DeletedItem record
+        foreach (var item in items)
+        {
+            var deleteResponse = await DeleteItemAsync(client, space.Id, item.Id, token);
+            deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        }
+
+        // After 6 deletions with max=5, pruning should have trimmed to 5
+        await factory.WithDbContextAsync(async db =>
+        {
+            var deletedCount = await db.DeletedItems.CountAsync(d => d.SpaceId == space.Id);
+            deletedCount.Should().BeLessOrEqualTo(5);
+
+            var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
+            s.JournalPrunedBefore.Should().NotBeNull();
+        });
+    }
+
+    [Fact]
+    public async Task GetJournal_WithoutSinceParameter_ReturnsAllItems()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item1 = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "old item",
+            sharedAt: DateTime.UtcNow.AddDays(-7),
+            fileSize: 0);
+
+        var item2 = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "new item",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        // No since parameter → should return everything
+        var response = await GetJournalAsync(client, space.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.AddedOrUpdated.Should().HaveCount(2);
+        body.AddedOrUpdated.Should().Contain(r => r.Id == item1.Id);
+        body.AddedOrUpdated.Should().Contain(r => r.Id == item2.Id);
+    }
+
+    // --- Helpers ---
+
+    private static async Task<HttpResponseMessage> GetJournalAsync(
+        HttpClient client, Guid spaceId, string? token = null, DateTime? since = null)
+    {
+        var url = $"/v1/spaces/{spaceId}/journal";
+        if (since.HasValue)
+        {
+            url += $"?since={since.Value:O}";
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> DeleteItemAsync(
+        HttpClient client, Guid spaceId, Guid itemId, string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/v1/spaces/{spaceId}/items/{itemId}");
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> TransferItemAsync(
+        HttpClient client, Guid spaceId, Guid itemId, string sourceToken,
+        string destinationToken, string action)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/items/{itemId}/transfer");
+        request.Content = JsonContent.Create(new { destinationToken, action });
+        AddAuthorizationHeader(request, sourceToken);
+        return await client.SendAsync(request);
+    }
+
+    private static void AddAuthorizationHeader(HttpRequestMessage request, string? token)
+    {
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+    }
+
+    private static string GenerateTestJwt(Guid memberId, Guid spaceId, string displayName = "TestUser")
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestWebApplicationFactory.JwtSigningKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var token = new JwtSecurityToken(
+            claims:
+            [
+                new Claim(JwtRegisteredClaimNames.Sub, memberId.ToString()),
+                new Claim("display_name", displayName),
+                new Claim("server_url", TestWebApplicationFactory.ServerUrl),
+                new Claim("space_id", spaceId.ToString())
+            ],
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadFromJsonAsync<T>();
+        body.Should().NotBeNull();
+        return body!;
+    }
+
+    private sealed record JournalResponse(
+        bool FullSyncRequired,
+        SpaceItemResponse[] AddedOrUpdated,
+        Guid[] Deleted);
+
+    private sealed record SpaceItemResponse(
+        Guid Id,
+        Guid SpaceId,
+        Guid MemberId,
+        string ContentType,
+        string Content,
+        long FileSize,
+        DateTime SharedAt);
+
+    private sealed class TestWebApplicationFactory(long? maxSpaceQuotaBytes = null, int? journalMaxEntries = null) : WebApplicationFactory<Program>
+    {
+        public const string AdminSecret = "test-admin-secret";
+        public const string JwtSigningKey = "test-signing-key-1234567890abcdef";
+        public const string ServerUrl = "https://sharedspaces.test";
+
+        private readonly string _databaseName = $"sharedspaces-journal-tests-{Guid.NewGuid()}";
+        private readonly long _maxSpaceQuotaBytes = maxSpaceQuotaBytes ?? 104_857_600;
+        private readonly int _journalMaxEntries = journalMaxEntries ?? 1000;
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Testing");
+
+            builder.ConfigureAppConfiguration((_, configBuilder) =>
+            {
+                configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Admin:Secret"] = AdminSecret,
+                    ["Jwt:SigningKey"] = JwtSigningKey,
+                    ["Storage:BasePath"] = "./artifacts/storage-journal-tests",
+                    ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString(),
+                    ["Journal:MaxEntriesPerSpace"] = _journalMaxEntries.ToString()
+                });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<DbContextOptions<AppDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<AppDbContext>>();
+                services.RemoveAll<AppDbContext>();
+                services.RemoveAll<IFileStorage>();
+
+                services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(_databaseName));
+                services.AddSingleton<IFileStorage>(_ => new InMemoryFileStorage());
+            });
+        }
+
+        public async Task<Space> CreateSpaceAsync(string name = "Test Space", long? maxUploadSize = null)
+        {
+            return await WithDbContextAsync(async db =>
+            {
+                var space = new Space
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    MaxUploadSize = maxUploadSize
+                };
+
+                db.Spaces.Add(space);
+                await db.SaveChangesAsync();
+                return space;
+            });
+        }
+
+        public async Task<SpaceMember> CreateMemberAsync(Guid spaceId, string displayName = "TestUser", Guid? memberId = null)
+        {
+            return await WithDbContextAsync(async db =>
+            {
+                var member = new SpaceMember
+                {
+                    Id = memberId ?? Guid.NewGuid(),
+                    SpaceId = spaceId,
+                    DisplayName = displayName,
+                    JoinedAt = DateTime.UtcNow,
+                    IsRevoked = false
+                };
+
+                db.SpaceMembers.Add(member);
+                await db.SaveChangesAsync();
+                return member;
+            });
+        }
+
+        public async Task<SpaceItem> CreateItemAsync(
+            Guid spaceId,
+            Guid memberId,
+            string contentType,
+            string content,
+            DateTime sharedAt,
+            long fileSize,
+            Guid? itemId = null)
+        {
+            return await WithDbContextAsync(async db =>
+            {
+                var item = new SpaceItem(itemId ?? Guid.NewGuid())
+                {
+                    SpaceId = spaceId,
+                    MemberId = memberId,
+                    ContentType = contentType,
+                    Content = content,
+                    SharedAt = sharedAt,
+                    FileSize = fileSize
+                };
+
+                db.SpaceItems.Add(item);
+                await db.SaveChangesAsync();
+                return item;
+            });
+        }
+
+        public async Task WithDbContextAsync(Func<AppDbContext, Task> action)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await action(db);
+        }
+
+        public async Task<T> WithDbContextAsync<T>(Func<AppDbContext, Task<T>> action)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await action(db);
+        }
+
+        private sealed class InMemoryFileStorage : IFileStorage
+        {
+            private readonly object _syncRoot = new();
+            private readonly Dictionary<string, byte[]> _files = new(StringComparer.OrdinalIgnoreCase);
+
+            private static string GetKey(Guid spaceId, Guid itemId) => $"{spaceId:N}/{itemId:N}";
+
+            public async Task SaveAsync(Guid spaceId, Guid itemId, Stream content, CancellationToken ct)
+            {
+                ct.ThrowIfCancellationRequested();
+                ArgumentNullException.ThrowIfNull(content);
+
+                await using var buffer = new MemoryStream();
+                await content.CopyToAsync(buffer, ct);
+                var key = GetKey(spaceId, itemId);
+
+                lock (_syncRoot)
+                {
+                    _files[key] = buffer.ToArray();
+                }
+            }
+
+            public Task<Stream> ReadAsync(Guid spaceId, Guid itemId, CancellationToken ct)
+            {
+                ct.ThrowIfCancellationRequested();
+                var key = GetKey(spaceId, itemId);
+
+                lock (_syncRoot)
+                {
+                    if (!_files.TryGetValue(key, out var bytes))
+                    {
+                        throw new FileNotFoundException($"Stored file '{key}' was not found.", key);
+                    }
+
+                    return Task.FromResult<Stream>(new MemoryStream(bytes));
+                }
+            }
+
+            public Task DeleteAsync(Guid spaceId, Guid itemId, CancellationToken ct)
+            {
+                ct.ThrowIfCancellationRequested();
+                var key = GetKey(spaceId, itemId);
+
+                lock (_syncRoot)
+                {
+                    _files.Remove(key);
+                }
+
+                return Task.CompletedTask;
+            }
+        }
+    }
+}

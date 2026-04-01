@@ -26,6 +26,9 @@ public class SpaceMemberConfiguration : IEntityTypeConfiguration<SpaceMember>
             .HasDefaultValue(false)
             .IsRequired();
 
+        builder.Property(member => member.LastSyncAt)
+            .IsRequired(false);
+
         builder.HasIndex(member => member.SpaceId);
 
         builder.HasOne(member => member.Space)
