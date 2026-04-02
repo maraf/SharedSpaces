@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace SharedSpaces.Cli.Core.Services;
@@ -9,8 +8,10 @@ public sealed class SyncService : IAsyncDisposable
     private readonly SharedSpacesApiClient _apiClient;
     private readonly string _serverUrl;
     private readonly string _spaceId;
+    private readonly Guid _spaceGuid;
     private readonly string _jwtToken;
     private readonly string _localFolder;
+    private readonly SyncStateStore _stateStore;
     private const double TimestampToleranceSeconds = 2;
     private readonly ConcurrentDictionary<Guid, string> _downloadedItems = new();
     private readonly ConcurrentDictionary<Guid, byte> _pendingUploads = new();
@@ -20,6 +21,9 @@ public sealed class SyncService : IAsyncDisposable
     private DateTime _lastDisconnect = DateTime.MinValue;
     private PeriodicTimer? _pollingTimer;
     private Task? _pollingTask;
+    private DateTime? _lastAppliedCheckpointUtc;
+    private bool _hasPersistedState;
+    private bool _stateLoaded;
 
     public SyncService(
         SharedSpacesApiClient apiClient,
@@ -31,13 +35,27 @@ public sealed class SyncService : IAsyncDisposable
         _apiClient = apiClient;
         _serverUrl = serverUrl.TrimEnd('/');
         _spaceId = spaceId;
+        _spaceGuid = Guid.TryParse(spaceId, out var parsedSpaceId)
+            ? parsedSpaceId
+            : throw new ArgumentException("spaceId must be a valid GUID.", nameof(spaceId));
         _jwtToken = jwtToken;
         _localFolder = localFolder;
+        _stateStore = new SyncStateStore(localFolder);
     }
 
     public bool IsDownloaded(Guid itemId) => _downloadedItems.ContainsKey(itemId);
 
-    public void MarkAsDownloaded(Guid itemId) => _downloadedItems.TryAdd(itemId, string.Empty);
+    public void MarkAsDownloaded(Guid itemId, string? filename = null)
+    {
+        _downloadedItems[itemId] = filename ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(filename))
+        {
+            _knownFiles.TryAdd(filename, 0);
+        }
+
+        SaveSyncState();
+    }
 
     public bool IsKnownFile(string filename) => _knownFiles.ContainsKey(filename);
 
@@ -46,6 +64,7 @@ public sealed class SyncService : IAsyncDisposable
         Console.WriteLine($"Starting sync for space {_spaceId}...");
         Console.WriteLine($"Local folder: {_localFolder}");
 
+        LoadSyncState();
         ScanExistingFiles();
         await InitialSyncAsync(ct);
         await ConnectSignalRAsync(ct);
@@ -65,16 +84,9 @@ public sealed class SyncService : IAsyncDisposable
     {
         Console.WriteLine("Performing initial sync...");
 
-        var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
-        var fileItems = items.Where(i => i.ContentType == "file").ToList();
-
-        Console.WriteLine($"Found {fileItems.Count} file(s) on server.");
-
-        foreach (var item in fileItems)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DownloadAndSaveFileAsync(item.Id, item.Content, item.FileSize, item.SharedAt, ct);
-        }
+        LoadSyncState();
+        var journal = await _apiClient.GetJournalAsync(_serverUrl, _spaceId, _jwtToken, ct);
+        await ApplyRemoteChangesAsync(journal, forceFullSync: !_hasPersistedState, ct);
 
         Console.WriteLine("Initial sync complete.");
     }
@@ -89,11 +101,14 @@ public sealed class SyncService : IAsyncDisposable
         }
     }
 
-    public void OnItemDeleted(ItemDeletedEvent itemDeleted)
+    public bool OnItemDeleted(ItemDeletedEvent itemDeleted)
     {
         Console.WriteLine($"[Event] ItemDeleted: {itemDeleted.Id}");
 
-        if (_downloadedItems.TryRemove(itemDeleted.Id, out var filename) && !string.IsNullOrEmpty(filename))
+        if (!_downloadedItems.TryGetValue(itemDeleted.Id, out var filename))
+            return true;
+
+        if (!string.IsNullOrEmpty(filename))
         {
             var localPath = Path.Combine(_localFolder, filename);
             try
@@ -107,10 +122,15 @@ public sealed class SyncService : IAsyncDisposable
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"[Delete] Failed to delete {filename}: {ex.Message}");
+                return false;
             }
 
             _knownFiles.TryRemove(filename, out _);
         }
+
+        _downloadedItems.TryRemove(itemDeleted.Id, out _);
+        SaveSyncState();
+        return true;
     }
 
     private async Task ConnectSignalRAsync(CancellationToken ct)
@@ -232,32 +252,8 @@ public sealed class SyncService : IAsyncDisposable
 
             try
             {
-                var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
-                var fileItems = items.Where(i => i.ContentType == "file").ToList();
-
-                // Download new files
-                var newFileItems = fileItems.Where(i => !_downloadedItems.ContainsKey(i.Id)).ToList();
-                if (newFileItems.Count > 0)
-                {
-                    Console.WriteLine($"[Polling] Found {newFileItems.Count} new file(s).");
-                    foreach (var item in newFileItems)
-                    {
-                        await DownloadAndSaveFileAsync(item.Id, item.Content, item.FileSize, item.SharedAt, ct);
-                    }
-                }
-
-                // Delete files removed from server
-                var serverFileIds = new HashSet<Guid>(fileItems.Select(i => i.Id));
-                foreach (var localId in _downloadedItems.Keys)
-                {
-                    if (_pendingUploads.ContainsKey(localId))
-                        continue;
-
-                    if (!serverFileIds.Contains(localId))
-                    {
-                        OnItemDeleted(new ItemDeletedEvent(localId, Guid.Parse(_spaceId)));
-                    }
-                }
+                var journal = await _apiClient.GetJournalAsync(_serverUrl, _spaceId, _jwtToken, ct);
+                await ApplyRemoteChangesAsync(journal, forceFullSync: false, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -276,16 +272,17 @@ public sealed class SyncService : IAsyncDisposable
         _pollingTimer = null;
     }
 
-    private async Task DownloadAndSaveFileAsync(Guid itemId, string filename, long fileSize, DateTime sharedAt, CancellationToken ct)
+    private async Task<bool> DownloadAndSaveFileAsync(Guid itemId, string filename, long fileSize, DateTime sharedAt, CancellationToken ct)
     {
         var safeName = SanitizeFileName(filename, itemId);
 
-        // Atomic claim — stores filename so deletion can map itemId → file
-        if (!_downloadedItems.TryAdd(itemId, safeName))
+        if (_downloadedItems.TryGetValue(itemId, out var existingName) && string.IsNullOrEmpty(existingName))
         {
             Console.WriteLine($"[Download] Skipping already claimed item: {itemId}");
-            return;
+            return true;
         }
+
+        _downloadedItems[itemId] = safeName;
 
         try
         {
@@ -300,7 +297,8 @@ public sealed class SyncService : IAsyncDisposable
                 {
                     Console.WriteLine($"[Download] Skipping unchanged file: {safeName}");
                     _knownFiles.TryAdd(safeName, 0);
-                    return;
+                    SaveSyncState();
+                    return true;
                 }
             }
 
@@ -324,6 +322,8 @@ public sealed class SyncService : IAsyncDisposable
 
                 // Track downloaded file to prevent upload loop
                 _knownFiles.TryAdd(safeName, 0);
+                SaveSyncState();
+                return true;
             }
             catch
             {
@@ -334,12 +334,15 @@ public sealed class SyncService : IAsyncDisposable
         catch (OperationCanceledException)
         {
             _downloadedItems.TryRemove(itemId, out _);
+            SaveSyncState();
             throw;
         }
         catch (Exception ex)
         {
             _downloadedItems.TryRemove(itemId, out _);
+            SaveSyncState();
             Console.Error.WriteLine($"[Download] Failed to download {itemId}: {ex.Message}");
+            return false;
         }
     }
 
@@ -370,8 +373,7 @@ public sealed class SyncService : IAsyncDisposable
         foreach (var filePath in files)
         {
             var fileName = Path.GetFileName(filePath);
-            // Ignore temp files
-            if (fileName.StartsWith(".") && fileName.EndsWith(".tmp", System.StringComparison.OrdinalIgnoreCase))
+            if (IsIgnoredLocalFile(fileName))
                 continue;
 
             _knownFiles.TryAdd(fileName, 0);
@@ -402,8 +404,7 @@ public sealed class SyncService : IAsyncDisposable
     {
         var fileName = Path.GetFileName(e.FullPath);
 
-        // Ignore temp files created by download process
-        if (fileName.StartsWith(".") && fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+        if (IsIgnoredLocalFile(fileName))
             return;
 
         // Attempt to mark as known; if already known, ignore to prevent double-upload
@@ -463,17 +464,21 @@ public sealed class SyncService : IAsyncDisposable
                     // Use server-returned ID in case it differs
                     if (response.Id != itemId)
                     {
-                        _downloadedItems.TryAdd(response.Id, fileName);
+                        _downloadedItems.TryRemove(itemId, out _);
+                        _downloadedItems[response.Id] = fileName;
                     }
 
                     Console.WriteLine($"[Upload] Successfully uploaded {fileName} as {response.Id}");
                     _pendingUploads.TryRemove(itemId, out _);
+                    _pendingUploads.TryRemove(response.Id, out _);
+                    SaveSyncState();
                     return;
                 }
                 catch
                 {
                     _pendingUploads.TryRemove(itemId, out _);
                     _downloadedItems.TryRemove(itemId, out _);
+                    SaveSyncState();
                     throw;
                 }
             }
@@ -497,6 +502,173 @@ public sealed class SyncService : IAsyncDisposable
 
         Console.Error.WriteLine($"[Upload] Failed to access {fileName} after 3 attempts.");
         _knownFiles.TryRemove(fileName, out _);
+    }
+
+    private async Task ApplyRemoteChangesAsync(JournalResponse journal, bool forceFullSync, CancellationToken ct)
+    {
+        if (forceFullSync || journal.FullSyncRequired)
+        {
+            Console.WriteLine(forceFullSync
+                ? "[Sync] Local sync state missing; performing full reconciliation."
+                : "[Sync] Journal history was pruned; performing full reconciliation.");
+
+            await PerformFullSyncAsync(journal.Checkpoint, ct);
+            return;
+        }
+
+        var deletedCount = journal.Deleted.Length;
+        var addedOrUpdatedFiles = journal.AddedOrUpdated.Where(item => item.ContentType == "file").ToList();
+        Console.WriteLine($"[Journal] Applying {addedOrUpdatedFiles.Count} added/updated file(s) and {deletedCount} deletion(s).");
+        var applySucceeded = true;
+
+        foreach (var deletedId in journal.Deleted.Distinct())
+        {
+            if (_pendingUploads.ContainsKey(deletedId))
+                continue;
+
+            applySucceeded &= OnItemDeleted(new ItemDeletedEvent(deletedId, _spaceGuid));
+        }
+
+        foreach (var item in addedOrUpdatedFiles)
+        {
+            ct.ThrowIfCancellationRequested();
+            applySucceeded &= await DownloadAndSaveFileAsync(item.Id, item.Content, item.FileSize, item.SharedAt, ct);
+        }
+
+        if (!applySucceeded)
+        {
+            Console.Error.WriteLine("[Journal] Some remote changes could not be applied; checkpoint was not acknowledged.");
+            return;
+        }
+
+        await AcknowledgeCheckpointAsync(journal.Checkpoint, ct);
+    }
+
+    private async Task PerformFullSyncAsync(DateTime checkpoint, CancellationToken ct)
+    {
+        var items = await _apiClient.ListItemsAsync(_serverUrl, _spaceId, _jwtToken, ct);
+        var fileItems = items.Where(i => i.ContentType == "file").ToList();
+        var serverFileIds = new HashSet<Guid>(fileItems.Select(i => i.Id));
+        var expectedFileNames = new HashSet<string>(
+            fileItems.Select(item => SanitizeFileName(item.Content, item.Id)),
+            StringComparer.OrdinalIgnoreCase);
+
+        Console.WriteLine($"[Sync] Found {fileItems.Count} authoritative file(s) on server.");
+
+        foreach (var localId in _downloadedItems.Keys.ToList())
+        {
+            if (_pendingUploads.ContainsKey(localId))
+                continue;
+
+            if (!serverFileIds.Contains(localId))
+            {
+                if (!OnItemDeleted(new ItemDeletedEvent(localId, _spaceGuid)))
+                {
+                    Console.Error.WriteLine("[Sync] Full reconciliation did not finish cleanly; checkpoint was not acknowledged.");
+                    return;
+                }
+            }
+        }
+
+        if (!CleanupAdditionalLocalFiles(expectedFileNames))
+        {
+            Console.Error.WriteLine("[Sync] Full reconciliation did not finish cleanly; checkpoint was not acknowledged.");
+            return;
+        }
+
+        foreach (var item in fileItems)
+        {
+            ct.ThrowIfCancellationRequested();
+            var applied = await DownloadAndSaveFileAsync(item.Id, item.Content, item.FileSize, item.SharedAt, ct);
+            if (!applied)
+            {
+                Console.Error.WriteLine("[Sync] Full reconciliation did not finish cleanly; checkpoint was not acknowledged.");
+                return;
+            }
+        }
+
+        await AcknowledgeCheckpointAsync(checkpoint, ct);
+    }
+
+    private async Task AcknowledgeCheckpointAsync(DateTime checkpoint, CancellationToken ct)
+    {
+        await _apiClient.UpdateJournalCheckpointAsync(_serverUrl, _spaceId, _jwtToken, checkpoint, ct);
+        _lastAppliedCheckpointUtc = DateTime.SpecifyKind(checkpoint, DateTimeKind.Utc);
+        _hasPersistedState = true;
+        SaveSyncState();
+    }
+
+    private bool CleanupAdditionalLocalFiles(HashSet<string> expectedFileNames)
+    {
+        if (!Directory.Exists(_localFolder))
+            return true;
+
+        var cleanupSucceeded = true;
+
+        foreach (var filePath in Directory.GetFiles(_localFolder))
+        {
+            var fileName = Path.GetFileName(filePath);
+            if (IsIgnoredLocalFile(fileName) || expectedFileNames.Contains(fileName))
+                continue;
+
+            try
+            {
+                File.Delete(filePath);
+                Console.WriteLine($"[Cleanup] Deleted stale local file: {fileName}");
+                _knownFiles.TryRemove(fileName, out _);
+                RemoveTrackedEntriesForFile(fileName);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Cleanup] Failed to delete {fileName}: {ex.Message}");
+                cleanupSucceeded = false;
+            }
+        }
+
+        SaveSyncState();
+        return cleanupSucceeded;
+    }
+
+    private void RemoveTrackedEntriesForFile(string fileName)
+    {
+        foreach (var entry in _downloadedItems
+                     .Where(entry => string.Equals(entry.Value, fileName, StringComparison.OrdinalIgnoreCase))
+                     .ToList())
+        {
+            _downloadedItems.TryRemove(entry.Key, out _);
+        }
+    }
+
+    private void LoadSyncState()
+    {
+        if (_stateLoaded)
+            return;
+
+        _stateLoaded = true;
+        var snapshot = _stateStore.Load();
+        _lastAppliedCheckpointUtc = snapshot.LastAppliedCheckpointUtc;
+        _hasPersistedState = snapshot.LastAppliedCheckpointUtc.HasValue || snapshot.TrackedItems.Count > 0;
+
+        foreach (var entry in snapshot.TrackedItems)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.Value))
+            {
+                _downloadedItems[entry.Key] = entry.Value;
+            }
+        }
+    }
+
+    private void SaveSyncState()
+    {
+        _stateStore.Save(_downloadedItems, _lastAppliedCheckpointUtc);
+    }
+
+    private static bool IsIgnoredLocalFile(string fileName)
+    {
+        if (string.Equals(fileName, SyncStateStore.FileName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return fileName.StartsWith(".") && fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
     }
 
     public async ValueTask DisposeAsync()

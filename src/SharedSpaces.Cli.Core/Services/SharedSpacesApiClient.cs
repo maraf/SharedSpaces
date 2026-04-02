@@ -100,6 +100,76 @@ public sealed class SharedSpacesApiClient : IDisposable
             ?? throw new InvalidOperationException("Server returned empty items list.");
     }
 
+    public async Task<JournalResponse> GetJournalAsync(
+        string serverUrl,
+        string spaceId,
+        string jwtToken,
+        CancellationToken ct = default)
+    {
+        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/journal";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+        using var response = await _http.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"Get journal failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
+        }
+
+        return await response.Content.ReadFromJsonAsync<JournalResponse>(ct)
+            ?? throw new InvalidOperationException("Server returned empty journal response.");
+    }
+
+    public async Task UpdateJournalCheckpointAsync(
+        string serverUrl,
+        string spaceId,
+        string jwtToken,
+        DateTime checkpoint,
+        CancellationToken ct = default)
+    {
+        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/journal/checkpoint";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(new JournalCheckpointRequest(checkpoint))
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+        using var response = await _http.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"Update journal checkpoint failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
+        }
+    }
+
+    public async Task ResetJournalCheckpointAsync(
+        string serverUrl,
+        string spaceId,
+        string jwtToken,
+        CancellationToken ct = default)
+    {
+        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/journal/checkpoint";
+
+        using var request = new HttpRequestMessage(HttpMethod.Delete, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+        using var response = await _http.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"Reset journal checkpoint failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
+        }
+    }
+
     public async Task DownloadFileToAsync(
         string serverUrl,
         string spaceId,
@@ -152,3 +222,12 @@ public sealed record SpaceItemResponse(
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("fileSize")] long FileSize,
     [property: JsonPropertyName("sharedAt")] DateTime SharedAt);
+
+public sealed record JournalResponse(
+    [property: JsonPropertyName("fullSyncRequired")] bool FullSyncRequired,
+    [property: JsonPropertyName("checkpoint")] DateTime Checkpoint,
+    [property: JsonPropertyName("addedOrUpdated")] SpaceItemResponse[] AddedOrUpdated,
+    [property: JsonPropertyName("deleted")] Guid[] Deleted);
+
+public sealed record JournalCheckpointRequest(
+    [property: JsonPropertyName("checkpoint")] DateTime Checkpoint);
