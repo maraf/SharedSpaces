@@ -12,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Journal;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -509,6 +510,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        ISystemClock systemClock,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
         IHttpClientFactory httpClientFactory,
@@ -564,7 +566,7 @@ public static class ItemEndpoints
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, configuration, journalOptions, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, systemClock, configuration, journalOptions, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
