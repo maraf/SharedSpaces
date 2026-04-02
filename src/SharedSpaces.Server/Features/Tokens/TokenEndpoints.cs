@@ -23,7 +23,8 @@ public static class TokenEndpoints
         AppDbContext db,
         IConfiguration configuration,
         HttpRequest httpRequest,
-        ISystemClock systemClock)
+        ISystemClock systemClock,
+        IGuidGenerator guidGenerator)
     {
         if (string.IsNullOrWhiteSpace(request.Pin))
         {
@@ -63,6 +64,7 @@ public static class TokenEndpoints
 
         var member = new SpaceMember
         {
+            Id = guidGenerator.NewGuid(),
             SpaceId = invitation.SpaceId,
             DisplayName = displayName,
             JoinedAt = systemClock.UtcNow,

@@ -36,6 +36,7 @@ public static class SharedLinkEndpoints
         HttpContext httpContext,
         AppDbContext db,
         ISystemClock systemClock,
+        IGuidGenerator guidGenerator,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -64,6 +65,8 @@ public static class SharedLinkEndpoints
 
         var link = new SharedLink
         {
+            Id = guidGenerator.NewGuid(),
+            Token = guidGenerator.NewGuid(),
             SpaceId = spaceId,
             ItemId = itemId,
             CreatedBy = memberId,

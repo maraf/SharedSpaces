@@ -53,7 +53,8 @@ public static class SpaceEndpoints
         CreateSpaceRequest request,
         AppDbContext db,
         IOptions<StorageOptions> storageOptions,
-        ISystemClock systemClock)
+        ISystemClock systemClock,
+        IGuidGenerator guidGenerator)
     {
         var trimmedName = request.Name?.Trim() ?? string.Empty;
 
@@ -84,6 +85,7 @@ public static class SpaceEndpoints
 
         var space = new Space
         {
+            Id = guidGenerator.NewGuid(),
             Name = trimmedName,
             MaxUploadSize = request.MaxUploadSize,
             CreatedAt = systemClock.UtcNow

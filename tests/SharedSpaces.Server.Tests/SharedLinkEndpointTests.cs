@@ -87,6 +87,22 @@ public class SharedLinkEndpointTests
     }
 
     [Fact]
+    public async Task CreateSharedLink_WithDeterministicTimeConfig_ReusesStableTokensAcrossRuns()
+    {
+        const string seededUtcNow = "2025-03-19T15:00:00Z";
+
+        await using var factory1 = new TestWebApplicationFactory(seededUtcNow);
+        using var client1 = factory1.CreateClient();
+        var firstRunToken = await CreateDeterministicSharedLinkTokenAsync(factory1, client1);
+
+        await using var factory2 = new TestWebApplicationFactory(seededUtcNow);
+        using var client2 = factory2.CreateClient();
+        var secondRunToken = await CreateDeterministicSharedLinkTokenAsync(factory2, client2);
+
+        firstRunToken.Should().Be(secondRunToken, "deterministic screenshot/test seeding should keep shared URLs stable across runs");
+    }
+
+    [Fact]
     public async Task CreateSharedLink_WithName_Returns201WithName()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -746,6 +762,27 @@ public class SharedLinkEndpointTests
     // ──────────────────────────────────────────────
     // HTTP helpers
     // ──────────────────────────────────────────────
+
+    private static async Task<Guid> CreateDeterministicSharedLinkTokenAsync(
+        TestWebApplicationFactory factory,
+        HttpClient client)
+    {
+        var space = await factory.CreateSpaceAsync("Stable Link Space");
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var item = await factory.CreateItemAsync(
+            space.Id,
+            member.Id,
+            contentType: "text",
+            content: "Stable shared content",
+            sharedAt: DateTime.UtcNow.AddMinutes(-5),
+            fileSize: 0);
+
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token);
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        return body.Token;
+    }
 
     private static async Task<HttpResponseMessage> CreateSharedLinkAsync(
         HttpClient client,
