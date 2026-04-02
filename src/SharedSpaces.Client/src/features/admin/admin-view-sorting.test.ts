@@ -2,6 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SpaceResponse } from './admin-api';
 
 // Mock the admin-api module (admin-view imports it for API calls)
+const adminApiMocks = vi.hoisted(() => ({
+  mockListSpaces: vi.fn().mockResolvedValue([]),
+  mockCreateSpace: vi.fn(),
+  mockCreateInvitation: vi.fn(),
+  mockDeleteInvitation: vi.fn(),
+  mockListInvitations: vi.fn().mockResolvedValue([]),
+  mockListMembers: vi.fn().mockResolvedValue([]),
+  mockRemoveMember: vi.fn(),
+  mockRevokeMember: vi.fn(),
+  mockUnrevokeMember: vi.fn(),
+}));
+
 vi.mock('./admin-api', () => ({
   AdminApiError: class extends Error {
     status: number;
@@ -10,15 +22,15 @@ vi.mock('./admin-api', () => ({
       this.status = status;
     }
   },
-  listSpaces: vi.fn().mockResolvedValue([]),
-  createSpace: vi.fn(),
-  createInvitation: vi.fn(),
-  deleteInvitation: vi.fn(),
-  listInvitations: vi.fn().mockResolvedValue([]),
-  listMembers: vi.fn().mockResolvedValue([]),
-  removeMember: vi.fn(),
-  revokeMember: vi.fn(),
-  unrevokeMember: vi.fn(),
+  listSpaces: adminApiMocks.mockListSpaces,
+  createSpace: adminApiMocks.mockCreateSpace,
+  createInvitation: adminApiMocks.mockCreateInvitation,
+  deleteInvitation: adminApiMocks.mockDeleteInvitation,
+  listInvitations: adminApiMocks.mockListInvitations,
+  listMembers: adminApiMocks.mockListMembers,
+  removeMember: adminApiMocks.mockRemoveMember,
+  revokeMember: adminApiMocks.mockRevokeMember,
+  unrevokeMember: adminApiMocks.mockUnrevokeMember,
 }));
 
 // Mock admin-url-storage (used in connectedCallback)
@@ -46,6 +58,9 @@ describe('AdminView — Alphabetical Space Sorting (Issue #96)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    adminApiMocks.mockListSpaces.mockResolvedValue([]);
+    adminApiMocks.mockListInvitations.mockResolvedValue([]);
+    adminApiMocks.mockListMembers.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -253,5 +268,55 @@ describe('AdminView — Alphabetical Space Sorting (Issue #96)', () => {
     expect(spaces.map((s) => s.name)).toEqual(['Alpha', 'Bravo', 'Charlie']);
     // Verify IDs follow the same sorted order
     expect(spaces.map((s) => s.id)).toEqual([spaceA.id, spaceB.id, spaceC.id]);
+  });
+
+  it('sorts loaded members by display name with stable tie-breakers', async () => {
+    createElement();
+    await element.updateComplete;
+
+    const space = makeSpace({ id: 'space-a', name: 'Alpha' });
+    (element as any).adminServerUrl = 'http://localhost:5165';
+    (element as any).adminSecret = 'secret';
+    (element as any).setSpaces([space]);
+
+    adminApiMocks.mockListMembers.mockResolvedValueOnce([
+      { id: '2', displayName: 'zebra', joinedAt: '2025-03-19T12:05:00Z', isRevoked: false, itemCount: 1 },
+      { id: '1', displayName: 'Alpha', joinedAt: '2025-03-19T12:10:00Z', isRevoked: false, itemCount: 2 },
+      { id: '3', displayName: 'alpha', joinedAt: '2025-03-19T12:00:00Z', isRevoked: true, itemCount: 0 },
+    ]);
+
+    await (element as any).loadSpaceCollections(space.id, 'http://localhost:5165', 'secret', {
+      members: true,
+      invitations: false,
+    });
+
+    expect((element as any).spaceCardState[space.id].members.map((member: any) => member.id)).toEqual(['3', '1', '2']);
+  });
+
+  it('sorts loaded invitations by id', async () => {
+    createElement();
+    await element.updateComplete;
+
+    const space = makeSpace({ id: 'space-a', name: 'Alpha' });
+    (element as any).adminServerUrl = 'http://localhost:5165';
+    (element as any).adminSecret = 'secret';
+    (element as any).setSpaces([space]);
+
+    adminApiMocks.mockListInvitations.mockResolvedValueOnce([
+      { id: 'inv-c', spaceId: space.id },
+      { id: 'inv-a', spaceId: space.id },
+      { id: 'inv-b', spaceId: space.id },
+    ]);
+
+    await (element as any).loadSpaceCollections(space.id, 'http://localhost:5165', 'secret', {
+      members: false,
+      invitations: true,
+    });
+
+    expect((element as any).spaceCardState[space.id].invitations.map((invitation: any) => invitation.id)).toEqual([
+      'inv-a',
+      'inv-b',
+      'inv-c',
+    ]);
   });
 });

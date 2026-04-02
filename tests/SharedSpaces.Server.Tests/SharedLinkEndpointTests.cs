@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -53,6 +54,52 @@ public class SharedLinkEndpointTests
         body.CreatedBy.Should().Be(member.Id);
         body.CreatedAt.Should().BeOnOrAfter(beforeRequest.AddSeconds(-2));
         body.Name.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateSharedLink_WithDeterministicTimeConfig_UsesConfiguredTimestamp()
+    {
+        const string seededUtcNow = "2025-03-19T15:00:00Z";
+        var expectedTimestamp = DateTimeOffset.Parse(seededUtcNow).UtcDateTime;
+        await using var factory = new TestWebApplicationFactory(seededUtcNow);
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync("Link Space");
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text", content: "Hello shared world",
+            sharedAt: DateTime.UtcNow.AddMinutes(-5), fileSize: 0);
+
+        var response = await CreateSharedLinkAsync(
+            client,
+            space.Id,
+            item.Id,
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        body.CreatedAt.Should().Be(expectedTimestamp);
+
+        var savedLink = await factory.WithDbContextAsync(db => db.SharedLinks.SingleAsync(link => link.Id == body.Id));
+        savedLink.CreatedAt.Should().Be(expectedTimestamp);
+    }
+
+    [Fact]
+    public async Task CreateSharedLink_WithDeterministicTimeConfig_ReusesStableTokensAcrossRuns()
+    {
+        const string seededUtcNow = "2025-03-19T15:00:00Z";
+
+        await using var factory1 = new TestWebApplicationFactory(seededUtcNow);
+        using var client1 = factory1.CreateClient();
+        var firstRunToken = await CreateDeterministicSharedLinkTokenAsync(factory1, client1);
+
+        await using var factory2 = new TestWebApplicationFactory(seededUtcNow);
+        using var client2 = factory2.CreateClient();
+        var secondRunToken = await CreateDeterministicSharedLinkTokenAsync(factory2, client2);
+
+        firstRunToken.Should().Be(secondRunToken, "deterministic screenshot/test seeding should keep shared URLs stable across runs");
     }
 
     [Fact]
@@ -716,8 +763,33 @@ public class SharedLinkEndpointTests
     // HTTP helpers
     // ──────────────────────────────────────────────
 
+    private static async Task<Guid> CreateDeterministicSharedLinkTokenAsync(
+        TestWebApplicationFactory factory,
+        HttpClient client)
+    {
+        var space = await factory.CreateSpaceAsync("Stable Link Space");
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var item = await factory.CreateItemAsync(
+            space.Id,
+            member.Id,
+            contentType: "text",
+            content: "Stable shared content",
+            sharedAt: DateTime.UtcNow.AddMinutes(-5),
+            fileSize: 0);
+
+        var response = await CreateSharedLinkAsync(client, space.Id, item.Id, token);
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SharedLinkResponse>(response);
+        return body.Token;
+    }
+
     private static async Task<HttpResponseMessage> CreateSharedLinkAsync(
-        HttpClient client, Guid spaceId, Guid itemId, string? token = null, string? name = null)
+        HttpClient client,
+        Guid spaceId,
+        Guid itemId,
+        string? token = null,
+        string? name = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"/v1/spaces/{spaceId}/items/{itemId}/share");
@@ -817,7 +889,7 @@ public class SharedLinkEndpointTests
     // Test infrastructure
     // ──────────────────────────────────────────────
 
-    private sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class TestWebApplicationFactory(string? seededUtcNow = null) : WebApplicationFactory<Program>
     {
         public const string AdminSecret = "test-admin-secret";
         public const string JwtSigningKey = "test-signing-key-1234567890abcdef";
@@ -836,7 +908,8 @@ public class SharedLinkEndpointTests
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
                     ["Storage:BasePath"] = "./artifacts/storage-tests",
-                    ["Storage:MaxSpaceQuotaBytes"] = "104857600"
+                    ["Storage:MaxSpaceQuotaBytes"] = "104857600",
+                    [SystemClockFactory.SeededUtcNowConfigKey] = seededUtcNow
                 });
             });
 

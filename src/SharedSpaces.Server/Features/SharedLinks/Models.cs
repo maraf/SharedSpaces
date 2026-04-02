@@ -1,7 +1,6 @@
 namespace SharedSpaces.Server.Features.SharedLinks;
 
-public sealed record CreateSharedLinkRequest(
-    string? Name);
+public sealed record CreateSharedLinkRequest(string? Name);
 
 public sealed record SharedLinkResponse(
     Guid Id,

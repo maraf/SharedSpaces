@@ -4,6 +4,7 @@ using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Features.Items;
 using SharedSpaces.Server.Features.Journal;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.SharedLinks;
 using SharedSpaces.Server.Features.Spaces;
 using SharedSpaces.Server.Features.Tokens;
@@ -16,6 +17,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddPersistence(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddJwtAuthentication(builder.Configuration);
+builder.Services.AddSingleton<IAdminSecretValidator, AdminSecretValidator>();
+builder.Services.AddSingleton<ISystemClock>(_ => SystemClockFactory.Create(builder.Configuration));
+builder.Services.AddSingleton<IInvitationPinGenerator>(
+    _ => InvitationPinGeneratorFactory.Create(builder.Configuration));
+builder.Services.AddSingleton<IGuidGenerator>(_ => GuidGeneratorFactory.Create(builder.Configuration));
 builder.Services.AddScoped<AdminAuthenticationFilter>();
 builder.Services.AddOptions<StorageOptions>()
     .Bind(builder.Configuration.GetSection("Storage"))

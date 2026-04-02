@@ -2,6 +2,7 @@ import { test, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deflateSync } from 'node:zlib';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9,6 +10,7 @@ const SERVER_URL = process.env.SERVER_URL || 'http://localhost:5165';
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
+const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
 
 interface ViewportSpec {
   name: string;
@@ -35,6 +37,61 @@ async function apiCall(url: string, options: RequestInit = {}) {
     throw new Error(`API ${options.method ?? 'GET'} ${url} → ${res.status}: ${body}`);
   }
   return res.json();
+}
+
+/** Generate a visible test PNG with a gradient pattern */
+function generateTestPng(width: number, height: number): Uint8Array {
+  const crcTable = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crcTable[n] = c;
+  }
+  function crc32(buf: Uint8Array): number {
+    let crc = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ buf[i]) & 0xff];
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+  function pngChunk(type: string, data: Uint8Array): Uint8Array {
+    const out = new Uint8Array(4 + 4 + data.length + 4);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, data.length);
+    out.set(new TextEncoder().encode(type), 4);
+    out.set(data, 8);
+    view.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+    return out;
+  }
+  const ihdr = new Uint8Array(13);
+  const ihdrView = new DataView(ihdr.buffer);
+  ihdrView.setUint32(0, width);
+  ihdrView.setUint32(4, height);
+  ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
+  const raw = new Uint8Array(height * (1 + width * 3));
+  for (let y = 0; y < height; y++) {
+    const rowOff = y * (1 + width * 3);
+    raw[rowOff] = 0; // filter: none
+    for (let x = 0; x < width; x++) {
+      const off = rowOff + 1 + x * 3;
+      raw[off] = Math.floor(59 + 196 * (x / width));
+      raw[off + 1] = Math.floor(130 + 70 * (y / height));
+      raw[off + 2] = Math.floor(246 - 90 * (x / width));
+    }
+  }
+  const compressed = deflateSync(Buffer.from(raw));
+  const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const chunks = [sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', new Uint8Array(compressed)), pngChunk('IEND', new Uint8Array(0))];
+  const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+  const png = new Uint8Array(totalLen);
+  let pos = 0;
+  for (const c of chunks) { png.set(c, pos); pos += c.length; }
+  return png;
+}
+
+/** Build a /shared/{segment} URL for a shared-item link */
+function buildTestShareUrl(shareToken: string, serverUrl: string): string {
+  const payload = `token=${encodeURIComponent(shareToken)}&api=${encodeURIComponent(serverUrl)}`;
+  const segment = Buffer.from(payload).toString('base64url');
+  return `${CLIENT_URL}/shared/${segment}`;
 }
 
 async function seedSpace(name: string) {
@@ -86,6 +143,7 @@ async function seedSpace(name: string) {
   }
 
   // Add sample text items — enough to overflow and show the scrollbar
+  let firstTextItemId = '';
   for (const content of [
     'Welcome to SharedSpaces! 🚀',
     'This is a shared note visible to all members.',
@@ -97,6 +155,7 @@ async function seedSpace(name: string) {
     'Quick thought: we should add rate limiting before launch.',
   ]) {
     const itemId = crypto.randomUUID();
+    if (!firstTextItemId) firstTextItemId = itemId;
     const form = new FormData();
     form.append('id', itemId);
     form.append('contentType', 'text');
@@ -139,18 +198,7 @@ async function seedSpace(name: string) {
   });
 
   // Add a PNG image file item (for image preview screenshot)
-  // Minimal 1×1 red PNG
-  const pngBytes = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-    0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
+  const pngBytes = generateTestPng(200, 150);
   const pngItemId = crypto.randomUUID();
   const pngForm = new FormData();
   pngForm.append('id', pngItemId);
@@ -162,7 +210,7 @@ async function seedSpace(name: string) {
     body: pngForm,
   });
 
-  return { space, invitation, token: aliceToken.token };
+  return { space, invitation, token: aliceToken.token, firstTextItemId, pngItemId };
 }
 
 /** Inject tokens into localStorage so the pill bar shows joined spaces */
@@ -184,13 +232,24 @@ async function navigateToAdminSignedIn(page: Page) {
   await page.locator('admin-view button[type="submit"]').click();
 
   await page.waitForFunction(
-    () => document.body.textContent?.match(/Members\s*\(\d+\)/),
+    () => {
+      const adminView = document.querySelector('admin-view') as any;
+      if (!adminView?.spaces?.length) {
+        return false;
+      }
+
+      const states = Object.values(adminView.spaceCardState ?? {});
+      return (
+        states.length === adminView.spaces.length
+        && states.every((state: any) => !state.isLoadingMembers && !state.isLoadingInvitations)
+      );
+    },
     { timeout: 10_000 },
   );
   await page.waitForTimeout(500);
 }
 
-async function capture(page: Page, name: string, vp: ViewportSpec, { fullPage = true } = {}) {
+async function capture(page: Page, name: string, vp: ViewportSpec, { fullPage = false } = {}) {
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await page.waitForTimeout(300);
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
@@ -202,10 +261,58 @@ async function capture(page: Page, name: string, vp: ViewportSpec, { fullPage = 
 test.describe('Screenshot Capture', () => {
   let tokenMap: Record<string, string>;
   let invitationString: string;
+  let emptySpaceTokenMap: Record<string, string>;
+  let shareTextUrl: string;
+  let shareFileUrl: string;
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript((isoNow) => {
+      const fixedTime = new Date(isoNow).valueOf();
+      const RealDate = Date;
+
+      class FixedDate extends RealDate {
+        constructor(...args: any[]) {
+          if (args.length === 0) {
+            super(fixedTime);
+            return;
+          }
+
+          super(...args);
+        }
+
+        static now() {
+          return fixedTime;
+        }
+      }
+
+      FixedDate.UTC = RealDate.UTC;
+      FixedDate.parse = RealDate.parse;
+      // @ts-expect-error Deterministic screenshots require overriding the global Date constructor in-page.
+      globalThis.Date = FixedDate;
+    }, FROZEN_SCREENSHOT_NOW);
+  });
 
   test.beforeAll(async () => {
-    const space1 = await seedSpace('Project Alpha');
+    const emptySpace = await apiCall(`${SERVER_URL}/v1/spaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
+      body: JSON.stringify({ name: 'Empty Space' }),
+    });
+    const emptyInv = await apiCall(`${SERVER_URL}/v1/spaces/${emptySpace.id}/invitations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
+      body: JSON.stringify({ clientAppUrl: CLIENT_URL }),
+    });
+    const emptyPin = emptyInv.invitationString.split('|').pop()!;
+    const emptyToken = await apiCall(`${SERVER_URL}/v1/tokens`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: emptyPin, displayName: 'Alice' }),
+    });
+    emptySpaceTokenMap = { [`${SERVER_URL}:${emptySpace.id}`]: emptyToken.token };
+
     const space2 = await seedSpace('Design Team');
+    const space1 = await seedSpace('Project Alpha');
 
     invitationString = space1.invitation.invitationString;
 
@@ -213,7 +320,36 @@ test.describe('Screenshot Capture', () => {
       [`${SERVER_URL}:${space1.space.id}`]: space1.token,
       [`${SERVER_URL}:${space2.space.id}`]: space2.token,
     };
-    console.log(`Seeded spaces: ${space1.space.id}, ${space2.space.id}`);
+
+    // Create shared links for shared-item-view screenshots
+    const textShareLink = await apiCall(
+      `${SERVER_URL}/v1/spaces/${space1.space.id}/items/${space1.firstTextItemId}/share/`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${space1.token}` },
+        body: JSON.stringify({ name: 'Demo text share' }),
+      },
+    );
+    shareTextUrl = buildTestShareUrl(textShareLink.token, SERVER_URL);
+
+    const fileShareLink = await apiCall(
+      `${SERVER_URL}/v1/spaces/${space1.space.id}/items/${space1.pngItemId}/share/`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${space1.token}` },
+        body: JSON.stringify({ name: 'Demo image share' }),
+      },
+    );
+    shareFileUrl = buildTestShareUrl(fileShareLink.token, SERVER_URL);
+
+    // Create an unused invitation for admin invitations modal screenshot
+    await apiCall(`${SERVER_URL}/v1/spaces/${space1.space.id}/invitations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': ADMIN_SECRET },
+      body: JSON.stringify({ clientAppUrl: CLIENT_URL }),
+    });
+
+    console.log(`Seeded spaces: ${space1.space.id}, ${space2.space.id}, ${emptySpace.id} (empty)`);
   });
 
   for (const vp of Viewports) {
@@ -275,7 +411,13 @@ test.describe('Screenshot Capture', () => {
       // Click the image file item to open preview
       await page.getByRole('button', { name: 'photo.png' }).click();
       await page.waitForSelector('button[aria-label="Close preview"]', { timeout: 5_000 });
-      await page.waitForTimeout(500);
+      // Wait for the image to actually load
+      await page.waitForSelector('img[alt="photo.png"]', { state: 'visible', timeout: 5_000 });
+      await page.waitForFunction(() => {
+        const img = document.querySelector('img[alt="photo.png"]') as HTMLImageElement;
+        return img && img.complete && img.naturalWidth > 0;
+      }, { timeout: 5_000 });
+      await page.waitForTimeout(300);
       await capture(page, 'space-file-preview-image', vp, { fullPage: false });
 
       // Close preview
@@ -445,11 +587,15 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
 
-      // Click the "Members (N)" button on the first space card to open the modal
       const membersButton = page.locator('button', { hasText: /Members\s*\(\d+\)/ }).first();
       await membersButton.click();
-      await page.waitForSelector('[role="dialog"]');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(() => {
+        const adminView = document.querySelector('admin-view') as any;
+        return adminView?.activeModal?.type === 'members'
+          && adminView?.spaceCardState?.[adminView.activeModal.spaceId]
+          && !adminView.spaceCardState[adminView.activeModal.spaceId].isLoadingMembers;
+      }, { timeout: 10_000 });
+      await page.waitForTimeout(300);
       await capture(page, 'admin-members', vp);
     });
 
@@ -557,7 +703,6 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
 
-      // Click the invite button on the first space card to open the modal
       const inviteButton = page.locator('button', { hasText: /Invite/ }).first();
       await inviteButton.click();
       await page.waitForSelector('[role="dialog"]');
@@ -577,9 +722,195 @@ test.describe('Screenshot Capture', () => {
         { timeout: 10_000 },
       );
       await page.waitForSelector('img[alt*="QR" i]', { timeout: 10_000 });
+      await page.waitForFunction(() => {
+        const image = document.querySelector('img[alt*="QR" i]') as HTMLImageElement | null;
+        return !!image && image.complete && image.naturalWidth > 0;
+      }, { timeout: 10_000 });
       await page.waitForTimeout(500);
 
       await capture(page, 'admin-invite', vp);
+    });
+
+    // --- New screenshot tests for uncaptured UI states ---
+
+    test(`shared-item-view text - ${vp.name}`, async ({ page }) => {
+      await page.goto(shareTextUrl);
+      await page.waitForSelector('shared-item-view');
+      await page.waitForFunction(
+        () => document.querySelector('.animate-spin') === null
+          && document.querySelector('shared-item-view p.whitespace-pre-wrap') !== null,
+        { timeout: 10_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'shared-item-text', vp);
+    });
+
+    test(`shared-item-view file - ${vp.name}`, async ({ page }) => {
+      await page.goto(shareFileUrl);
+      await page.waitForSelector('shared-item-view');
+      await page.waitForFunction(
+        () => {
+          if (document.querySelector('.animate-spin')) return false;
+          const img = document.querySelector('shared-item-view img') as HTMLImageElement | null;
+          return !img || (img.complete && img.naturalWidth > 0);
+        },
+        { timeout: 10_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'shared-item-file', vp);
+    });
+
+    test(`shared-item-view error - ${vp.name}`, async ({ page }) => {
+      await page.goto(`${CLIENT_URL}/shared/invalidbase64segment`);
+      await page.waitForFunction(
+        () => document.body.textContent?.includes('Invalid share link'),
+        { timeout: 10_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'shared-item-error', vp);
+    });
+
+    test(`space view - empty state - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, emptySpaceTokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForFunction(
+        () => document.body.textContent?.includes('No items shared yet'),
+        { timeout: 10_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'space-empty', vp);
+    });
+
+    test(`space view - text modal - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+      // Click the text content of the first text item to open the full-text modal
+      const textContent = page.locator('space-view p[title="Click to view full text"]').first();
+      await textContent.click();
+      await page.waitForFunction(
+        () => document.querySelector('h3')?.textContent?.includes('Full Text'),
+        { timeout: 5_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'space-text-modal', vp);
+    });
+
+    test(`admin view - login form - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Navigate to admin view — shows login form before authentication
+      const adminBtns = page.locator('button[title="Admin panel"]');
+      const mobileBtn = adminBtns.first();
+      await (await mobileBtn.isVisible() ? mobileBtn : adminBtns.nth(1)).click();
+      await page.waitForSelector('admin-view');
+      await page.waitForTimeout(500);
+      await capture(page, 'admin-login', vp);
+    });
+
+    test(`admin view - invitations list - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await navigateToAdminSignedIn(page);
+      const invitationsButton = page.locator('button', { hasText: /Invitations\s*\(\d+\)/ }).first();
+      await invitationsButton.click();
+      await page.waitForFunction(() => {
+        const adminView = document.querySelector('admin-view') as any;
+        return adminView?.activeModal?.type === 'invitations'
+          && adminView?.spaceCardState?.[adminView.activeModal.spaceId]
+          && !adminView.spaceCardState[adminView.activeModal.spaceId].isLoadingInvitations;
+      }, { timeout: 10_000 });
+      await page.waitForTimeout(300);
+      await capture(page, 'admin-invitations', vp);
+    });
+
+    test(`join view - error state - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Navigate to join view via the "+" button
+      await page.click('button:has-text("+")');
+      await page.waitForSelector('join-view');
+      await page.waitForTimeout(500);
+      // Switch to manual entry mode
+      await page.click('button:has-text("Enter manually")');
+      // Fill in invalid credentials and submit
+      await page.fill('#serverUrl', SERVER_URL);
+      await page.fill('#pin', '000000');
+      await page.fill('#displayName', 'TestUser');
+      await page.click('button:has-text("Join Space")');
+      // Wait for error message to appear
+      await page.waitForFunction(
+        () => document.querySelector('.text-red-400') !== null,
+        { timeout: 10_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'join-error', vp);
+    });
+
+    test(`pending shares view - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      // Seed IndexedDB with pending share items
+      await page.evaluate(() => {
+        return new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open('shared-spaces-db', 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains('pending-shares'))
+              db.createObjectStore('pending-shares', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('offline-queue'))
+              db.createObjectStore('offline-queue', { keyPath: 'id' });
+          };
+          request.onsuccess = () => {
+            const db = request.result;
+            const tx = db.transaction('pending-shares', 'readwrite');
+            tx.objectStore('pending-shares').put({
+              id: 'pending-text-1',
+              type: 'text',
+              content: 'Check out this recipe: https://example.com/recipes/pasta-carbonara',
+              timestamp: Date.now(),
+            });
+            tx.objectStore('pending-shares').put({
+              id: 'pending-file-1',
+              type: 'file',
+              fileName: 'vacation-photo.jpg',
+              fileType: 'image/jpeg',
+              fileSize: 2457600,
+              timestamp: Date.now() - 60000,
+            });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          };
+          request.onerror = () => reject(request.error);
+        });
+      });
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.waitForTimeout(500);
+      // Click the pending shares pill (should appear when count > 0)
+      const pendingPill = page.locator('[data-testid="pending-shares-pill"], [data-testid="pending-shares-bar"]').first();
+      await pendingPill.waitFor({ state: 'visible', timeout: 5_000 });
+      await pendingPill.click();
+      await page.waitForFunction(
+        () => document.body.textContent?.includes('Shared from other apps'),
+        { timeout: 5_000 },
+      );
+      await page.waitForTimeout(500);
+      await capture(page, 'pending-shares', vp);
     });
   }
 
@@ -603,8 +934,28 @@ test.describe('Screenshot Capture', () => {
     await kebabBtn.waitFor({ state: 'visible', timeout: 10_000 });
     await kebabBtn.click();
     // Wait for the dropdown menu to appear
-    await page.waitForSelector('[data-kebab-menu] [role="menu"]', { timeout: 5_000 });
+    await page.waitForSelector('[data-kebab-menu] div.absolute', { timeout: 5_000 });
     await page.waitForTimeout(300);
     await capture(page, 'space-kebab-menu', mobile);
+  });
+
+  test(`mobile bottom sheet open - ${mobile.name}`, async ({ page }) => {
+    await page.goto(CLIENT_URL);
+    await injectTokens(page, tokenMap);
+    await page.reload();
+    await page.waitForSelector('app-shell');
+    await page.setViewportSize({ width: mobile.width, height: mobile.height });
+    await page.waitForTimeout(500);
+    // Open the bottom sheet by clicking the bottom bar
+    const bottomBar = page.locator('[data-testid="bottom-bar"]');
+    await bottomBar.waitFor({ state: 'visible', timeout: 5_000 });
+    await bottomBar.click();
+    // Wait for the sheet to open
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="bottom-sheet"]')?.classList.contains('bottom-sheet-open'),
+      { timeout: 5_000 },
+    );
+    await page.waitForTimeout(500);
+    await capture(page, 'mobile-bottom-sheet', mobile);
   });
 });

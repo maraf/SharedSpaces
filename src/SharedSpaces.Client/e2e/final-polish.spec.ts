@@ -32,8 +32,8 @@ async function createSpaceAndJoin(name: string) {
     body: JSON.stringify({ clientAppUrl: CLIENT_URL }),
   });
 
-  const pin = invitation.invitationString.split('|')[2];
-  const tokenRes = await apiCall(`${SERVER_URL}/v1/spaces/${space.id}/tokens`, {
+  const pin = invitation.invitationString.split('|').pop()!;
+  const tokenRes = await apiCall(`${SERVER_URL}/v1/tokens`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin, displayName: 'Alice' }),

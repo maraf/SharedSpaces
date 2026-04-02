@@ -145,6 +145,16 @@ describe('idb-storage', () => {
       expect(spaceB[0].id).toBe('q-3');
     });
 
+    it('getOfflineQueueForSpace returns items newest-first with stable tie-breakers', async () => {
+      await addToOfflineQueue({ ...item1, id: 'q-9', itemId: 'item-9', timestamp: 1000 });
+      await addToOfflineQueue({ ...item1, id: 'q-1', itemId: 'item-1', timestamp: 1000 });
+      await addToOfflineQueue({ ...item2, id: 'q-2', itemId: 'item-2', timestamp: 2000 });
+
+      const queue = await getOfflineQueueForSpace('http://server1', 'space-A');
+
+      expect(queue.map((item) => item.id)).toEqual(['q-2', 'q-1', 'q-9']);
+    });
+
     it('getOfflineQueueForSpace returns empty for unknown space', async () => {
       await addToOfflineQueue(item1);
       expect(await getOfflineQueueForSpace('http://other', 'space-X')).toEqual([]);

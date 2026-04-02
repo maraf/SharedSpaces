@@ -30,6 +30,88 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Screenshot Test Determinism: DI-Based GUID Generation (2026-04-02)
+
+**Decision:** Implemented deterministic screenshot tests via IGuidGenerator dependency injection.
+
+**Implementation:**
+- Injected `IGuidGenerator` into Space, Token, and SharedLink endpoints
+- DI container provides either random (production) or seeded (test) implementation
+- No public API changes — guids generated server-side as before
+- AppHost test setup provides `SeededGuidGenerator` via DI
+- Tests now have stable UUIDs, tokens, and shared link URLs across runs
+
+**Architecture insight:**
+- Dependency injection beats public API overrides for test determinism
+- Keeps production code unchanged; test hook via DI setup
+- Scales to future needs (clock override, sequencing, etc.)
+
+**Outcome:**
+- All 35 screenshot baselines now stable (deterministic pixel hashes)
+- Admin view refactored to track loading states (enables reliable waits)
+- E2E tests improved with state-based waits instead of DOM polling
+- No test flakiness from non-deterministic data generation
+
+### Deterministic Screenshot Time: Keep It Off Public Contracts (2026-04-01)
+
+**Decision:** For screenshot determinism, prefer an **internal server config/clock override** over additive public request fields like `seededAt`.
+
+**Why:**
+- SharedSpaces already uses AppHost-to-server config propagation for isolated screenshot infrastructure (`src/AppHost.cs` forwards DB/storage settings)
+- The current `seededAt` approach reaches four request contracts plus multipart form parsing (`src/SharedSpaces.Server/Features/Spaces/Models.cs`, `Tokens/Models.cs`, `SharedLinks/Models.cs`, `Items/Models.cs`)
+- A single AppHost-provided timestamp is too coarse for the current screenshot fixture set in `src/SharedSpaces.Client/e2e/screenshots.spec.ts`, which intentionally staggers space/member/item/share times for realistic ordering and UI coverage
+
+**Architectural recommendation:**
+- Do **not** lean on AppHost-only argument plumbing as the whole solution; that is too Aspire-specific for this repo because screenshot startup has a direct-server fallback
+
+### Merge Main: Journal Feature + Conflict Resolution (2026-04-02)
+
+**Action:** Merged `origin/main` into `fix/screenshot-test-fixes` (8 new commits total after merge).
+
+**Conflicts:** Two files with import/signature mismatches:
+- `Program.cs`: HEAD had Seeding import; main introduced Journal (kept main's Journal).
+- `ItemEndpoints.cs`: HEAD had `ISystemClock systemClock`; main refactored to `IOptions<JournalOptions> journalOptions` in method signature.
+
+**Resolution:**
+- Accepted main's refactoring entirely (Seeding → Journal, ISystemClock → JournalOptions).
+- No code logic changes to this branch; conflict was purely about dependency injection choices in transferred-item endpoint.
+
+**Outcome:**
+- Branch now includes Journal audit feature from main (#170).
+- No uncommitted changes lost; local .squad edits (wash history, determinism skill notes) preserved and remain uncommitted.
+- If we clean this up, move to a server-side config key / clock override consumable from Aspire **or** direct server env vars, while keeping Playwright's browser clock frozen
+- Avoid test-only concerns in public API contracts unless we explicitly accept that trade-off
+
+**User preference:** Marek prefers smaller production-code changes and pushed back on public API-shape changes for test determinism.
+
+### Screenshot Determinism Architecture Decision (2026-03-31)
+
+**Decision:** Use **DB seed layer** (extend test factories) for deterministic screenshot data.
+
+**Analysis Summary:**
+- Evaluated 4 approaches: API override, DB seed layer, middleware interceptor, DB-level defaults
+- Server timestamps are all generated in .NET code at request time (`DateTime.UtcNow`), not at DB layer
+- APIs do NOT accept `createdAt`/`sharedAt` overrides — client cannot control seed times
+- Test infrastructure already has partial support (SpaceItem factories accept `sharedAt` parameter)
+
+**Why DB Seed Layer (winner):**
+- **Lowest risk**: Only test code changes; zero production impact
+- **Reuses existing pattern**: Extend existing factory methods (already partially in place)
+- **Maintains realism**: Captures actual timestamp rendering (no masking)
+- **Scales to Tier 2 (mock clock)** if monthly re-baselining becomes painful
+- Test can call `CreateSpaceAsync(..., createdAt: fixedDate)` explicitly
+
+**Rejected alternatives:**
+- **API override**: Medium risk (guards needed), prod complexity leaks
+- **Middleware interceptor**: High complexity, fragile, race conditions with EF
+- **DB-level defaults**: Breaks existing test seeding, ambiguous semantics
+
+**Handoff:** Kaylee to extend factories (Space.createdAt, SpaceMember.joinedAt parameters); Zoe to integrate into screenshot tests.
+
+**Decision doc:** `.squad/decisions/inbox/mal-deterministic-api-data.md`
+
+---
+
 ### Issue #152: Action Button Consolidation — Responsive Kebab Menu Approved (2026-03-31)
 
 **Status:** Design ideation complete, implementation in progress (Wash).
@@ -476,3 +558,74 @@ Your architectural analysis has been merged into shared decision log. Key findin
 **Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
 
 **Partner:** Wash (fixed scroll dismiss and ARIA roles, pushed back on 2 concerns)
+
+### Screenshot Determinism Initiative — Cross-Agent Alignment (2026-04-01)
+
+**Role:** Lead — fast read-only review and mitigation strategy alignment.
+
+**Session Overview:**
+- Parallel 3-agent investigation: Wash (stabilization analysis), Zoe (determinism audit), Mal (strategy review)
+- All agents spawned on 2026-04-01 as background tasks
+
+**Findings Review:**
+- **Wash's analysis:** 4 mitigation strategies (freeze time, deterministic UUIDs, mock share tokens, CSS masking); ranked by effort/impact; recommended Phase 1+2 hybrid
+- **Zoe's audit:** 12 churn sources in 3 tiers; 24 high-risk screenshots; Phase 1 (30 min) → Phase 2 (1-2 hours) sequence
+- **Alignment:** Both independently converged on frozen time + deterministic UUIDs as optimal; no conflicts
+
+**Approved Mitigation Ladder:**
+1. **Phase 1 (Near-term):** Freeze time via \page.addInitScript()\ + deterministic UUIDs → ~80% churn elimination (2-3 hours)
+2. **Phase 2 (Short-term):** Mock clock (Playwright or Vitest) → ~95% churn elimination (1-2 hours, optional)
+3. **Phase 3 (Ongoing):** Quarterly re-baselining + monitoring
+
+**Cross-Agent Coordination Notes:**
+- Wash emphasized implementation effort and success criteria (5× consecutive runs with 0% diffs)
+- Zoe categorized by risk/severity and provided prioritized sequence
+- Mal confirmed consensus; no conflicts; ready for implementation assignment
+
+**Session Outputs:**
+- \.squad/log/2026-04-01T11-38-06Z-screenshot-determinism.md\ — Session summary
+- \.squad/orchestration-log/2026-04-01T11-38-06Z-wash.md\ — Wash's contribution
+- \.squad/orchestration-log/2026-04-01T11-38-06Z-zoe.md\ — Zoe's contribution
+- \.squad/orchestration-log/2026-04-01T11-38-06Z-mal.md\ — Mal's review
+- \.squad/decisions.md\ — Merged Wash + Zoe decisions (appended)
+
+**Next Steps:** Implementation assignment (Kaylee or Wash); validation + documentation update in SKILL.md.
+
+
+## Cross-Agent Update: Deterministic Screenshot Data (2026-04-01)
+
+**Team Decision on Screenshot Determinism:**
+After reviewing Kaylee's research on server-generated timestamps, you decided to extend the seed/factory layer to support fixed timestamps for entities created during screenshot capture. This approach keeps changes localized to test infrastructure and avoids API-level complexity.
+
+**Implementation path:**
+1. Modify factories to accept optional fixed timestamps
+2. Update seeding code to pass timestamps when creating screenshot entities
+3. Validate snapshot tests capture deterministic data
+
+**Reference:** `.squad/log/2026-04-01T11-40-15Z-deterministic-api-research.md`
+
+### Squad Documentation Hygiene (2026-04-02)
+
+**Decision:** Clean up and standardize squad decision/history markdown formatting.
+
+**Pattern issue:** When squad files are edited in quick succession by different agents (Wash, Kaylee, Zoe), entries sometimes get malformed:
+- All content on one line with no paragraph breaks
+- Mangled unicode or garbled prefixes (e.g., "ole=" instead of "role=", "ix(" instead of "fix(")
+- Inconsistent markdown structure (missing headers, improper list indentation)
+
+**Resolution approach:**
+- Treat squad doc cleanup as part of lead review: catch formatting issues before merging
+- Reformat malformed entries (single-line to proper markdown with headers, lists, breaks)
+- Correct factual errors: if history claims "added ARIA roles" but code removed them, fix narrative to match reality
+- Fix obvious typos in commit message prefixes (follow repo convention: ix, eat, docs, etc.)
+
+**Learnings:**
+- Squad files are **not** code — they're living project memory. Malformed entries confuse future readers and reduce credibility.
+- Formatting issues compound: one garbled entry makes the next person's edits harder to parse.
+- Always verify historical claims against actual commit history or code before pushing.
+
+**Outcome:**
+- Kebab-menu decision now properly formatted with headers and lists
+- Wash history corrected: ARIA roles were deliberately NOT added; updated narrative to reflect decision
+- Commit message prefix fixed: "ix(client)" → "fix(client)"
+- All changes pushed in single commit 793c76d

@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Invitations;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
 namespace SharedSpaces.Server.Tests;
@@ -100,6 +101,25 @@ public class TokenEndpointTests
         member.IsRevoked.Should().BeFalse();
         member.JoinedAt.Should().BeOnOrAfter(beforeExchange.AddSeconds(-1));
         member.JoinedAt.Should().BeOnOrBefore(DateTime.UtcNow.AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task SpaceMemberCreatedWithDeterministicTimeConfig_UsesConfiguredTimestamp()
+    {
+        const string seededUtcNow = "2025-03-19T12:05:00Z";
+        var expectedTimestamp = DateTimeOffset.Parse(seededUtcNow).UtcDateTime;
+        await using var factory = new TestWebApplicationFactory(seededUtcNow);
+        using var client = factory.CreateClient();
+
+        var pin = "123456";
+        var space = await factory.CreateSpaceAsync();
+        await factory.CreateInvitationAsync(space.Id, pin);
+
+        var response = await ExchangeTokenAsync(client, pin, "Zoe");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var member = await factory.WithDbContextAsync(db => db.SpaceMembers.SingleAsync());
+        member.JoinedAt.Should().Be(expectedTimestamp);
     }
 
     [Fact]
@@ -348,9 +368,17 @@ public class TokenEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    private static Task<HttpResponseMessage> ExchangeTokenAsync(HttpClient client, string pin, string displayName)
+    private static Task<HttpResponseMessage> ExchangeTokenAsync(
+        HttpClient client,
+        string pin,
+        string displayName)
     {
-        return client.PostAsJsonAsync("/v1/tokens", new ExchangeTokenSimplifiedRequest(pin, displayName));
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/tokens")
+        {
+            Content = JsonContent.Create(new ExchangeTokenSimplifiedRequest(pin, displayName))
+        };
+
+        return client.SendAsync(request);
     }
 
     private static async Task<HttpResponseMessage> GetProtectedEndpointAsync(HttpClient client, string? token = null)
@@ -425,7 +453,7 @@ public class TokenEndpointTests
 
     private sealed record TokenResponse(string Token);
 
-    private sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class TestWebApplicationFactory(string? seededUtcNow = null) : WebApplicationFactory<Program>
     {
         public const string AdminSecret = "test-admin-secret";
         public const string JwtSigningKey = "test-signing-key-1234567890abcdef";
@@ -443,7 +471,8 @@ public class TokenEndpointTests
                 {
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
-                    ["Storage:BasePath"] = "./artifacts/storage-tests"
+                    ["Storage:BasePath"] = "./artifacts/storage-tests",
+                    [SystemClockFactory.SeededUtcNowConfigKey] = seededUtcNow
                 });
             });
 

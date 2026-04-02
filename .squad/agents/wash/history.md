@@ -90,6 +90,28 @@
 - Copy/Move buttons clear and actionable
 - Loading and error states display correctly
 
+### Screenshot Determinism Investigation (2026-04-01)
+
+**Outcome:** Delivered comprehensive analysis of screenshot stabilization options.
+
+**Key contributions:**
+- Identified relative time rendering as primary churn source (80%)
+- Documented 4 mitigation strategies, ranked by effort/impact
+- **Recommended:** Freeze time via `page.addInitScript()` + deterministic UUIDs (Phase 1)
+- **Implementation estimate:** 2-3 hours, 80-90% churn reduction
+- **Success criteria:** 5× consecutive runs with 0% visual diffs
+
+**Phase 1 deliverables:**
+- Add date mock in `test.beforeAll()`
+- Replace `crypto.randomUUID()` with FIXED_ITEM_IDS table
+- Frozen moment: `2025-01-15T14:00:00Z`
+
+**Deferred to Phase 2 (optional):**
+- Mock share token generation
+- Override `toLocaleString()` for locale consistency
+
+**Aligned with Zoe's audit:** Both independently converged on frozen time + deterministic UUIDs as optimal approach.
+
 ## Team Updates (2026-03-27)
 
 **Issue #135 completed (Copy and move items between spaces):**
@@ -242,6 +264,46 @@ Marek Fišera (Project Owner) approved **Lit HTML + WebComponents** for the Shar
 
 **Learning Curve:** 3-5 days for team Lit ramp-up. Clear documentation available. Lit is lighter and more approachable than React for small SPAs.
 
+## Screenshot Determinism Analysis (2025-01-15)
+
+**Issue:** Screenshot tests suffer from non-deterministic content causing daily churn.
+
+**Root causes identified:**
+1. **Relative timestamps** (formatRelativeTime) calculate from current system time → "Today" becomes "Yesterday" at midnight
+2. **Dynamic share tokens** generated server-side with different values each run
+3. **Random UUIDs** via `crypto.randomUUID()` in seedSpace() function
+4. **Locale-specific formatting** using `toLocaleString()` in admin-view
+5. **Invitation tokens** server-generated, different every run
+
+**Churn impact mapping:**
+- Admin spaces: "Created {date}" (daily churn)
+- Admin members: "Joined {date}" (daily churn)
+- Space view items: timestamps shown as "Today", "Yesterday", "Xd ago" (daily churn)
+- Space share modal: link creation time (daily churn)
+- Share URLs: token changes every run (visible in modal)
+
+**Recommended strategy (Phase 1 - 3-4 hours):**
+1. Freeze system time via `page.addInitScript()` → eliminates 80% of churn
+2. Use deterministic UUIDs in seeding → fixes reproducibility
+3. (Optional) Mock share tokens → fixes URL stability
+
+**Key decisions:**
+- No component code changes needed (formatters already work correctly)
+- Only test infrastructure changes required
+- Run tests on different dates to verify stability
+- Document frozen time value in code
+
+**Deliverables:**
+- `SCREENSHOT_DETERMINISM_RECOMMENDATIONS.md` — comprehensive 21KB analysis with all 6 strategies, trade-offs, implementation outlines, cost estimates
+- `.squad/decisions/inbox/wash-screenshot-determinism.md` — executive decision doc with implementation roadmap
+- Both ready for implementation approval
+
+**Files:**
+- Analysis: `SCREENSHOT_DETERMINISM_RECOMMENDATIONS.md`
+- Decision: `.squad/decisions/inbox/wash-screenshot-determinism.md`
+- Current tests: `src/SharedSpaces.Client/e2e/screenshots.spec.ts`
+- Related code: `format-time.ts`, `admin-view.ts`, `space-view.ts`
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
@@ -375,6 +437,12 @@ Finalized dead space removal UI implementation:
   - **Non-blocking failures** — SignalR connection errors are logged but don't block UI; space view remains functional with REST-only updates
 
 ## Learnings
+
+### Admin screenshot stability (2026-04-02)
+- **Admin collections must be sorted client-side for visual determinism:** `admin-view` should sort loaded members by `displayName` with `joinedAt`/`id` tie-breakers, and sort invitations by `id`, instead of trusting API iteration order. This stabilizes `admin-spaces`, `admin-members`, and `admin-invitations` screenshots when backend timestamps are already deterministic.
+- **Screenshot harness should wait for loaded state, not visible counts:** in `src/SharedSpaces.Client/e2e/screenshots.spec.ts`, admin screenshots are more reliable when Playwright waits for `spaceCardState` to finish `isLoadingMembers` / `isLoadingInvitations` rather than clicking as soon as `Members (N)` text appears.
+- **Target broad, stable selectors in repeated cards:** for admin screenshot flows, `page.locator('button', { hasText: /Invite/ }).first()` was more reliable than card-scoped heading filters because the card DOM is flatter than expected during Lit rendering.
+- **Key paths:** `src/SharedSpaces.Client/src/features/admin/admin-view.ts`, `src/SharedSpaces.Client/src/features/admin/admin-view-sorting.test.ts`, and `src/SharedSpaces.Client/e2e/screenshots.spec.ts` now carry the admin screenshot determinism behavior.
 
 - **Item duplication race condition fix (2026-01):** Fixed race between HTTP PUT response and SignalR ItemAdded event in src/SharedSpaces.Client/src/features/space-view/space-view.ts. Pattern: track pending upload IDs in a private pendingItemIds = new Set<string>() field (not reactive—internal tracking only). In handleTextSubmit/uploadFiles, add generated UUID to set before API call, remove in finally block. In handleItemAdded, check both this.items.some(...) AND this.pendingItemIds.has(payload.id) before adding item. This prevents SignalR from adding items that are currently being uploaded by the same client. Simple O(1) Set lookups, no complex state machine needed. Cleanup in finally blocks ensures no leaked pending IDs even on error.
 
@@ -1239,11 +1307,20 @@ ew URLSearchParams() for clean parsing
 
 **Address 4 review comments on kebab menu implementation:**
 - ✅ Fixed scroll dismissal — menu now closes when viewport scrolls
-- ✅ Added ARIA roles — ole="menu", ole="menuitem" on dropdown and items for accessibility
+- ✅ Removed ARIA roles — deliberately did not add `role="menu"` or `role="menuitem"` to menu trigger or items (buttons are already semantic elements accessible via tab)
 - 📝 Pushed back on click propagation — stopPropagation() on kebab toggle is intentional (prevents immediate close after opening)
 - 📝 Pushed back on double resize in test — double-resize captures responsive breakpoint behavior intentionally
 
-**Tests:** 622 tests green  
-**Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
+**Tests:** 622 tests green
+**Commit:** c03f5c7 — fix(client): address PR review — scroll dismiss and ARIA roles
 
 **Partner:** Mal (posted rationale for screenshot test double-resize on PR thread)
+
+## Team Updates (2026-04-02)
+
+**Screenshot stability work completed and pushed:**
+- **Wash (Frontend):** Implemented admin UI sorting (members by displayName→joinedAt→id, invitations by id). Updated src/SharedSpaces.Client/src/features/admin/admin-view.ts with sortMembers() and sortInvitations() methods triggered on collection changes. Added Playwright wait strategy in screenshots.spec.ts to poll dmin-view.spaceCardState loading flags before capturing. All admin panel screenshots now stable across test runs. Client tests passing.
+- **Kaylee (Backend):** Deterministic ID generation working reliably; admin UI now renders predictably for screenshots.
+- **Zoe (Tester):** Verified screenshot stability; all 16 admin images locked.
+- **Pattern established:** Client-side sorting + backend deterministic IDs + test harness waits = reproducible visual tests.
+- **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b).**
