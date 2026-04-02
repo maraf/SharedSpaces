@@ -232,7 +232,18 @@ async function navigateToAdminSignedIn(page: Page) {
   await page.locator('admin-view button[type="submit"]').click();
 
   await page.waitForFunction(
-    () => document.body.textContent?.match(/Members\s*\(\d+\)/),
+    () => {
+      const adminView = document.querySelector('admin-view') as any;
+      if (!adminView?.spaces?.length) {
+        return false;
+      }
+
+      const states = Object.values(adminView.spaceCardState ?? {});
+      return (
+        states.length === adminView.spaces.length
+        && states.every((state: any) => !state.isLoadingMembers && !state.isLoadingInvitations)
+      );
+    },
     { timeout: 10_000 },
   );
   await page.waitForTimeout(500);
@@ -576,11 +587,15 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
 
-      // Click the "Members (N)" button on the first space card to open the modal
       const membersButton = page.locator('button', { hasText: /Members\s*\(\d+\)/ }).first();
       await membersButton.click();
-      await page.waitForSelector('[role="dialog"]');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(() => {
+        const adminView = document.querySelector('admin-view') as any;
+        return adminView?.activeModal?.type === 'members'
+          && adminView?.spaceCardState?.[adminView.activeModal.spaceId]
+          && !adminView.spaceCardState[adminView.activeModal.spaceId].isLoadingMembers;
+      }, { timeout: 10_000 });
+      await page.waitForTimeout(300);
       await capture(page, 'admin-members', vp);
     });
 
@@ -688,7 +703,6 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
 
-      // Click the invite button on the first space card to open the modal
       const inviteButton = page.locator('button', { hasText: /Invite/ }).first();
       await inviteButton.click();
       await page.waitForSelector('[role="dialog"]');
@@ -708,6 +722,10 @@ test.describe('Screenshot Capture', () => {
         { timeout: 10_000 },
       );
       await page.waitForSelector('img[alt*="QR" i]', { timeout: 10_000 });
+      await page.waitForFunction(() => {
+        const image = document.querySelector('img[alt*="QR" i]') as HTMLImageElement | null;
+        return !!image && image.complete && image.naturalWidth > 0;
+      }, { timeout: 10_000 });
       await page.waitForTimeout(500);
 
       await capture(page, 'admin-invite', vp);
@@ -806,11 +824,15 @@ test.describe('Screenshot Capture', () => {
       await page.reload();
       await page.waitForSelector('app-shell');
       await navigateToAdminSignedIn(page);
-      // Click the "Invitations (N)" button on the first space card
       const invitationsButton = page.locator('button', { hasText: /Invitations\s*\(\d+\)/ }).first();
       await invitationsButton.click();
-      await page.waitForSelector('[role="dialog"]');
-      await page.waitForTimeout(500);
+      await page.waitForFunction(() => {
+        const adminView = document.querySelector('admin-view') as any;
+        return adminView?.activeModal?.type === 'invitations'
+          && adminView?.spaceCardState?.[adminView.activeModal.spaceId]
+          && !adminView.spaceCardState[adminView.activeModal.spaceId].isLoadingInvitations;
+      }, { timeout: 10_000 });
+      await page.waitForTimeout(300);
       await capture(page, 'admin-invitations', vp);
     });
 

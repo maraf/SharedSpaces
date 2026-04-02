@@ -82,9 +82,15 @@ export async function getOfflineQueueForSpace(
   spaceId: string,
 ): Promise<OfflineQueueItem[]> {
   const all = await getOfflineQueue();
-  return all.filter(
-    (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
-  );
+  return all
+    .filter(
+      (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
+    )
+    .sort((a, b) =>
+      (b.timestamp - a.timestamp)
+      || a.id.localeCompare(b.id)
+      || a.itemId.localeCompare(b.itemId),
+    );
 }
 
 export async function clearOfflineQueueForSpace(
