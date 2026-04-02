@@ -224,12 +224,17 @@
 - **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.
 
 ## Learnings
-
+ 
 - **AppHost deterministic time is screenshot-only opt-in (2026-04-01):**
   - Reviewed the AppHost change that gates DeterministicTime__SeededUtcNow and DeterministicTime__AutoAdvanceSeconds behind Screenshots:UseDeterministicTime=true.
   - End-to-end validation: plain dotnet run .\src\AppHost.cs created spaces with wall-clock createdAt, while dotnet run .\src\AppHost.cs -- --Screenshots:UseDeterministicTime=true created spaces at the seeded 2025-03-19T12:00:00Z.
   - Added 	ests/SharedSpaces.Server.Tests/SystemClockFactoryTests.cs to lock the fallback/default behavior (SystemClock with no seeded config) and deterministic auto-advance behavior (default 1 second and explicit 60 seconds).
   - Focused validation passed: full SharedSpaces.Server.Tests project green, plus the 3 new SystemClockFactoryTests.
+
+- **Screenshot zero-drift verification run (2026-04-02):**
+  - Ran `npx playwright test --project=screenshots` from `src/SharedSpaces.Client` after deleting `artifacts/screenshots.db*` and `artifacts/screenshots-storage`.
+  - The current deterministic harness (`src/SharedSpaces.Client/playwright.config.ts` + `src/AppHost.cs`) produced 62 passing screenshot captures with no screenshot file hash changes under `docs/screenshots`.
+  - Final working tree stayed clean after the run, and no listeners remained on screenshot ports `5173` / `5165` once Playwright shut its web server down.
 
 ## Team Updates (2026-04-02)
 

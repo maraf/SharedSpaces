@@ -263,6 +263,15 @@ This keeps screenshots realistic (real server responses, real UI formatting) whi
   - invitations: `id` or other stable generated key
 - In Playwright, wait for async modal/card loading flags to settle before clicking or capturing; visible counts alone are not a strong readiness signal.
 
+### Zero-drift rerun check
+
+- For a stability check, delete `artifacts/screenshots.db*` and `artifacts/screenshots-storage` first even if `playwright.config.ts` already does it.
+- Then run `npx playwright test --project=screenshots` from `src/SharedSpaces.Client`.
+- Treat the run as truly stable only if:
+  - the suite passes,
+  - `docs/screenshots` file hashes stay unchanged before vs. after,
+  - and the working tree is still clean after Playwright exits.
+
 ---
 
 **Last updated:** 2026-04-01 (Zoe)  
