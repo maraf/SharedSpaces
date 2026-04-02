@@ -128,6 +128,7 @@ public class JournalEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
         body.FullSyncRequired.Should().BeTrue();
+        body.AddedOrUpdated.Should().BeEmpty();
         body.Deleted.Should().BeEmpty();
     }
 
@@ -157,6 +158,7 @@ public class JournalEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
         body.FullSyncRequired.Should().BeTrue();
+        body.AddedOrUpdated.Should().BeEmpty();
     }
 
     [Fact]

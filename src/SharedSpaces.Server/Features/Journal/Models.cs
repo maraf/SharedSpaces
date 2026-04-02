@@ -9,4 +9,4 @@ public sealed record JournalResponse(
     Guid[] Deleted);
 
 public sealed record JournalCheckpointRequest(
-    DateTime Checkpoint);
+    DateTimeOffset Checkpoint);

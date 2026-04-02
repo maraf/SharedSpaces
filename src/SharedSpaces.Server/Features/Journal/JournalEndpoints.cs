@@ -60,27 +60,29 @@ public static class JournalEndpoints
         var checkpointUtc = DateTime.UtcNow;
         var fullSyncRequired = space.JournalPrunedBefore.HasValue && sinceUtc <= space.JournalPrunedBefore.Value;
 
-        var addedOrUpdated = await db.SpaceItems
-            .AsNoTracking()
-            .Where(item => item.SpaceId == spaceId && item.SharedAt >= sinceUtc)
-            .OrderBy(item => item.SharedAt)
-            .Select(item => new SpaceItemResponse(
-                item.Id,
-                item.SpaceId,
-                item.MemberId,
-                item.ContentType,
-                item.Content,
-                item.FileSize,
-                item.SharedAt))
-            .ToArrayAsync(cancellationToken);
-
+        SpaceItemResponse[] addedOrUpdated;
         Guid[] deleted;
         if (fullSyncRequired)
         {
+            addedOrUpdated = [];
             deleted = [];
         }
         else
         {
+            addedOrUpdated = await db.SpaceItems
+                .AsNoTracking()
+                .Where(item => item.SpaceId == spaceId && item.SharedAt >= sinceUtc)
+                .OrderBy(item => item.SharedAt)
+                .Select(item => new SpaceItemResponse(
+                    item.Id,
+                    item.SpaceId,
+                    item.MemberId,
+                    item.ContentType,
+                    item.Content,
+                    item.FileSize,
+                    item.SharedAt))
+                .ToArrayAsync(cancellationToken);
+
             deleted = await db.DeletedItems
                 .AsNoTracking()
                 .Where(d => d.SpaceId == spaceId && d.DeletedAt >= sinceUtc)
@@ -110,14 +112,7 @@ public static class JournalEndpoints
             return Results.BadRequest(new { Error = "The 'checkpoint' value is required." });
         }
 
-        if (request.Checkpoint.Kind == DateTimeKind.Local)
-        {
-            return Results.BadRequest(new { Error = "The 'checkpoint' value must be in UTC." });
-        }
-
-        var checkpointUtc = request.Checkpoint.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(request.Checkpoint, DateTimeKind.Utc)
-            : request.Checkpoint.ToUniversalTime();
+        var checkpointUtc = request.Checkpoint.UtcDateTime;
 
         var member = await db.SpaceMembers
             .SingleOrDefaultAsync(m => m.Id == memberId && m.SpaceId == spaceId, cancellationToken);
