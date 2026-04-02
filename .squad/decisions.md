@@ -5100,3 +5100,56 @@ Mobile space constraint — 4-5 action buttons per item consume ~160px of 390px 
 
 
 # Kebab Menu: Mobile Action Overflow Pattern  **Date:** 2026-03-31   **Author:** Wash (Frontend Dev)   **Issue:** #152  ## Decision  Mobile (< 640px) shows only the **primary action button** plus a **kebab menu (⋮)** that consolidates secondary actions. Desktop (≥ 640px) remains unchanged with all buttons inline.  ## Pattern  - **Responsive split:** `hidden sm:flex` for desktop buttons, `flex sm:hidden` for mobile layout - **Primary actions:** Copy (text items), Download (file items) — always visible - **Kebab contains:** Manage Links, Send To (conditional), Delete (with divider) - **State:** Single `openMenuItemId` reactive property — only one menu open at a time - **Dismissal:** Click outside (`data-kebab-menu` attribute check), Escape key, or selecting an action - **Delete flow:** Kebab menu closes, then standard delete confirmation overlay appears  ## Rationale  Four inline icon buttons on a 390px viewport caused cramped touch targets and visual clutter. The kebab pattern keeps the most-used action instantly accessible while consolidating less-frequent actions behind one tap.  ## Impact  - Establishes the kebab overflow pattern for future mobile action menus - No changes to existing button render methods or desktop layout - Delete confirmation flow unchanged on both mobile and desktop
+
+---
+
+# Decision: CLI Sync State Tracking via Server-Only Checkpoints (Duplicated from inbox - removing)
+
+---
+
+# Migration Snapshot Validation Test
+
+**Date:** 2026-03-29  
+**Author:** Zoe (Tester)  
+**Status:** Implemented
+
+## Context
+
+Production crash occurred when `20260329064632_MakePinIndexUnique.Designer.cs` was missing the `SharedLink` entity definition. EF Core compares the current model against the last migration's designer snapshot at startup, throwing `PendingModelChangesWarning` on mismatch. This crash happened at server startup, not during development.
+
+## Decision
+
+Added `MigrationSnapshotTests.MigrationSnapshot_ShouldMatchCurrentModel` test to catch migration snapshot desync bugs at test time, before deployment.
+
+## Implementation
+
+Test validates that:
+1. The current `AppDbContext` model matches the last migration's `AppDbContextModelSnapshot`
+2. Both models are initialized as design-time models using `IModelRuntimeInitializer`
+3. `IMigrationsModelDiffer.HasDifferences()` returns false
+
+**Key technical details:**
+- Test uses SQLite (not InMemoryDatabase) — migrations require a real database provider
+- Both models must be finalized with `designTime: true` before calling `GetRelationalModel()`
+- Services retrieved via `DbContext.GetInfrastructure().GetRequiredService<T>()`
+
+**Test file:** `tests/SharedSpaces.Server.Tests/MigrationSnapshotTests.cs`
+
+## Impact
+
+- Catches missing entities in Designer.cs files during `dotnet test`, not at server startup
+- Prevents production crashes from snapshot desync
+- Clear failure message tells developer to run `dotnet ef migrations add`
+- Runs as part of CI pipeline
+
+## Alternatives Considered
+
+1. **Runtime check in `Program.cs`** — Rejected because it still crashes at startup, not during development
+2. **Custom EF Core design-time service** — Rejected as too complex and invasive
+3. **Pre-commit hook** — Rejected because not all developers use git hooks, test suite is more reliable
+
+## Related Files
+
+- `tests/SharedSpaces.Server.Tests/MigrationSnapshotTests.cs` — The test
+- `src/SharedSpaces.Server/Infrastructure/Persistence/Migrations/AppDbContextModelSnapshot.cs` — Snapshot model
+- `.squad/agents/zoe/history.md` — Documented EF Core model initialization patterns
