@@ -144,7 +144,7 @@ async function seedSpace(name: string) {
 
   // Add sample text items — enough to overflow and show the scrollbar
   let firstTextItemId = '';
-  for (const [index, content] of [
+  for (const content of [
     'Welcome to SharedSpaces! 🚀',
     'This is a shared note visible to all members.',
     'Here are the docs for the new API: https://api.example.com/v2/docs',
@@ -153,7 +153,7 @@ async function seedSpace(name: string) {
     'The deployment went through — staging is green ✅',
     'Updated the color tokens in the design system. Check Figma for the latest.',
     'Quick thought: we should add rate limiting before launch.',
-  ].entries()) {
+  ]) {
     const itemId = crypto.randomUUID();
     if (!firstTextItemId) firstTextItemId = itemId;
     const form = new FormData();
@@ -168,10 +168,10 @@ async function seedSpace(name: string) {
   }
 
   // Add sample file items (text-like)
-  for (const [index, file] of [
+  for (const file of [
     { name: 'meeting-notes.txt', content: '# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM' },
     { name: 'architecture.md', content: '# System Architecture\n\nClient → API Gateway → Services → Database' },
-  ].entries()) {
+  ]) {
     const fileItemId = crypto.randomUUID();
     const fileForm = new FormData();
     fileForm.append('id', fileItemId);
