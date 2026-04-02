@@ -255,6 +255,14 @@ The screenshot harness now uses the smaller deterministic-time path:
 
 This keeps screenshots realistic (real server responses, real UI formatting) while removing timestamp drift from visual baselines.
 
+### Admin collection determinism matters too
+
+- If a screenshot covers admin/member/invitation lists, do not rely on backend enumeration order alone.
+- Sort collections in the client before rendering when the UI is intended to look ordered anyway:
+  - members: `displayName`, then deterministic tie-breakers like `joinedAt` and `id`
+  - invitations: `id` or other stable generated key
+- In Playwright, wait for async modal/card loading flags to settle before clicking or capturing; visible counts alone are not a strong readiness signal.
+
 ---
 
 **Last updated:** 2026-04-01 (Zoe)  

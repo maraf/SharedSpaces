@@ -5889,3 +5889,130 @@ This approach:
 
 All approaches aligned on the admin-gated API parameter method. No conflicts; full team alignment achieved.
 
+---
+
+### Deterministic Screenshot Seeding: Backend ID Generation
+
+**Decision Date:** 2026-04-01  
+**Decided By:** Kaylee (Backend Dev)  
+**Status:** Implemented
+
+#### Context
+Screenshot reruns were still churning after invitation PINs were stabilized because some server-generated identifiers remained random. The visible diffs were concentrated in admin space/invitation IDs and share-link URLs.
+
+#### Decision
+When deterministic screenshot seeding is enabled through `DeterministicTime:SeededUtcNow`, the backend should also switch server-generated IDs and tokens to deterministic generators. Keep the default runtime behavior random; only the seeded screenshot/test path becomes deterministic.
+
+#### Implementation
+- Register `IGuidGenerator` beside `ISystemClock` and `IInvitationPinGenerator` in `src/SharedSpaces.Server/Program.cs`.
+- Assign explicit deterministic IDs in `Features/Spaces/SpaceEndpoints.cs`, `Features/Invitations/InvitationEndpoints.cs`, `Features/Tokens/TokenEndpoints.cs`, and `Features/SharedLinks/SharedLinkEndpoints.cs`.
+- Reuse the seeded time value as the deterministic seed so screenshot runs stay reproducible without adding new public config knobs.
+
+#### Impact
+This keeps `admin-spaces`, `admin-invitations`, and `space-share-modal` stable across reruns while preserving normal production randomness. Future screenshot-oriented backend seeding should follow the same runtime-configured generator pattern.
+
+---
+
+### Admin UI Deterministic Sorting
+
+**Decision Date:** 2026-04-01  
+**Decided By:** Wash (Frontend Dev)  
+**Status:** Implemented
+
+#### Context
+- `admin-spaces`, `admin-members`, and `admin-invitations` screenshots were drifting after the invitation PIN fix.
+- The remaining churn came from frontend rendering assumptions: admin collections were rendered in API-returned order, and the screenshot harness clicked admin cards before async collection loading had fully settled.
+
+#### Decision
+- Sort admin members in the client by `displayName`, then `joinedAt`, then `id`.
+- Sort admin invitations in the client by `id`.
+- In Playwright screenshot capture, wait for `admin-view.spaceCardState` loading flags to clear before capturing modal/card states.
+
+#### Rationale
+- This keeps screenshot determinism at the presentation layer where the instability was visible, without widening API contracts or masking content.
+- It also makes the admin UI feel more deliberate for real users, not just screenshots.
+
+#### Impact
+- Admin collections now render in predictable order across test runs
+- Playwright test harness waits for async UI to settle before capturing
+- No API changes required; determinism achieved through client-side normalization
+
+---
+
+### Screenshot Stability Strategy: Deterministic Seed Data Adoption
+
+**Decision Date:** 2026-03-29  
+**Decided By:** Zoe (Tester), with team alignment (Kaylee, Wash)  
+**Status:** Implemented
+
+#### Context
+Admin panel Playwright screenshots were non-deterministic due to randomly generated UUIDs and cryptographic tokens in the seed data:
+- Space IDs are UUIDs
+- Invitation tokens are cryptographic secrets
+- Member IDs are server-generated UUIDs
+- QR codes are generated from tokens
+
+This caused screenshot hashes to differ on every test run, even though visual layout is identical and no UI regressions occur.
+
+#### Options Evaluated
+
+**Option A: Deterministic Seed Data (Recommended, Selected)**
+Force test data to use fixed UUIDs instead of random generation.
+
+**Pros:**
+- Screenshots stable across all runs
+- Baseline noise eliminated
+- Easiest to spot real UI regressions
+- Test behavior matches production (users have consistent IDs once created)
+
+**Cons:**
+- Server must support accepting fixed IDs (currently generates them)
+- Requires coordination with server implementation
+- May not be realistic for all test scenarios
+
+**Option B: Mask Dynamic Content (Alternative)**
+Hide invitation tokens, space IDs, and QR codes during screenshot capture via CSS or DOM manipulation.
+
+**Pros:**
+- No server changes needed
+- Simple client-side test harness change
+- Removes visual noise from screenshots
+
+**Cons:**
+- Loses visibility into data display (tokens, IDs)
+- May hide real rendering bugs
+- Screenshot no longer shows "real" UI
+
+**Option C: Accept Non-Deterministic Baselines (Status Quo)**
+Run tests, capture screenshots, visually verify layout, commit new baseline.
+
+**Pros:**
+- No code changes
+
+**Cons:**
+- Baseline churn on every CI run
+- Harder to spot regressions in diffs
+- Noise in git history
+- Screenshot tests become less useful
+
+#### Selected Decision
+**Adopt Option A (Deterministic Seed Data)** with fallback to **Option B (Masking)** if server changes are infeasible.
+
+#### Rationale
+1. Screenshot tests should be deterministic by default — that's the point.
+2. Real regression detection requires stable baselines.
+3. If the server doesn't support fixed IDs, masking is acceptable short-term.
+4. Production data is persistent (IDs don't change per request), so fixed test IDs are realistic.
+
+#### Implementation
+1. Backend: Coordinate with server to accept optional fixed IDs via `DeterministicTime:SeededUtcNow` config (see "Deterministic Screenshot Seeding: Backend ID Generation" above).
+2. Client: Implement admin UI sorting (see "Admin UI Deterministic Sorting" above) and Playwright wait strategies.
+3. Regenerate all 16 admin panel baselines once; they remain stable across runs.
+4. Document deterministic seeding pattern in `.squad/skills/playwright-screenshot-determinism/SKILL.md`.
+
+#### Impact
+- Screenshot baselines now stable across all runs
+- Regression detection more reliable and signal-to-noise ratio high
+- Test harness determinism pattern established for future use
+- Admin UI provides better UX for real users (sorted collections)
+

@@ -438,6 +438,12 @@ Finalized dead space removal UI implementation:
 
 ## Learnings
 
+### Admin screenshot stability (2026-04-02)
+- **Admin collections must be sorted client-side for visual determinism:** `admin-view` should sort loaded members by `displayName` with `joinedAt`/`id` tie-breakers, and sort invitations by `id`, instead of trusting API iteration order. This stabilizes `admin-spaces`, `admin-members`, and `admin-invitations` screenshots when backend timestamps are already deterministic.
+- **Screenshot harness should wait for loaded state, not visible counts:** in `src/SharedSpaces.Client/e2e/screenshots.spec.ts`, admin screenshots are more reliable when Playwright waits for `spaceCardState` to finish `isLoadingMembers` / `isLoadingInvitations` rather than clicking as soon as `Members (N)` text appears.
+- **Target broad, stable selectors in repeated cards:** for admin screenshot flows, `page.locator('button', { hasText: /Invite/ }).first()` was more reliable than card-scoped heading filters because the card DOM is flatter than expected during Lit rendering.
+- **Key paths:** `src/SharedSpaces.Client/src/features/admin/admin-view.ts`, `src/SharedSpaces.Client/src/features/admin/admin-view-sorting.test.ts`, and `src/SharedSpaces.Client/e2e/screenshots.spec.ts` now carry the admin screenshot determinism behavior.
+
 - **Item duplication race condition fix (2026-01):** Fixed race between HTTP PUT response and SignalR ItemAdded event in src/SharedSpaces.Client/src/features/space-view/space-view.ts. Pattern: track pending upload IDs in a private pendingItemIds = new Set<string>() field (not reactive—internal tracking only). In handleTextSubmit/uploadFiles, add generated UUID to set before API call, remove in finally block. In handleItemAdded, check both this.items.some(...) AND this.pendingItemIds.has(payload.id) before adding item. This prevents SignalR from adding items that are currently being uploaded by the same client. Simple O(1) Set lookups, no complex state machine needed. Cleanup in finally blocks ensures no leaked pending IDs even on error.
 
 - **UI tweaks batch (Issue #50):** Five small CSS/layout fixes across space-view, join-view, admin-view:
@@ -1309,3 +1315,12 @@ ew URLSearchParams() for clean parsing
 **Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
 
 **Partner:** Mal (posted rationale for screenshot test double-resize on PR thread)
+
+## Team Updates (2026-04-02)
+
+**Screenshot stability work completed and pushed:**
+- **Wash (Frontend):** Implemented admin UI sorting (members by displayName→joinedAt→id, invitations by id). Updated src/SharedSpaces.Client/src/features/admin/admin-view.ts with sortMembers() and sortInvitations() methods triggered on collection changes. Added Playwright wait strategy in screenshots.spec.ts to poll dmin-view.spaceCardState loading flags before capturing. All admin panel screenshots now stable across test runs. Client tests passing.
+- **Kaylee (Backend):** Deterministic ID generation working reliably; admin UI now renders predictably for screenshots.
+- **Zoe (Tester):** Verified screenshot stability; all 16 admin images locked.
+- **Pattern established:** Client-side sorting + backend deterministic IDs + test harness waits = reproducible visual tests.
+- **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b).**

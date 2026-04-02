@@ -1179,3 +1179,21 @@ After your research on server-generated timestamps, Mal evaluated the determinis
 - **Zoe (Client/Tests):** Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts with fixed seed date (2026-03-30T12:00:00Z) and deterministic seeding calls with X-Admin-Secret header. Configured Playwright with pinned locale (en-US), timezone (UTC), and frozen in-page clock. All 58 screenshots captured successfully; full suite validated.
 - **Coordination:** No conflicts between backend analysis, factory decision, and implementation — all agents aligned on admin-gated API parameter approach.
 - **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.
+
+## Team Updates (2026-04-02)
+
+**Screenshot stability work completed and pushed:**
+- **Kaylee (Backend):** Implemented deterministic ID generation (IGuidGenerator, IInvitationPinGenerator) keyed to `DeterministicTime:SeededUtcNow`. Updated SpaceEndpoints.cs, TokenEndpoints.cs, SharedLinkEndpoints.cs, and InvitationEndpoints.cs to assign fixed IDs/tokens during seeded runs. All 16 admin panel screenshots stabilized (spaces, invitations, members, share-modal). Server build + test suite passing. Branch: fix/screenshot-test-fixes, commit 2f9729b.
+- **Wash (Frontend):** Implemented admin UI sorting (members by displayName→joinedAt→id, invitations by id). Updated admin-view.ts with reactive sort methods. Added Playwright wait strategy for `admin-view.spaceCardState` loading flags. Client tests passing; screenshot captures stable.
+- **Zoe (Tester):** Verified all 16 admin screenshots stable across 5+ test runs (no visual regressions, deterministic PNG hashes). Confirmed Playwright capture timing fixes work reliably.
+- **Pattern established:** Backend seeded generators + client-side sorting + test harness wait strategies = stable screenshot test cycle. Reusable for future determinism requirements.
+- **PR ready for merge to main.**
+
+## Learnings
+### 2026-04-02 — Screenshot-stable server IDs
+- Deterministic screenshot runs need stable server-generated identifiers as well as stable timestamps; key both off `DeterministicTime:SeededUtcNow`.
+- `src/SharedSpaces.Server/Program.cs` now wires `ISystemClock`, `IInvitationPinGenerator`, and `IGuidGenerator`; the create paths in `Features/Spaces`, `Invitations`, `Tokens`, and `SharedLinks` should assign IDs/tokens explicitly.
+- The backend-owned screenshot churn points are the visible space/invitation IDs in admin screenshots and the shared-link token embedded in `space-share-modal` URLs.
+
+
+

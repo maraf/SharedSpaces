@@ -1,4 +1,19 @@
 
+## Screenshot Stability Analysis (2026-03-29)
+
+**Screenshot drift investigation (pass 1 vs pass 2):**
+- Analyzed 7 changed admin panel screenshots across two Playwright test runs.
+- **Root cause:** Non-deterministic seed data generation — UUIDs, invitation tokens, and member IDs are generated fresh on each run, causing PNG hashes to differ even though visual layout is stable.
+- **Grouped into 4 buckets:**
+  - **Admin Spaces Display** (2 images): Space IDs visible in metadata differ on each run.
+  - **Admin Invitations Modal** (2 images): Generated invitation tokens/strings are cryptographic and non-deterministic.
+  - **Admin Invite Generation Modal** (1 image): QR code is procedurally generated from invitation token, differs each run.
+  - **Admin Members Modal** (2 images): Member UUIDs generated server-side, may affect rendered data attributes.
+- **Layout is stable** — no actual UI regressions. Visual spacing, button placement, modal structure all match across runs.
+- **Test harness location:** `src/SharedSpaces.Client/e2e/screenshots.spec.ts:257–342` (beforeAll seed setup) and specific tests at lines 569, 583, 713, 814.
+- **Recommendation:** Implement deterministic seeding (fixed UUIDs for test data) or mask dynamic content (hide/replace invitation tokens) in screenshots to stabilize baselines. Current approach accepts non-deterministic admin data as "expected" since real systems generate fresh tokens on each run.
+- **Documentation:** Created detailed analysis in `screenshot-drift-analysis.md` with technical breakdown, visual evidence, and three stabilization options.
+
 ## Team Updates (2026-03-27)
 
 **Issue #135 completed (Copy and move items between spaces):**
@@ -215,3 +230,12 @@
   - End-to-end validation: plain dotnet run .\src\AppHost.cs created spaces with wall-clock createdAt, while dotnet run .\src\AppHost.cs -- --Screenshots:UseDeterministicTime=true created spaces at the seeded 2025-03-19T12:00:00Z.
   - Added 	ests/SharedSpaces.Server.Tests/SystemClockFactoryTests.cs to lock the fallback/default behavior (SystemClock with no seeded config) and deterministic auto-advance behavior (default 1 second and explicit 60 seconds).
   - Focused validation passed: full SharedSpaces.Server.Tests project green, plus the 3 new SystemClockFactoryTests.
+
+## Team Updates (2026-04-02)
+
+**Screenshot stability work completed and pushed:**
+- **Zoe (Tester):** Verified all 16 admin panel screenshots stable across 5+ consecutive test runs. Confirmed deterministic PNG hashes despite re-capturing baselines. Validated Playwright wait strategies (admin-view.spaceCardState) settle async collection loading before capture. No visual regressions detected (layout, spacing, button placement all identical across runs).
+- **Kaylee (Backend):** Deterministic ID generation (IGuidGenerator) now coordinated with deterministic timestamps; backend-owned screenshot churn (visible IDs in admin UI, share-link tokens) eliminated.
+- **Wash (Frontend):** Client-side sorting ensures predictable render order; Playwright waits ensure async UI settling.
+- **Pattern validated:** Deterministic screenshot testing pipeline now fully operational. Reusable for future features requiring stable visual baselines.
+- **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b). All tests passing: Playwright screenshots 100% stable, Vitest suite 447 tests green, xUnit server tests green.**
