@@ -560,6 +560,76 @@ public class AdminEndpointTests
         pin1.Should().NotBe(pin2, "PINs should be unique across all spaces");
     }
 
+    [Fact]
+    public async Task CreateInvitation_WithDeterministicTimeConfig_ReusesStablePinSequenceAcrossRuns()
+    {
+        const string seededUtcNow = "2025-03-19T12:00:00Z";
+
+        await using var factory1 = new TestWebApplicationFactory(seededUtcNow);
+        using var client1 = factory1.CreateClient();
+        var space1 = await factory1.CreateSpaceAsync("Deterministic Space");
+        var invitation1 = await CreateInvitationViaAdminAsync(client1, space1.Id);
+        var firstRunPin = ExtractPin(invitation1.InvitationString);
+
+        await using var factory2 = new TestWebApplicationFactory(seededUtcNow);
+        using var client2 = factory2.CreateClient();
+        var space2 = await factory2.CreateSpaceAsync("Deterministic Space");
+        var invitation2 = await CreateInvitationViaAdminAsync(client2, space2.Id);
+        var secondRunPin = ExtractPin(invitation2.InvitationString);
+
+        firstRunPin.Should().Be(secondRunPin, "deterministic screenshot/test seeding should keep invitation PINs stable across runs");
+    }
+
+    [Fact]
+    public async Task CreateSpace_WithDeterministicTimeConfig_ReusesStableSpaceIdsAcrossRuns()
+    {
+        const string seededUtcNow = "2025-03-19T12:00:00Z";
+
+        await using var factory1 = new TestWebApplicationFactory(seededUtcNow);
+        using var client1 = factory1.CreateClient();
+        var response1 = await CreateSpaceAsync(client1, "Stable Space", TestWebApplicationFactory.AdminSecret);
+        response1.StatusCode.Should().Be(HttpStatusCode.Created);
+        var firstRunSpace = await ReadJsonAsync<SpaceResponse>(response1);
+
+        await using var factory2 = new TestWebApplicationFactory(seededUtcNow);
+        using var client2 = factory2.CreateClient();
+        var response2 = await CreateSpaceAsync(client2, "Stable Space", TestWebApplicationFactory.AdminSecret);
+        response2.StatusCode.Should().Be(HttpStatusCode.Created);
+        var secondRunSpace = await ReadJsonAsync<SpaceResponse>(response2);
+
+        firstRunSpace.Should().NotBeNull();
+        secondRunSpace.Should().NotBeNull();
+        firstRunSpace!.Id.Should().Be(secondRunSpace!.Id, "deterministic screenshot/test seeding should keep visible space IDs stable across runs");
+    }
+
+    [Fact]
+    public async Task ListInvitations_WithDeterministicTimeConfig_ReusesStableInvitationIdsAcrossRuns()
+    {
+        const string seededUtcNow = "2025-03-19T12:00:00Z";
+
+        await using var factory1 = new TestWebApplicationFactory(seededUtcNow);
+        using var client1 = factory1.CreateClient();
+        var space1 = await factory1.CreateSpaceAsync("Stable Invitations");
+        await CreateInvitationViaAdminAsync(client1, space1.Id);
+        var listResponse1 = await ListInvitationsAsync(client1, space1.Id, TestWebApplicationFactory.AdminSecret);
+        listResponse1.StatusCode.Should().Be(HttpStatusCode.OK);
+        var firstRunInvitations = await ReadJsonAsync<InvitationListResponse[]>(listResponse1);
+
+        await using var factory2 = new TestWebApplicationFactory(seededUtcNow);
+        using var client2 = factory2.CreateClient();
+        var space2 = await factory2.CreateSpaceAsync("Stable Invitations");
+        await CreateInvitationViaAdminAsync(client2, space2.Id);
+        var listResponse2 = await ListInvitationsAsync(client2, space2.Id, TestWebApplicationFactory.AdminSecret);
+        listResponse2.StatusCode.Should().Be(HttpStatusCode.OK);
+        var secondRunInvitations = await ReadJsonAsync<InvitationListResponse[]>(listResponse2);
+
+        firstRunInvitations.Should().NotBeNull();
+        secondRunInvitations.Should().NotBeNull();
+        firstRunInvitations.Should().HaveCount(1);
+        secondRunInvitations.Should().HaveCount(1);
+        firstRunInvitations![0].Id.Should().Be(secondRunInvitations![0].Id, "deterministic screenshot/test seeding should keep visible invitation IDs stable across runs");
+    }
+
     // ========== Member Management Tests ==========
 
     [Fact]

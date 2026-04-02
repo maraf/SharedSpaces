@@ -17,6 +17,9 @@ builder.Services.AddPersistence(builder.Configuration, builder.Environment.Conte
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddSingleton<IAdminSecretValidator, AdminSecretValidator>();
 builder.Services.AddSingleton<ISystemClock>(_ => SystemClockFactory.Create(builder.Configuration));
+builder.Services.AddSingleton<IInvitationPinGenerator>(
+    _ => InvitationPinGeneratorFactory.Create(builder.Configuration));
+builder.Services.AddSingleton<IGuidGenerator>(_ => GuidGeneratorFactory.Create(builder.Configuration));
 builder.Services.AddScoped<AdminAuthenticationFilter>();
 builder.Services.AddOptions<StorageOptions>()
     .Bind(builder.Configuration.GetSection("Storage"))
