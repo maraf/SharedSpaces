@@ -603,3 +603,29 @@ After reviewing Kaylee's research on server-generated timestamps, you decided to
 3. Validate snapshot tests capture deterministic data
 
 **Reference:** `.squad/log/2026-04-01T11-40-15Z-deterministic-api-research.md`
+
+### Squad Documentation Hygiene (2026-04-02)
+
+**Decision:** Clean up and standardize squad decision/history markdown formatting.
+
+**Pattern issue:** When squad files are edited in quick succession by different agents (Wash, Kaylee, Zoe), entries sometimes get malformed:
+- All content on one line with no paragraph breaks
+- Mangled unicode or garbled prefixes (e.g., "ole=" instead of "role=", "ix(" instead of "fix(")
+- Inconsistent markdown structure (missing headers, improper list indentation)
+
+**Resolution approach:**
+- Treat squad doc cleanup as part of lead review: catch formatting issues before merging
+- Reformat malformed entries (single-line to proper markdown with headers, lists, breaks)
+- Correct factual errors: if history claims "added ARIA roles" but code removed them, fix narrative to match reality
+- Fix obvious typos in commit message prefixes (follow repo convention: ix, eat, docs, etc.)
+
+**Learnings:**
+- Squad files are **not** code — they're living project memory. Malformed entries confuse future readers and reduce credibility.
+- Formatting issues compound: one garbled entry makes the next person's edits harder to parse.
+- Always verify historical claims against actual commit history or code before pushing.
+
+**Outcome:**
+- Kebab-menu decision now properly formatted with headers and lists
+- Wash history corrected: ARIA roles were deliberately NOT added; updated narrative to reflect decision
+- Commit message prefix fixed: "ix(client)" → "fix(client)"
+- All changes pushed in single commit 793c76d
