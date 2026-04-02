@@ -30,6 +30,28 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### Screenshot Test Determinism: DI-Based GUID Generation (2026-04-02)
+
+**Decision:** Implemented deterministic screenshot tests via IGuidGenerator dependency injection.
+
+**Implementation:**
+- Injected `IGuidGenerator` into Space, Token, and SharedLink endpoints
+- DI container provides either random (production) or seeded (test) implementation
+- No public API changes — guids generated server-side as before
+- AppHost test setup provides `SeededGuidGenerator` via DI
+- Tests now have stable UUIDs, tokens, and shared link URLs across runs
+
+**Architecture insight:**
+- Dependency injection beats public API overrides for test determinism
+- Keeps production code unchanged; test hook via DI setup
+- Scales to future needs (clock override, sequencing, etc.)
+
+**Outcome:**
+- All 35 screenshot baselines now stable (deterministic pixel hashes)
+- Admin view refactored to track loading states (enables reliable waits)
+- E2E tests improved with state-based waits instead of DOM polling
+- No test flakiness from non-deterministic data generation
+
 ### Deterministic Screenshot Time: Keep It Off Public Contracts (2026-04-01)
 
 **Decision:** For screenshot determinism, prefer an **internal server config/clock override** over additive public request fields like `seededAt`.
