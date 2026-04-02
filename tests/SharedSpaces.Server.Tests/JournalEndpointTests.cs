@@ -22,7 +22,7 @@ namespace SharedSpaces.Server.Tests;
 public class JournalEndpointTests
 {
     [Fact]
-    public async Task GetJournal_ReturnsAddedItemsSinceTimestamp()
+    public async Task GetJournal_ReturnsAddedItemsSinceStoredCheckpoint()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -31,7 +31,21 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        var beforeCreate = DateTime.UtcNow.AddSeconds(-1);
+        var checkpoint = DateTime.UtcNow.AddMinutes(-1);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = checkpoint;
+            await db.SaveChangesAsync();
+        });
+
+        await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "old item",
+            sharedAt: checkpoint.AddMinutes(-2),
+            fileSize: 0);
 
         var item = await factory.CreateItemAsync(
             space.Id, member.Id,
@@ -40,17 +54,18 @@ public class JournalEndpointTests
             sharedAt: DateTime.UtcNow,
             fileSize: 0);
 
-        var response = await GetJournalAsync(client, space.Id, token, since: beforeCreate);
+        var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
         body.FullSyncRequired.Should().BeFalse();
+        body.Checkpoint.Should().BeOnOrAfter(checkpoint);
         body.AddedOrUpdated.Should().ContainSingle(r => r.Id == item.Id);
         body.Deleted.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task GetJournal_ReturnsDeletedItemIdsSinceTimestamp()
+    public async Task GetJournal_ReturnsDeletedItemIdsSinceStoredCheckpoint()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -58,9 +73,6 @@ public class JournalEndpointTests
         var space = await factory.CreateSpaceAsync();
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
-
-        // Opt member into journaling
-        await GetJournalAsync(client, space.Id, token);
 
         var item = await factory.CreateItemAsync(
             space.Id, member.Id,
@@ -71,11 +83,18 @@ public class JournalEndpointTests
 
         var beforeDelete = DateTime.UtcNow.AddSeconds(-1);
 
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = beforeDelete;
+            await db.SaveChangesAsync();
+        });
+
         // Delete the item via API
         var deleteResponse = await DeleteItemAsync(client, space.Id, item.Id, token);
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        var response = await GetJournalAsync(client, space.Id, token, since: beforeDelete);
+        var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
@@ -84,7 +103,7 @@ public class JournalEndpointTests
     }
 
     [Fact]
-    public async Task GetJournal_ReturnsFullSyncRequired_WhenSinceIsBeforePrunedWatermark()
+    public async Task GetJournal_ReturnsFullSyncRequired_WhenCheckpointIsBeforePrunedWatermark()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -93,16 +112,18 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        // Set the JournalPrunedBefore watermark directly
+        var checkpoint = DateTime.UtcNow.AddMinutes(-30);
+
         await factory.WithDbContextAsync(async db =>
         {
             var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
             s.JournalPrunedBefore = DateTime.UtcNow.AddMinutes(-10);
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = checkpoint;
             await db.SaveChangesAsync();
         });
 
-        // Query with a since before the watermark
-        var response = await GetJournalAsync(client, space.Id, token, since: DateTime.UtcNow.AddMinutes(-30));
+        var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
@@ -111,7 +132,7 @@ public class JournalEndpointTests
     }
 
     [Fact]
-    public async Task GetJournal_ReturnsFullSyncRequired_WhenSinceEqualsWatermark()
+    public async Task GetJournal_ReturnsFullSyncRequired_WhenCheckpointEqualsWatermark()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -126,11 +147,12 @@ public class JournalEndpointTests
         {
             var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
             s.JournalPrunedBefore = watermark;
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = watermark;
             await db.SaveChangesAsync();
         });
 
-        // Query with since == watermark — boundary should require full sync
-        var response = await GetJournalAsync(client, space.Id, token, since: watermark);
+        var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
@@ -147,8 +169,14 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        // No pruning has happened — JournalPrunedBefore is null
-        var response = await GetJournalAsync(client, space.Id, token, since: DateTime.UtcNow.AddMinutes(-5));
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = DateTime.UtcNow.AddMinutes(-5);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
@@ -156,7 +184,7 @@ public class JournalEndpointTests
     }
 
     [Fact]
-    public async Task GetJournal_UpdatesMemberLastSyncAt()
+    public async Task GetJournal_InitialCallEnablesJournalingWithoutAdvancingCheckpoint()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -172,16 +200,66 @@ public class JournalEndpointTests
             m.LastSyncAt.Should().BeNull();
         });
 
-        var beforeCall = DateTime.UtcNow;
         var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<JournalResponse>(response);
+        body.Checkpoint.Should().BeOnOrAfter(DateTime.UtcNow.AddMinutes(-1));
 
         await factory.WithDbContextAsync(async db =>
         {
             var m = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
             m.LastSyncAt.Should().NotBeNull();
-            m.LastSyncAt!.Value.Should().BeOnOrAfter(beforeCall);
+            m.LastSyncAt!.Value.Should().Be(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc));
+        });
+    }
+
+    [Fact]
+    public async Task PostCheckpoint_UpdatesMemberLastSyncAt()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var journalResponse = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+
+        var checkpointResponse = await PostCheckpointAsync(client, space.Id, token, journalResponse.Checkpoint);
+        checkpointResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var m = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            m.LastSyncAt.Should().Be(journalResponse.Checkpoint);
+        });
+    }
+
+    [Fact]
+    public async Task DeleteCheckpoint_ClearsMemberLastSyncAt()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = DateTime.UtcNow.AddMinutes(-5);
+            await db.SaveChangesAsync();
+        });
+
+        var response = await DeleteCheckpointAsync(client, space.Id, token);
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var m = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            m.LastSyncAt.Should().BeNull();
         });
     }
 
@@ -195,7 +273,14 @@ public class JournalEndpointTests
         var member = await factory.CreateMemberAsync(space.Id, "Zoe");
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
-        var response = await GetJournalAsync(client, space.Id, token, since: DateTime.UtcNow);
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        });
+
+        var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
@@ -381,7 +466,7 @@ public class JournalEndpointTests
     }
 
     [Fact]
-    public async Task GetJournal_WithoutSinceParameter_ReturnsAllItems()
+    public async Task GetJournal_WithoutCheckpoint_ReturnsAllItems()
     {
         await using var factory = new TestWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -404,7 +489,7 @@ public class JournalEndpointTests
             sharedAt: DateTime.UtcNow,
             fileSize: 0);
 
-        // No since parameter → should return everything
+        // No checkpoint yet -> should return everything
         var response = await GetJournalAsync(client, space.Id, token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -417,15 +502,26 @@ public class JournalEndpointTests
     // --- Helpers ---
 
     private static async Task<HttpResponseMessage> GetJournalAsync(
-        HttpClient client, Guid spaceId, string? token = null, DateTimeOffset? since = null)
+        HttpClient client, Guid spaceId, string? token = null)
     {
-        var url = $"/v1/spaces/{spaceId}/journal";
-        if (since.HasValue)
-        {
-            url += $"?since={since.Value.UtcDateTime:O}";
-        }
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/spaces/{spaceId}/journal");
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+    private static async Task<HttpResponseMessage> PostCheckpointAsync(
+        HttpClient client, Guid spaceId, string token, DateTime checkpoint)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/journal/checkpoint");
+        request.Content = JsonContent.Create(new { checkpoint });
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> DeleteCheckpointAsync(
+        HttpClient client, Guid spaceId, string token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/v1/spaces/{spaceId}/journal/checkpoint");
         AddAuthorizationHeader(request, token);
         return await client.SendAsync(request);
     }
@@ -482,6 +578,7 @@ public class JournalEndpointTests
 
     private sealed record JournalResponse(
         bool FullSyncRequired,
+        DateTime Checkpoint,
         SpaceItemResponse[] AddedOrUpdated,
         Guid[] Deleted);
 

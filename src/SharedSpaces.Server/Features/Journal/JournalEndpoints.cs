@@ -14,6 +14,8 @@ public static class JournalEndpoints
             .RequireAuthorization();
 
         group.MapGet("/", GetJournal);
+        group.MapPost("/checkpoint", UpdateCheckpoint);
+        group.MapDelete("/checkpoint", ResetCheckpoint);
 
         return app;
     }
@@ -22,8 +24,7 @@ public static class JournalEndpoints
         Guid spaceId,
         HttpContext httpContext,
         AppDbContext db,
-        CancellationToken cancellationToken,
-        DateTimeOffset? since = null)
+        CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
         if (authorizationResult is not null)
@@ -40,7 +41,23 @@ public static class JournalEndpoints
             return Results.NotFound(new { Error = "Space not found" });
         }
 
-        var sinceUtc = since?.UtcDateTime ?? DateTime.MinValue;
+        var member = await db.SpaceMembers
+            .SingleOrDefaultAsync(m => m.Id == memberId && m.SpaceId == spaceId, cancellationToken);
+
+        if (member is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (member.LastSyncAt is null)
+        {
+            // Enroll the member into journaling without acknowledging any progress yet.
+            member.LastSyncAt = DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var sinceUtc = DateTime.SpecifyKind(member.LastSyncAt.Value, DateTimeKind.Utc);
+        var checkpointUtc = DateTime.UtcNow;
         var fullSyncRequired = space.JournalPrunedBefore.HasValue && sinceUtc <= space.JournalPrunedBefore.Value;
 
         var addedOrUpdated = await db.SpaceItems
@@ -72,17 +89,80 @@ public static class JournalEndpoints
                 .ToArrayAsync(cancellationToken);
         }
 
-        // Update requesting member's LastSyncAt
+        return Results.Ok(new JournalResponse(fullSyncRequired, checkpointUtc, addedOrUpdated, deleted));
+    }
+
+    private static async Task<IResult> UpdateCheckpoint(
+        Guid spaceId,
+        JournalCheckpointRequest request,
+        HttpContext httpContext,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
+        if (authorizationResult is not null)
+        {
+            return authorizationResult;
+        }
+
+        if (request.Checkpoint == default)
+        {
+            return Results.BadRequest(new { Error = "The 'checkpoint' value is required." });
+        }
+
+        if (request.Checkpoint.Kind == DateTimeKind.Local)
+        {
+            return Results.BadRequest(new { Error = "The 'checkpoint' value must be in UTC." });
+        }
+
+        var checkpointUtc = request.Checkpoint.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(request.Checkpoint, DateTimeKind.Utc)
+            : request.Checkpoint.ToUniversalTime();
+
         var member = await db.SpaceMembers
             .SingleOrDefaultAsync(m => m.Id == memberId && m.SpaceId == spaceId, cancellationToken);
 
-        if (member is not null)
+        if (member is null)
         {
-            member.LastSyncAt = DateTime.UtcNow;
+            return Results.Unauthorized();
+        }
+
+        if (member.LastSyncAt is null || checkpointUtc > member.LastSyncAt.Value)
+        {
+            member.LastSyncAt = checkpointUtc;
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        return Results.Ok(new JournalResponse(fullSyncRequired, addedOrUpdated, deleted));
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ResetCheckpoint(
+        Guid spaceId,
+        HttpContext httpContext,
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
+        if (authorizationResult is not null)
+        {
+            return authorizationResult;
+        }
+
+        var member = await db.SpaceMembers
+            .SingleOrDefaultAsync(m => m.Id == memberId && m.SpaceId == spaceId, cancellationToken);
+
+        if (member is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (member.LastSyncAt is not null)
+        {
+            member.LastSyncAt = null;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return Results.NoContent();
     }
 
     private static IResult? TryAuthorizeSpaceRequest(HttpContext httpContext, Guid routeSpaceId, out Guid memberId)
