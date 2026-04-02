@@ -264,6 +264,142 @@ public class JournalEndpointTests
     }
 
     [Fact]
+    public async Task GetJournal_ReplaysSameChanges_UntilCheckpointIsAcknowledged()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "replay me",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        var first = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+        var second = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+
+        first.AddedOrUpdated.Should().ContainSingle(r => r.Id == item.Id);
+        second.AddedOrUpdated.Should().ContainSingle(r => r.Id == item.Id);
+        second.Checkpoint.Should().BeOnOrAfter(first.Checkpoint);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt.Should().Be(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc));
+        });
+    }
+
+    [Fact]
+    public async Task PostCheckpoint_StopsReplayingAcknowledgedItems()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var oldItem = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "already synced",
+            sharedAt: DateTime.UtcNow,
+            fileSize: 0);
+
+        var first = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+        await PostCheckpointAsync(client, space.Id, token, first.Checkpoint);
+
+        var newItem = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "new after ack",
+            sharedAt: first.Checkpoint.AddSeconds(1),
+            fileSize: 0);
+
+        var second = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+
+        second.AddedOrUpdated.Should().ContainSingle(r => r.Id == newItem.Id);
+        second.AddedOrUpdated.Should().NotContain(r => r.Id == oldItem.Id);
+    }
+
+    [Fact]
+    public async Task DeleteCheckpoint_MakesNextGetReplayFullBaseline()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var item = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "text",
+            content: "baseline item",
+            sharedAt: DateTime.UtcNow.AddMinutes(-5),
+            fileSize: 0);
+
+        var initial = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+        await PostCheckpointAsync(client, space.Id, token, initial.Checkpoint);
+
+        var resetResponse = await DeleteCheckpointAsync(client, space.Id, token);
+        resetResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var replay = await ReadJsonAsync<JournalResponse>(await GetJournalAsync(client, space.Id, token));
+        replay.AddedOrUpdated.Should().ContainSingle(r => r.Id == item.Id);
+    }
+
+    [Fact]
+    public async Task PostCheckpoint_DoesNotMoveStoredCheckpointBackward()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var currentCheckpoint = DateTime.UtcNow;
+        var olderCheckpoint = currentCheckpoint.AddMinutes(-5);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = currentCheckpoint;
+            await db.SaveChangesAsync();
+        });
+
+        var response = await PostCheckpointAsync(client, space.Id, token, olderCheckpoint);
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt.Should().Be(currentCheckpoint);
+        });
+    }
+
+    [Fact]
+    public async Task PostCheckpoint_WithDefaultCheckpoint_Returns400()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var response = await PostCheckpointAsync(client, space.Id, token, default);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task GetJournal_EmptyJournal_ReturnsEmptyArrays()
     {
         await using var factory = new TestWebApplicationFactory();
