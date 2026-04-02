@@ -128,7 +128,7 @@ public sealed class SharedSpacesApiClient : IDisposable
         string serverUrl,
         string spaceId,
         string jwtToken,
-        DateTime checkpoint,
+        DateTimeOffset checkpoint,
         CancellationToken ct = default)
     {
         var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/journal/checkpoint";
@@ -225,9 +225,9 @@ public sealed record SpaceItemResponse(
 
 public sealed record JournalResponse(
     [property: JsonPropertyName("fullSyncRequired")] bool FullSyncRequired,
-    [property: JsonPropertyName("checkpoint")] DateTime Checkpoint,
+    [property: JsonPropertyName("checkpoint")] DateTimeOffset Checkpoint,
     [property: JsonPropertyName("addedOrUpdated")] SpaceItemResponse[] AddedOrUpdated,
     [property: JsonPropertyName("deleted")] Guid[] Deleted);
 
 public sealed record JournalCheckpointRequest(
-    [property: JsonPropertyName("checkpoint")] DateTime Checkpoint);
+    [property: JsonPropertyName("checkpoint")] DateTimeOffset Checkpoint);

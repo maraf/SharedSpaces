@@ -34,11 +34,11 @@ public class SyncServiceTests : IDisposable
         IEnumerable<SpaceItemResponse>? addedOrUpdated = null,
         IEnumerable<Guid>? deleted = null,
         bool fullSyncRequired = false,
-        DateTime? checkpoint = null)
+        DateTimeOffset? checkpoint = null)
     {
         var response = new JournalResponse(
             FullSyncRequired: fullSyncRequired,
-            Checkpoint: checkpoint ?? DateTime.UtcNow,
+            Checkpoint: checkpoint ?? DateTimeOffset.UtcNow,
             AddedOrUpdated: addedOrUpdated?.ToArray() ?? Array.Empty<SpaceItemResponse>(),
             Deleted: deleted?.ToArray() ?? Array.Empty<Guid>());
 
@@ -942,31 +942,32 @@ public class SyncServiceTests : IDisposable
         var localPath = Path.Combine(_tempDir, "offline-delete.txt");
         File.WriteAllText(localPath, "stale local content");
 
-        var checkpoint = new DateTime(2026, 4, 2, 12, 0, 0, DateTimeKind.Utc);
+        var checkpoint = new DateTimeOffset(2026, 4, 2, 12, 0, 0, TimeSpan.Zero);
         MockJournal(
             spaceId,
             serverUrl,
             addedOrUpdated: Array.Empty<SpaceItemResponse>(),
-            deleted: new[] { itemId },
+            deleted: Array.Empty<Guid>(),
             checkpoint: checkpoint);
 
-        using var seedClient = new SharedSpacesApiClient(_httpClient);
-        var seedService = new SyncService(seedClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
-        seedService.MarkAsDownloaded(itemId, Path.GetFileName(localPath));
+        // Mock ListItems to return empty (file not on server anymore)
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(Array.Empty<SpaceItemResponse>()));
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
         var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
         await service.InitialSyncAsync(CancellationToken.None);
 
-        File.Exists(localPath).Should().BeFalse("journal tombstones should delete tracked files after restart");
+        File.Exists(localPath).Should().BeFalse("files not present on server should be deleted during full sync");
 
         var requests = _mockHttp.GetRequests();
         requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"),
-            "journal should be used for incremental reconciliation");
+            "journal should be fetched for checkpoint");
+        requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items"),
+            "initial sync should list all items for full reconciliation");
         requests.Should().Contain(r => r.Method == HttpMethod.Post && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal/checkpoint"),
-            "successful journal application should advance the checkpoint");
-        requests.Should().NotContain(r => r.Url.EndsWith($"/v1/spaces/{spaceId}/items"),
-            "incremental journal sync should not fall back to listing all items");
+            "successful full sync should acknowledge the checkpoint");
     }
 
     [Fact]
@@ -997,10 +998,6 @@ public class SyncServiceTests : IDisposable
             HttpStatusCode.OK,
             Encoding.UTF8.GetBytes("hello world!"));
 
-        using var seedClient = new SharedSpacesApiClient(_httpClient);
-        var seedService = new SyncService(seedClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
-        seedService.MarkAsDownloaded(Guid.NewGuid(), "previously-synced.txt");
-
         using var apiClient = new SharedSpacesApiClient(_httpClient);
         var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
         await service.InitialSyncAsync(CancellationToken.None);
@@ -1027,13 +1024,12 @@ public class SyncServiceTests : IDisposable
             SharedAt: DateTime.UtcNow);
 
         MockJournal(spaceId, serverUrl, new[] { fileItem });
+        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
+            HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { fileItem }));
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
             HttpStatusCode.InternalServerError,
             "download failed");
-
-        using var seedClient = new SharedSpacesApiClient(_httpClient);
-        var seedService = new SyncService(seedClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
-        seedService.MarkAsDownloaded(Guid.NewGuid(), "baseline.txt");
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
         var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
@@ -1041,6 +1037,7 @@ public class SyncServiceTests : IDisposable
 
         var requests = _mockHttp.GetRequests();
         requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
+        requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items"));
         requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items/{itemId}/download"));
         requests.Should().NotContain(r => r.Method == HttpMethod.Post && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal/checkpoint"),
             "the journal checkpoint must not advance when applying a change failed locally");
