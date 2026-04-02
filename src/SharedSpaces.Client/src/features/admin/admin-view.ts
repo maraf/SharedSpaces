@@ -105,6 +105,28 @@ export class AdminView extends BaseElement {
     return mb % 1 === 0 ? `${mb} MB` : `${mb.toFixed(1)} MB`;
   }
 
+  private sortMembers(members: MemberResponse[]) {
+    return [...members].sort((a, b) => {
+      const displayNameCompare = a.displayName.localeCompare(b.displayName, undefined, {
+        sensitivity: 'base',
+      });
+      if (displayNameCompare !== 0) {
+        return displayNameCompare;
+      }
+
+      const joinedAtCompare = a.joinedAt.localeCompare(b.joinedAt);
+      if (joinedAtCompare !== 0) {
+        return joinedAtCompare;
+      }
+
+      return a.id.localeCompare(b.id);
+    });
+  }
+
+  private sortInvitations(invitations: InvitationListResponse[]) {
+    return [...invitations].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
   private createSpaceCardState(): SpaceCardState {
     return {
       clientAppUrl: window.location.origin,
@@ -125,11 +147,12 @@ export class AdminView extends BaseElement {
   }
 
   private setSpaces(spaces: SpaceResponse[]) {
-    this.spaces = [...spaces].sort((a, b) =>
+    const sortedSpaces = [...spaces].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
     );
+    this.spaces = sortedSpaces;
     this.spaceCardState = Object.fromEntries(
-      spaces.map((space) => [
+      sortedSpaces.map((space) => [
         space.id,
         this.spaceCardState[space.id] ?? this.createSpaceCardState(),
       ]),
@@ -248,7 +271,7 @@ export class AdminView extends BaseElement {
     if (shouldLoadMembers) {
       nextState.isLoadingMembers = false;
       if (membersResult.status === 'fulfilled') {
-        nextState.members = membersResult.value;
+        nextState.members = this.sortMembers(membersResult.value);
         nextState.membersError = '';
       } else {
         nextState.membersError =
@@ -261,7 +284,7 @@ export class AdminView extends BaseElement {
     if (shouldLoadInvitations) {
       nextState.isLoadingInvitations = false;
       if (invitationsResult.status === 'fulfilled') {
-        nextState.invitations = invitationsResult.value;
+        nextState.invitations = this.sortInvitations(invitationsResult.value);
         nextState.invitationsError = '';
       } else {
         nextState.invitationsError =
@@ -464,8 +487,10 @@ export class AdminView extends BaseElement {
 
       const latestState = this.getSpaceCardState(spaceId);
       this.updateSpaceCardState(spaceId, {
-        members: latestState.members.map((member) =>
-          member.id === memberId ? { ...member, isRevoked: true } : member,
+        members: this.sortMembers(
+          latestState.members.map((member) =>
+            member.id === memberId ? { ...member, isRevoked: true } : member,
+          ),
         ),
         pendingMemberRevocations: this.getPendingState(
           latestState.pendingMemberRevocations,
@@ -521,8 +546,10 @@ export class AdminView extends BaseElement {
 
       const latestState = this.getSpaceCardState(spaceId);
       this.updateSpaceCardState(spaceId, {
-        members: latestState.members.map((member) =>
-          member.id === memberId ? { ...member, isRevoked: false } : member,
+        members: this.sortMembers(
+          latestState.members.map((member) =>
+            member.id === memberId ? { ...member, isRevoked: false } : member,
+          ),
         ),
         pendingMemberUnrevocations: this.getPendingState(
           latestState.pendingMemberUnrevocations,
@@ -586,7 +613,9 @@ export class AdminView extends BaseElement {
 
       const latestState = this.getSpaceCardState(spaceId);
       this.updateSpaceCardState(spaceId, {
-        members: latestState.members.filter((member) => member.id !== memberId),
+        members: this.sortMembers(
+          latestState.members.filter((member) => member.id !== memberId),
+        ),
         pendingMemberRemovals: this.getPendingState(
           latestState.pendingMemberRemovals,
           memberId,
@@ -1229,4 +1258,3 @@ declare global {
     'admin-view': AdminView;
   }
 }
-
