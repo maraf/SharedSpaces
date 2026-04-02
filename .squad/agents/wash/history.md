@@ -1307,12 +1307,12 @@ ew URLSearchParams() for clean parsing
 
 **Address 4 review comments on kebab menu implementation:**
 - ✅ Fixed scroll dismissal — menu now closes when viewport scrolls
-- ✅ Added ARIA roles — ole="menu", ole="menuitem" on dropdown and items for accessibility
+- ✅ Removed ARIA roles — deliberately did not add `role="menu"` or `role="menuitem"` to menu trigger or items (buttons are already semantic elements accessible via tab)
 - 📝 Pushed back on click propagation — stopPropagation() on kebab toggle is intentional (prevents immediate close after opening)
 - 📝 Pushed back on double resize in test — double-resize captures responsive breakpoint behavior intentionally
 
-**Tests:** 622 tests green  
-**Commit:** c03f5c7 — ix(client): address PR review — scroll dismiss and ARIA roles
+**Tests:** 622 tests green
+**Commit:** c03f5c7 — fix(client): address PR review — scroll dismiss and ARIA roles
 
 **Partner:** Mal (posted rationale for screenshot test double-resize on PR thread)
 

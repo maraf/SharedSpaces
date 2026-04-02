@@ -276,3 +276,10 @@ This keeps screenshots realistic (real server responses, real UI formatting) whi
 
 **Last updated:** 2026-04-01 (Zoe)  
 **Status:** Implemented and validated
+
+### Intentional visual probe workflow
+
+When you need to prove the screenshot harness is actually catching UI changes, make a temporary, clearly visible change in a screen already covered by src/SharedSpaces.Client/e2e/screenshots.spec.ts, rerun 
+px playwright test --project=screenshots, and inspect which files in docs/screenshots/ changed before restoring everything.
+
+A good probe is a single text change in one component file because it is easy to reason about and easy to revert. In the join flow, changing the join-view.ts heading changed exactly the six join-related screenshots (join, join-prefilled, and join-error in both desktop and mobile), which is the expected blast radius for that component.

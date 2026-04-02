@@ -63,6 +63,22 @@
 
 **Architectural recommendation:**
 - Do **not** lean on AppHost-only argument plumbing as the whole solution; that is too Aspire-specific for this repo because screenshot startup has a direct-server fallback
+
+### Merge Main: Journal Feature + Conflict Resolution (2026-04-02)
+
+**Action:** Merged `origin/main` into `fix/screenshot-test-fixes` (8 new commits total after merge).
+
+**Conflicts:** Two files with import/signature mismatches:
+- `Program.cs`: HEAD had Seeding import; main introduced Journal (kept main's Journal).
+- `ItemEndpoints.cs`: HEAD had `ISystemClock systemClock`; main refactored to `IOptions<JournalOptions> journalOptions` in method signature.
+
+**Resolution:**
+- Accepted main's refactoring entirely (Seeding → Journal, ISystemClock → JournalOptions).
+- No code logic changes to this branch; conflict was purely about dependency injection choices in transferred-item endpoint.
+
+**Outcome:**
+- Branch now includes Journal audit feature from main (#170).
+- No uncommitted changes lost; local .squad edits (wash history, determinism skill notes) preserved and remain uncommitted.
 - If we clean this up, move to a server-side config key / clock override consumable from Aspire **or** direct server env vars, while keeping Playwright's browser clock frozen
 - Avoid test-only concerns in public API contracts unless we explicitly accept that trade-off
 
