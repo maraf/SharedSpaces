@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SpaceMember> SpaceMembers => Set<SpaceMember>();
     public DbSet<SpaceItem> SpaceItems => Set<SpaceItem>();
     public DbSet<SharedLink> SharedLinks => Set<SharedLink>();
+    public DbSet<DeletedItem> DeletedItems => Set<DeletedItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
-using SharedSpaces.Server.Features.Seeding;
+using SharedSpaces.Server.Features.Journal;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
@@ -396,6 +396,7 @@ public static class ItemEndpoints
         AppDbContext db,
         IFileStorage fileStorage,
         ISpaceHubNotifier hubNotifier,
+        IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out _);
@@ -415,7 +416,23 @@ public static class ItemEndpoints
         var isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase);
 
         db.SpaceItems.Remove(item);
+
+        // Only write journal tombstone if at least one member has opted into journaling
+        var hasJournalSubscribers = await db.SpaceMembers
+            .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
+
+        if (hasJournalSubscribers)
+        {
+            await UpsertDeletedItemAsync(db, item.Id, item.SpaceId, cancellationToken);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
+
+        // Prune old journal entries if configured
+        if (hasJournalSubscribers)
+        {
+            await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
+        }
 
         var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
         await hubNotifier.NotifyItemDeletedAsync(itemDeletedEvent, cancellationToken);
@@ -492,8 +509,8 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
-        ISystemClock systemClock,
         IConfiguration configuration,
+        IOptions<JournalOptions> journalOptions,
         IHttpClientFactory httpClientFactory,
         CancellationToken cancellationToken)
     {
@@ -542,12 +559,12 @@ public static class ItemEndpoints
         {
             return await TransferItemCrossServer(
                 spaceId, itemId, action, request.DestinationToken, jwtToken,
-                db, fileStorage, hubNotifier, httpClientFactory, cancellationToken);
+                db, fileStorage, hubNotifier, httpClientFactory, journalOptions, cancellationToken);
         }
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, systemClock, configuration, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, configuration, journalOptions, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
@@ -574,6 +591,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         ISpaceHubNotifier hubNotifier,
         IHttpClientFactory httpClientFactory,
+        IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
     {
         var destinationServerUrl = jwtToken.Claims
@@ -688,7 +706,22 @@ public static class ItemEndpoints
                 if (sourceItemTracked is not null)
                 {
                     db.SpaceItems.Remove(sourceItemTracked);
+
+                    // Only write journal tombstone if at least one member has opted into journaling
+                    var hasJournalSubscribers = await db.SpaceMembers
+                        .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
+
+                    if (hasJournalSubscribers)
+                    {
+                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, cancellationToken);
+                    }
+
                     await db.SaveChangesAsync(cancellationToken);
+
+                    if (hasJournalSubscribers)
+                    {
+                        await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
+                    }
                 }
 
                 var itemDeletedEvent = new ItemDeletedEvent(itemId, spaceId);
@@ -729,6 +762,7 @@ public static class ItemEndpoints
         ISpaceHubNotifier hubNotifier,
         ISystemClock systemClock,
         IConfiguration configuration,
+        IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
     {
         // Validate destination token with signature verification (same server = same signing key)
@@ -872,6 +906,8 @@ public static class ItemEndpoints
                     : sourceItem.Content;
             }
 
+            var hasJournalSubscribers = false;
+
             // If move, delete source item
             if (action == "move")
             {
@@ -881,6 +917,15 @@ public static class ItemEndpoints
                 if (sourceItemTracked is not null)
                 {
                     db.SpaceItems.Remove(sourceItemTracked);
+
+                    // Only write journal tombstone if at least one member has opted into journaling
+                    hasJournalSubscribers = await db.SpaceMembers
+                        .AnyAsync(m => m.SpaceId == spaceId && m.LastSyncAt != null, cancellationToken);
+
+                    if (hasJournalSubscribers)
+                    {
+                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, cancellationToken);
+                    }
                 }
             }
 
@@ -922,6 +967,12 @@ public static class ItemEndpoints
                     {
                         // Best-effort cleanup
                     }
+                }
+
+                // Prune old journal entries if configured
+                if (hasJournalSubscribers)
+                {
+                    await PruneDeletedItemsAsync(db, spaceId, journalOptions.Value, cancellationToken);
                 }
             }
 
@@ -971,6 +1022,76 @@ public static class ItemEndpoints
                 await quotaLock.DisposeAsync();
             }
         }
+    }
+
+    private static async Task UpsertDeletedItemAsync(
+        AppDbContext db,
+        Guid itemId,
+        Guid spaceId,
+        CancellationToken cancellationToken)
+    {
+        var existing = await db.DeletedItems
+            .SingleOrDefaultAsync(d => d.ItemId == itemId, cancellationToken);
+
+        if (existing is not null)
+        {
+            existing.SpaceId = spaceId;
+            existing.DeletedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            db.DeletedItems.Add(new DeletedItem
+            {
+                ItemId = itemId,
+                SpaceId = spaceId,
+                DeletedAt = DateTime.UtcNow
+            });
+        }
+    }
+
+    private static async Task PruneDeletedItemsAsync(
+        AppDbContext db,
+        Guid spaceId,
+        JournalOptions journalOptions,
+        CancellationToken cancellationToken)
+    {
+        if (journalOptions.MaxEntriesPerSpace is not { } maxEntries)
+        {
+            return;
+        }
+
+        var count = await db.DeletedItems
+            .CountAsync(d => d.SpaceId == spaceId, cancellationToken);
+
+        if (count <= maxEntries)
+        {
+            return;
+        }
+
+        var excess = count - maxEntries;
+
+        var oldestEntries = await db.DeletedItems
+            .Where(d => d.SpaceId == spaceId)
+            .OrderBy(d => d.DeletedAt)
+            .Take(excess)
+            .ToListAsync(cancellationToken);
+
+        if (oldestEntries.Count == 0)
+        {
+            return;
+        }
+
+        var watermark = oldestEntries.Max(d => d.DeletedAt);
+
+        db.DeletedItems.RemoveRange(oldestEntries);
+
+        var space = await db.Spaces.SingleOrDefaultAsync(s => s.Id == spaceId, cancellationToken);
+        if (space is not null)
+        {
+            space.JournalPrunedBefore = watermark;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static IResult? TryAuthorizeSpaceRequest(HttpContext httpContext, Guid routeSpaceId, out Guid memberId)

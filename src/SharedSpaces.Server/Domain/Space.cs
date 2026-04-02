@@ -6,7 +6,9 @@ public class Space
     public string Name { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public long? MaxUploadSize { get; set; }
+    public DateTime? JournalPrunedBefore { get; set; }
     public ICollection<SpaceInvitation> Invitations { get; set; } = [];
     public ICollection<SpaceMember> Members { get; set; } = [];
     public ICollection<SpaceItem> Items { get; set; } = [];
+    public ICollection<DeletedItem> DeletedItems { get; set; } = [];
 }

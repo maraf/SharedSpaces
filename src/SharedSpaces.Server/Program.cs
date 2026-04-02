@@ -3,13 +3,14 @@ using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Features.Items;
-using SharedSpaces.Server.Features.Seeding;
+using SharedSpaces.Server.Features.Journal;
 using SharedSpaces.Server.Features.SharedLinks;
 using SharedSpaces.Server.Features.Spaces;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +29,7 @@ builder.Services.AddOptions<StorageOptions>()
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ISpaceHubNotifier, SpaceHubNotifier>();
+builder.Services.Configure<JournalOptions>(builder.Configuration.GetSection("Journal"));
 builder.Services.AddSignalR();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -81,6 +83,7 @@ app.MapSpaceEndpoints();
 app.MapInvitationEndpoints();
 app.MapTokenEndpoints();
 app.MapItemEndpoints();
+app.MapJournalEndpoints();
 app.MapSharedLinkEndpoints();
 app.MapHubEndpoints();
 
