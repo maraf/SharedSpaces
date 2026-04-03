@@ -61,7 +61,7 @@ public static class JournalEndpoints
         var fullSyncRequired = space.JournalPrunedBefore.HasValue && sinceUtc <= space.JournalPrunedBefore.Value;
 
         SpaceItemResponse[] addedOrUpdated;
-        Guid[] deleted;
+        DeletedItemResponse[] deleted;
         if (fullSyncRequired)
         {
             addedOrUpdated = [];
@@ -87,7 +87,7 @@ public static class JournalEndpoints
                 .AsNoTracking()
                 .Where(d => d.SpaceId == spaceId && d.DeletedAt >= sinceUtc)
                 .OrderBy(d => d.DeletedAt)
-                .Select(d => d.ItemId)
+                .Select(d => new DeletedItemResponse(d.ItemId, d.Content))
                 .ToArrayAsync(cancellationToken);
         }
 

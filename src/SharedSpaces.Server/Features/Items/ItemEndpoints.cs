@@ -424,7 +424,8 @@ public static class ItemEndpoints
 
         if (hasJournalSubscribers)
         {
-            await UpsertDeletedItemAsync(db, item.Id, item.SpaceId, cancellationToken);
+            var content = isFile ? item.Content : null;
+            await UpsertDeletedItemAsync(db, item.Id, item.SpaceId, content, cancellationToken);
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -715,7 +716,10 @@ public static class ItemEndpoints
 
                     if (hasJournalSubscribers)
                     {
-                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, cancellationToken);
+                        var content = string.Equals(sourceItemTracked.ContentType, "file", StringComparison.OrdinalIgnoreCase)
+                            ? sourceItemTracked.Content
+                            : null;
+                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, content, cancellationToken);
                     }
 
                     await db.SaveChangesAsync(cancellationToken);
@@ -926,7 +930,10 @@ public static class ItemEndpoints
 
                     if (hasJournalSubscribers)
                     {
-                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, cancellationToken);
+                        var content = string.Equals(sourceItemTracked.ContentType, "file", StringComparison.OrdinalIgnoreCase)
+                            ? sourceItemTracked.Content
+                            : null;
+                        await UpsertDeletedItemAsync(db, sourceItemTracked.Id, sourceItemTracked.SpaceId, content, cancellationToken);
                     }
                 }
             }
@@ -1030,6 +1037,7 @@ public static class ItemEndpoints
         AppDbContext db,
         Guid itemId,
         Guid spaceId,
+        string? content,
         CancellationToken cancellationToken)
     {
         var existing = await db.DeletedItems
@@ -1039,6 +1047,7 @@ public static class ItemEndpoints
         {
             existing.SpaceId = spaceId;
             existing.DeletedAt = DateTime.UtcNow;
+            existing.Content = content;
         }
         else
         {
@@ -1046,7 +1055,8 @@ public static class ItemEndpoints
             {
                 ItemId = itemId,
                 SpaceId = spaceId,
-                DeletedAt = DateTime.UtcNow
+                DeletedAt = DateTime.UtcNow,
+                Content = content
             });
         }
     }
