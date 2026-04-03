@@ -1131,7 +1131,7 @@ Reviewer flagged that `CreateSharedLink` did not validate `Name` length against 
 - **Server URL pattern:** `$"{httpContext.Request.Scheme}://{httpContext.Request.Host}"` is the standard way to compute the server's base URL (used in TokenEndpoints, InvitationEndpoints, and now SharedLinkEndpoints)
 - **Nullable record defaults for backward compat:** Adding optional fields to shared response records with `= null` default avoids breaking list/query endpoints that don't need the new field
 - **CLI sync no longer uses local manifests:** Journal sync is fully server-tracked via `SpaceMember.LastSyncAt`. The server returns deltas since the client's last checkpoint, so no local `.sharedspaces-sync.json` file is needed. Initial sync always performs full reconciliation (lists all items) to handle cases where the in-memory `_downloadedItems` dictionary is empty after restart.
-- **DateTimeOffset vs DateTime in DTOs:** Server contracts use `DateTimeOffset` for timestamps (e.g., `JournalCheckpointRequest.Checkpoint`, `JournalResponse.Checkpoint`). Client code should match this to avoid serialization/time zone issues.
+- **DateTimeOffset vs DateTime in DTOs:** Server uses `DateTimeOffset` for `JournalCheckpointRequest.Checkpoint` but `DateTime` for `JournalResponse.Checkpoint`. The CLI uses `DateTimeOffset` on both for safety. `System.Text.Json` handles the `DateTime` → `DateTimeOffset` deserialization transparently.
 - **Atomic file download claims in CLI:** `DownloadAndSaveFileAsync` uses `TryAdd(itemId, safeName)` as an atomic claim to prevent double-downloads when the same item appears in multiple events (e.g., journal delta + SignalR broadcast during polling).
 
 ## Team Update: Share Link Implementation Session (2026-03-30)

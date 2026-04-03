@@ -5175,10 +5175,6 @@ Mobile space constraint — 4-5 action buttons per item consume ~160px of 390px 
 
 ---
 
-# Decision: CLI Sync State Tracking via Server-Only Checkpoints (Duplicated from inbox - removing)
-
----
-
 # Migration Snapshot Validation Test
 
 **Date:** 2026-03-29  
