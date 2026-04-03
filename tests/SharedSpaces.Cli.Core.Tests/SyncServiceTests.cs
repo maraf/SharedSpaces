@@ -78,9 +78,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 0,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem, textItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem, textItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{fileItem.Id}/download",
@@ -117,9 +114,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 500,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
@@ -152,9 +146,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 2048,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -185,9 +176,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 4096,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -219,9 +207,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 512,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -311,9 +296,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 1024,
             SharedAt: DateTime.UtcNow)).ToArray();
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(items));
         MockJournal(spaceId, serverUrl, items);
 
         foreach (var item in items)
@@ -386,9 +368,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 1024,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -720,9 +699,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 1024,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -776,9 +752,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 100,
             SharedAt: DateTime.UtcNow);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -823,9 +796,6 @@ public class SyncServiceTests : IDisposable
             FileSize: fileContent.Length,
             SharedAt: sharedAt);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
@@ -869,9 +839,6 @@ public class SyncServiceTests : IDisposable
             FileSize: serverContent.Length,
             SharedAt: sharedAt);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -912,9 +879,6 @@ public class SyncServiceTests : IDisposable
             FileSize: fileContent.Length,
             SharedAt: new DateTime(2026, 1, 15, 10, 30, 0, DateTimeKind.Utc));
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
@@ -933,12 +897,12 @@ public class SyncServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task InitialSync_UsesJournalDeletionForTrackedFilesWithoutListingItems()
+    public async Task InitialSync_UsesJournalDeletionToDeleteLocalFiles()
     {
         var spaceId = Guid.NewGuid();
         var serverUrl = "https://server.example.com";
         var jwt = "fake-jwt-token";
-        var itemId = Guid.NewGuid();
+        var deletedItemId = Guid.NewGuid();
         var localPath = Path.Combine(_tempDir, "offline-delete.txt");
         File.WriteAllText(localPath, "stale local content");
 
@@ -947,27 +911,22 @@ public class SyncServiceTests : IDisposable
             spaceId,
             serverUrl,
             addedOrUpdated: Array.Empty<SpaceItemResponse>(),
-            deleted: Array.Empty<DeletedItemResponse>(),
+            deleted: new[] { new DeletedItemResponse(deletedItemId, "offline-delete.txt") },
             checkpoint: checkpoint);
-
-        // Mock ListItems to return empty (file not on server anymore)
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(Array.Empty<SpaceItemResponse>()));
 
         using var apiClient = new SharedSpacesApiClient(_httpClient);
         var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
         await service.InitialSyncAsync(CancellationToken.None);
 
-        File.Exists(localPath).Should().BeFalse("files not present on server should be deleted during full sync");
+        File.Exists(localPath).Should().BeFalse("file should be deleted via journal deletion");
 
         var requests = _mockHttp.GetRequests();
         requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"),
-            "journal should be fetched for checkpoint");
-        requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items"),
-            "initial sync should list all items for full reconciliation");
+            "journal should be fetched");
+        requests.Should().NotContain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items"),
+            "initial sync via journal should not need to list items");
         requests.Should().Contain(r => r.Method == HttpMethod.Post && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal/checkpoint"),
-            "successful full sync should acknowledge the checkpoint");
+            "successful journal application should acknowledge the checkpoint");
     }
 
     [Fact]
@@ -1024,9 +983,6 @@ public class SyncServiceTests : IDisposable
             SharedAt: DateTime.UtcNow);
 
         MockJournal(spaceId, serverUrl, new[] { fileItem });
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",
             HttpStatusCode.InternalServerError,
             "download failed");
@@ -1037,7 +993,8 @@ public class SyncServiceTests : IDisposable
 
         var requests = _mockHttp.GetRequests();
         requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
-        requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items"));
+        requests.Should().NotContain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items"),
+            "journal path should not call ListItems");
         requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/items/{itemId}/download"));
         requests.Should().NotContain(r => r.Method == HttpMethod.Post && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal/checkpoint"),
             "the journal checkpoint must not advance when applying a change failed locally");
@@ -1061,9 +1018,6 @@ public class SyncServiceTests : IDisposable
             FileSize: 11,
             SharedAt: sharedAt);
 
-        _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items",
-            HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { fileItem }));
         MockJournal(spaceId, serverUrl, new[] { fileItem });
 
         _mockHttp.AddResponse($"{serverUrl}/v1/spaces/{spaceId}/items/{itemId}/download",

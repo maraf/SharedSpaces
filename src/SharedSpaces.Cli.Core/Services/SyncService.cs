@@ -77,7 +77,7 @@ public sealed class SyncService : IAsyncDisposable
         Console.WriteLine("Performing initial sync...");
 
         var journal = await _apiClient.GetJournalAsync(_serverUrl, _spaceId, _jwtToken, ct);
-        await PerformFullSyncAsync(journal.Checkpoint, ct);
+        await ApplyRemoteChangesAsync(journal, ct);
 
         Console.WriteLine("Initial sync complete.");
     }
@@ -107,7 +107,7 @@ public sealed class SyncService : IAsyncDisposable
         {
             filename = tracked;
         }
-        else if (!string.IsNullOrEmpty(knownFilename))
+        else if (knownFilename is not null)
         {
             filename = SanitizeFileName(knownFilename, itemId);
         }
@@ -259,7 +259,7 @@ public sealed class SyncService : IAsyncDisposable
             try
             {
                 var journal = await _apiClient.GetJournalAsync(_serverUrl, _spaceId, _jwtToken, ct);
-                await ApplyRemoteChangesAsync(journal, forceFullSync: false, ct);
+                await ApplyRemoteChangesAsync(journal, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -503,14 +503,11 @@ public sealed class SyncService : IAsyncDisposable
         _knownFiles.TryRemove(fileName, out _);
     }
 
-    private async Task ApplyRemoteChangesAsync(JournalResponse journal, bool forceFullSync, CancellationToken ct)
+    private async Task ApplyRemoteChangesAsync(JournalResponse journal, CancellationToken ct)
     {
-        if (forceFullSync || journal.FullSyncRequired)
+        if (journal.FullSyncRequired)
         {
-            Console.WriteLine(forceFullSync
-                ? "[Sync] Local sync state missing; performing full reconciliation."
-                : "[Sync] Journal history was pruned; performing full reconciliation.");
-
+            Console.WriteLine("[Sync] Journal history was pruned; performing full reconciliation.");
             await PerformFullSyncAsync(journal.Checkpoint, ct);
             return;
         }
