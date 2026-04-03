@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.FileStorage;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
@@ -197,6 +198,33 @@ public class ItemEndpointTests
         savedItem.ContentType.Should().Be("text");
         savedItem.Content.Should().Be("hello world");
         savedItem.FileSize.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertTextItem_WithDeterministicTimeConfig_UsesConfiguredTimestamp()
+    {
+        const string seededUtcNow = "2025-03-19T12:20:00Z";
+        var expectedTimestamp = DateTimeOffset.Parse(seededUtcNow).UtcDateTime;
+        await using var factory = new TestWebApplicationFactory(seededUtcNow: seededUtcNow);
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var itemId = Guid.NewGuid();
+        var response = await UpsertTextItemAsync(
+            client,
+            space.Id,
+            itemId,
+            "seeded content",
+            token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SpaceItemResponse>(response);
+        body.SharedAt.Should().Be(expectedTimestamp);
+
+        var savedItem = await factory.WithDbContextAsync(db => db.SpaceItems.SingleAsync(item => item.Id == itemId));
+        savedItem.SharedAt.Should().Be(expectedTimestamp);
     }
 
     [Fact]
@@ -600,7 +628,7 @@ public class ItemEndpointTests
         long FileSize,
         DateTime SharedAt);
 
-    private sealed class TestWebApplicationFactory(long? maxSpaceQuotaBytes = null) : WebApplicationFactory<Program>
+    private sealed class TestWebApplicationFactory(long? maxSpaceQuotaBytes = null, string? seededUtcNow = null) : WebApplicationFactory<Program>
     {
         public const string AdminSecret = "test-admin-secret";
         public const string JwtSigningKey = "test-signing-key-1234567890abcdef";
@@ -621,7 +649,8 @@ public class ItemEndpointTests
                     ["Admin:Secret"] = AdminSecret,
                     ["Jwt:SigningKey"] = JwtSigningKey,
                     ["Storage:BasePath"] = StorageBasePath,
-                    ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString()
+                    ["Storage:MaxSpaceQuotaBytes"] = _maxSpaceQuotaBytes.ToString(),
+                    [SystemClockFactory.SeededUtcNowConfigKey] = seededUtcNow
                 });
             });
 

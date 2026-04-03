@@ -1,4 +1,19 @@
 
+## Screenshot Stability Analysis (2026-03-29)
+
+**Screenshot drift investigation (pass 1 vs pass 2):**
+- Analyzed 7 changed admin panel screenshots across two Playwright test runs.
+- **Root cause:** Non-deterministic seed data generation — UUIDs, invitation tokens, and member IDs are generated fresh on each run, causing PNG hashes to differ even though visual layout is stable.
+- **Grouped into 4 buckets:**
+  - **Admin Spaces Display** (2 images): Space IDs visible in metadata differ on each run.
+  - **Admin Invitations Modal** (2 images): Generated invitation tokens/strings are cryptographic and non-deterministic.
+  - **Admin Invite Generation Modal** (1 image): QR code is procedurally generated from invitation token, differs each run.
+  - **Admin Members Modal** (2 images): Member UUIDs generated server-side, may affect rendered data attributes.
+- **Layout is stable** — no actual UI regressions. Visual spacing, button placement, modal structure all match across runs.
+- **Test harness location:** `src/SharedSpaces.Client/e2e/screenshots.spec.ts:257–342` (beforeAll seed setup) and specific tests at lines 569, 583, 713, 814.
+- **Recommendation:** Implement deterministic seeding (fixed UUIDs for test data) or mask dynamic content (hide/replace invitation tokens) in screenshots to stabilize baselines. Current approach accepts non-deterministic admin data as "expected" since real systems generate fresh tokens on each run.
+- **Documentation:** Created detailed analysis in `screenshot-drift-analysis.md` with technical breakdown, visual evidence, and three stabilization options.
+
 ## Team Updates (2026-03-27)
 
 **Issue #135 completed (Copy and move items between spaces):**
@@ -148,3 +163,84 @@
 - .squad/log/2026-03-30T19-19-08-share-link-implementation.md
 - .squad/orchestration-log/2026-03-30T19-19-08-zoe.md
 - Decisions merged into .squad/decisions.md
+
+## Screenshot Determinism Analysis (2026-03-31)
+
+**Issue:** Screenshot churn caused by dynamic timestamps, UUIDs, and relative-time strings that change on every test run.
+
+**Root cause identified:**
+1. **TIER 1 (High churn):** Relative time formatting in item `sharedAt` (space-view.ts:1700, 1747), shared link `createdAt` (space-view.ts:2051), and admin space/member creation dates via `.toLocaleString()` (admin-view.ts:914, 1055)
+2. **TIER 2 (Medium churn):** Pending share timestamps (app-shell.ts:795–799), member/item/invitation count buttons
+3. **TIER 3 (Low churn):** UUID display in admin view (no layout impact; fixed-width monospace rendering)
+
+**Affected screenshots:** 24 of 58 (42%), primarily admin views, space view with items, and share/pending modals.
+
+**Key finding:** The `formatRelativeTime()` utility in `src/SharedSpaces.Client/src/lib/format-time.ts` returns dynamic strings ("Today", "Yesterday", "3d ago", "Mar 19") based on wall-clock time, causing monthly drift.
+
+**Recommended mitigations (prioritized):**
+1. **Tier 1 (lowest risk, 30 min):** Deterministic test fixtures—seed spaces/items with fixed timestamps (e.g., "2025-03-19T12:00:00Z"). Captures real rendering; re-baseline quarterly.
+2. **Tier 2 (1–2 hours, permanent):** Mock clock in test suite—freeze Playwright/Vitest time to eliminate monthly drift entirely.
+3. **Avoid:** Relative-time removal or masking—defeats purpose of E2E screenshots and regresses UX.
+
+**Decision recorded:** `.squad/decisions/inbox/zoe-screenshot-determinism.md` (full analysis with implementation sequence, file monitoring checklist, and future crew guidance).
+
+**Pattern for future work:** Screenshot determinism = fixture determinism. You can't mock your way out of dynamic test data.
+
+### Screenshot Determinism Initiative — Full Session (2026-04-01)
+
+**Session summary:** Parallel 3-agent investigation into screenshot churn (Wash, Zoe, Mal).
+
+**Outcome:** Unified recommendation for deterministic fixtures + frozen time mocking; hybrid approach approved.
+
+**Key findings across all agents:**
+- **Wash's analysis:** 4 mitigation strategies ranked by effort/impact; Phase 1 (freeze time + deterministic UUIDs) estimated 2-3 hours, 80-90% churn reduction
+- **Zoe's audit:** 12 churn sources in 3 tiers; 24 high-risk screenshots out of 58; Phase 1 (30 min) → Phase 2 (1-2 hours) → Phase 3 (ongoing)
+- **Mal's review:** Cross-agent alignment confirmed; no conflicts; recommendations unified
+
+**Approved mitigation ladder:**
+1. Phase 1 (Near-term): Deterministic fixtures + frozen time — ~80% churn elimination
+2. Phase 2 (Short-term, optional): Mock clock — ~95% churn elimination
+3. Phase 3 (Ongoing): Quarterly re-baselining + monitoring
+
+**Next steps:** Implementation assignment to Kaylee or Wash; validation via 5× consecutive test runs; documentation update in SKILL.md.
+
+**Session outputs:**
+- `.squad/log/2026-04-01T11-38-06Z-screenshot-determinism.md` — Session summary
+- `.squad/orchestration-log/2026-04-01T11-38-06Z-wash.md` — Wash's work
+- `.squad/orchestration-log/2026-04-01T11-38-06Z-zoe.md` — Zoe's work
+- `.squad/orchestration-log/2026-04-01T11-38-06Z-mal.md` — Mal's review
+- `.squad/decisions.md` — Merged Wash + Zoe decisions
+
+- 2026-04-01: Extended deterministic seeding is now live end-to-end for screenshots. The server accepts optional admin-gated `SeededAt` overrides on space creation, token exchange, item upsert form data, and shared-link creation; `screenshots.spec.ts` passes fixed timestamps for API-backed seed data.
+- 2026-04-01: Screenshot Playwright config now fixes `locale` to `en-US` and `timezoneId` to `UTC`, while `screenshots.spec.ts` freezes browser `Date` per test with `page.addInitScript` to keep relative-time labels stable.
+- 2026-04-01: Relevant validation for deterministic screenshot seeding is `dotnet test tests/SharedSpaces.Server.Tests/SharedSpaces.Server.Tests.csproj --filter "AdminEndpointTests|TokenEndpointTests|ItemEndpointTests|SharedLinkEndpointTests"`, `npm run build` in `src/SharedSpaces.Client`, and `npx playwright test --project=screenshots` in `src/SharedSpaces.Client`.
+
+## Team Updates (2026-04-01)
+
+**Deterministic screenshot seeding implementation completed:**
+- **Kaylee (Backend):** Implemented admin-gated seededAt parameter support on POST /v1/spaces, POST /v1/tokens, PUT /v1/spaces/{spaceId}/items/{itemId}, and POST /v1/spaces/{spaceId}/shared-links. Centralized timestamp resolution in SeededTimestampResolver.cs and admin-secret validation in AdminSecretValidator.cs. Preserved production behavior (no overrides without admin secret). Added tests; build + test suite passing.
+- **Zoe (Client/Tests):** Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts with fixed seed date (2026-03-30T12:00:00Z) and deterministic seeding calls with X-Admin-Secret header. Configured Playwright with pinned locale (en-US), timezone (UTC), and frozen in-page clock. All 58 screenshots captured successfully; full suite validated.
+- **Coordination:** No conflicts between backend analysis, factory decision, and implementation — all agents aligned on admin-gated API parameter approach.
+- **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.
+
+## Learnings
+ 
+- **AppHost deterministic time is screenshot-only opt-in (2026-04-01):**
+  - Reviewed the AppHost change that gates DeterministicTime__SeededUtcNow and DeterministicTime__AutoAdvanceSeconds behind Screenshots:UseDeterministicTime=true.
+  - End-to-end validation: plain dotnet run .\src\AppHost.cs created spaces with wall-clock createdAt, while dotnet run .\src\AppHost.cs -- --Screenshots:UseDeterministicTime=true created spaces at the seeded 2025-03-19T12:00:00Z.
+  - Added 	ests/SharedSpaces.Server.Tests/SystemClockFactoryTests.cs to lock the fallback/default behavior (SystemClock with no seeded config) and deterministic auto-advance behavior (default 1 second and explicit 60 seconds).
+  - Focused validation passed: full SharedSpaces.Server.Tests project green, plus the 3 new SystemClockFactoryTests.
+
+- **Screenshot zero-drift verification run (2026-04-02):**
+  - Ran `npx playwright test --project=screenshots` from `src/SharedSpaces.Client` after deleting `artifacts/screenshots.db*` and `artifacts/screenshots-storage`.
+  - The current deterministic harness (`src/SharedSpaces.Client/playwright.config.ts` + `src/AppHost.cs`) produced 62 passing screenshot captures with no screenshot file hash changes under `docs/screenshots`.
+  - Final working tree stayed clean after the run, and no listeners remained on screenshot ports `5173` / `5165` once Playwright shut its web server down.
+
+## Team Updates (2026-04-02)
+
+**Screenshot stability work completed and pushed:**
+- **Zoe (Tester):** Verified all 16 admin panel screenshots stable across 5+ consecutive test runs. Confirmed deterministic PNG hashes despite re-capturing baselines. Validated Playwright wait strategies (admin-view.spaceCardState) settle async collection loading before capture. No visual regressions detected (layout, spacing, button placement all identical across runs).
+- **Kaylee (Backend):** Deterministic ID generation (IGuidGenerator) now coordinated with deterministic timestamps; backend-owned screenshot churn (visible IDs in admin UI, share-link tokens) eliminated.
+- **Wash (Frontend):** Client-side sorting ensures predictable render order; Playwright waits ensure async UI settling.
+- **Pattern validated:** Deterministic screenshot testing pipeline now fully operational. Reusable for future features requiring stable visual baselines.
+- **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b). All tests passing: Playwright screenshots 100% stable, Vitest suite 447 tests green, xUnit server tests green.**

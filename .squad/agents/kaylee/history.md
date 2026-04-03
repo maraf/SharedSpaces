@@ -57,6 +57,8 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+- Screenshot determinism now hangs off the internal `DeterministicTime:SeededUtcNow` / `DeterministicTime:AutoAdvanceSeconds` config plus the browser-side frozen `Date`; avoid widening public server request DTOs for test-only timestamps.
+- `src/AppHost.cs` seeds deterministic server time for screenshot-oriented runs, while direct startup of `src/SharedSpaces.Server` stays normal unless the same config keys are supplied explicitly.
 - A baseline GitHub Actions CI workflow should validate `SharedSpaces.sln` on `ubuntu-latest` with .NET 9 using `dotnet restore`, `dotnet build --no-restore`, and `dotnet test --no-build` for PRs/pushes to `main`.
 - Per-space quota overrides use a nullable `long? MaxUploadSize` on the Space entity; null means "use server default from `StorageOptions.MaxSpaceQuotaBytes`". The effective quota is resolved as `space.MaxUploadSize ?? serverDefault` at both API response time and upload enforcement.
 - When generating EF Core migrations, always build first (don't use `--no-build`) to ensure the model snapshot picks up property changes.
@@ -94,10 +96,126 @@ Test project committed to same branch as solution scaffold (`squad/17-solution-s
 - Aspire local orchestration now lives in the single-file app `src/AppHost.cs`, which replaces the old `src/SharedSpaces.AppHost/` project and keeps local orchestration outside `SharedSpaces.sln`.
 - The file-based AppHost uses `Aspire.AppHost.Sdk@13.0.2`, `Aspire.Hosting.NodeJs@9.5.2`, and a `#:project` directive to `src/SharedSpaces.Server/SharedSpaces.Server.csproj`.
 - The Vite client is registered from `./SharedSpaces.Client` with `AddNpmApp("client", "./SharedSpaces.Client", "dev")`, waits for the server, wires `Server__DefaultClientAppUrl`, and should be started with `dotnet run src/AppHost.cs`.
+- Screenshot runs should opt into deterministic server time at the AppHost layer with `--Screenshots:UseDeterministicTime=true`; normal `dotnet run src/AppHost.cs` should stay on real wall-clock time.
+- Playwright screenshot capture now boots AppHost itself, wipes `artifacts/screenshots.db*` plus `artifacts/screenshots-storage`, and passes isolated DB/storage overrides so screenshot seeds stay deterministic and disposable.
 - Admin space management lives in `src/SharedSpaces.Server/Features/Spaces/SpaceEndpoints.cs`, where both `POST /v1/spaces` and `GET /v1/spaces` use `AdminAuthenticationFilter`, and listing returns `SpaceResponse` ordered newest-first for admin space selection.
 - Admin space management now also covers `/v1/spaces/{spaceId}/members` and `/v1/spaces/{spaceId}/invitations`: member listings return `MemberResponse` newest-first, revocation is idempotent via `POST .../members/{memberId}/revoke`, and invitation listings/deletes never expose hashed PIN values.
 - Space-scoped admin endpoints should check whether the space exists before looking up nested resources so missing spaces return `{ Error = "Space not found" }` consistently ahead of nested 404s.
 - Server container publishing uses .NET SDK container support (`EnableSdkContainerSupport`) in `.csproj`, targeting `ghcr.io/maraf/sharedspaces-server` with tag format `{VersionPrefix}-{RuntimeIdentifier}`.
+
+## Screenshot Determinism Analysis (2026-03-31)
+
+**Task:** Research backend options for stabilizing screenshot data when E2E tests pull live API responses.
+
+**Key Finding:** Five server-generated timestamps and IDs cause screenshot churn:
+1. `Space.CreatedAt` — set to `DateTime.UtcNow` (line 7 in Space.cs)
+2. `SpaceMember.JoinedAt` — set to `DateTime.UtcNow` (line 8 in SpaceMember.cs)
+3. `SpaceItem.SharedAt` — set to `DateTime.UtcNow` (line 30 in SpaceItem.cs)
+4. `SharedLink.CreatedAt` — set to `DateTime.UtcNow` (line 10 in SharedLink.cs)
+5. All IDs (Space, SpaceMember, SpaceItem, SharedLink, SpaceInvitation) — `Guid.NewGuid()` on entity construction
+
+**API Response Fields Affected (via entity snapshots in Models.cs):**
+- `SpaceResponse.CreatedAt` (line 5, Spaces/Models.cs) — renders as `.toLocaleString()` in admin view (desktop only)
+- `MemberResponse.JoinedAt` (line 7, Spaces/Models.cs) — renders as `.toLocaleString()` in admin members modal
+- `SpaceItemResponse.SharedAt` (line 22, Items/Models.cs) — renders as relative time ("Today", "Yesterday", etc.) in space-view.ts
+- `SpaceDetailsResponse.CreatedAt` (line 13, Items/Models.cs) — used on item detail page
+- `SharedLinkResponse.CreatedAt` (line 12, SharedLinks/Models.cs) — renders timestamp in shared link UI
+- All UUID fields in responses — impact low (monospace, fixed-width) but visible in screenshots
+
+**Current Screenshot Capture Flow (e2e/screenshots.spec.ts):**
+- `seedSpace(name)` calls live API endpoints sequentially
+- Creates Space (`POST /v1/spaces`) — seed gets `space.CreatedAt = DateTime.UtcNow`
+- Creates Invitation (`POST /v1/spaces/{spaceId}/invitations`) — always generates fresh `SpaceInvitation.Id`
+- Creates SpaceMember (via `POST /v1/tokens`) — seed gets `member.JoinedAt = DateTime.UtcNow`
+- Creates SpaceItems (via `PUT /v1/spaces/{spaceId}/items/{itemId}`) — each gets `item.SharedAt = DateTime.UtcNow`
+- No test-only seed endpoints or overrides exist
+
+**Backend Options for Determinism (Non-Implementation Analysis):**
+
+### Option 1: Accept Monthly Re-baselining (Lowest Backend Risk)
+- **Approach:** Client-side fixture determinism (Zoe's Tier 1). Keep backend as-is.
+- **Backend change:** None.
+- **Pros:** Zero product-code risk, backwards-compatible.
+- **Cons:** Re-baseline quarterly or when calendar month changes (maintenance cost).
+- **Timeline:** 0 min (backend)
+- **Recommendation:** Ship this first; add backend options only if re-baselining becomes painful.
+
+### Option 2: Test-Only Seeding Hook with Fixed Timestamps
+- **Approach:** Add optional `?testMode=true` or `X-Test-Seed` header that seeds entities with fixed timestamps instead of `DateTime.UtcNow`.
+- **Implementation points:**
+  - Middleware or endpoint filter checks header in development/test environment
+  - If present, inject a test-scoped `IDateTimeProvider` that returns fixed time (e.g., `new DateTime(2025, 3, 19, 12, 0, 0, DateTimeKind.Utc)`)
+  - Entities use `IDateTimeProvider.Now` instead of `DateTime.UtcNow` (requires small refactor in 5 entity classes)
+- **Backend code locations:**
+  - Inject into `Program.cs` only in non-production environments
+  - Create `Infrastructure/Clock/IDateTimeProvider` interface
+  - Update entity initializers (Space.cs:7, SpaceMember.cs:8, SpaceItem.cs:30, SharedLink.cs:10)
+  - Add test header check in `JwtAuthenticationExtensions.cs` or middleware
+- **Pros:** Permanent determinism, highly controlled, UI captures real timestamps (no mocking).
+- **Cons:** Requires entity refactoring (5 files), middleware addition.
+- **Timeline:** 1–2 hours (backend)
+- **Risk:** Low — changes isolated to test paths and optional provider injection; no product behavior changed.
+
+### Option 3: Admin Seed Endpoint (`POST /admin/seed`)
+- **Approach:** New admin-protected endpoint that creates a complete test space with all entities pre-seeded at a fixed timestamp.
+- **Implementation points:**
+  - `Features/Admin/SeedEndpoints.cs` — new feature folder
+  - Accept request with `{ "timestamp": "2025-03-19T12:00:00Z" }`
+  - Creates Space, Invitation, SpaceMember, SpaceItems all at that timestamp
+  - Returns full response structure (space ID, token, items)
+  - Protected by `AdminAuthenticationFilter` (X-Admin-Secret header)
+- **Backend code locations:**
+  - New endpoint file (50–80 lines)
+  - Optionally reuse/refactor entity creation logic from TokenEndpoints.cs and ItemEndpoints.cs
+- **Pros:** Explicit, easy to document, test harness can call once and reuse all IDs.
+- **Cons:** Requires new endpoint logic, doesn't help with existing item creation patterns (screenshot test still PUT items individually).
+- **Timeline:** 1 hour (backend)
+- **Risk:** Low — isolated endpoint, admin-protected.
+
+### Option 4: Clock Abstraction with DI + Test Override
+- **Approach:** Server-side version of Zoe's "Mock Clock" (Tier 2).
+  - Create `ISystemClock` interface returning `DateTimeOffset` (more testable than static `DateTime.UtcNow`)
+  - Register in DI container (dev/test: inject test clock; production: inject `SystemClock` → `DateTimeOffset.UtcNow`)
+  - Constructor-inject into entities, services, or pass to helper functions
+  - Test configuration sets frozen time at app startup
+- **Implementation points:**
+  - `Infrastructure/Clock/ISystemClock.cs` and `SystemClock.cs`
+  - Register in `Program.cs`
+  - Inject into entity creation flow (endpoints, domain services)
+  - TestWebApplicationFactory overrides clock in `ConfigureServices()`
+- **Pros:** Fully deterministic, server-side controlled, integrates with EF interceptors if needed later.
+- **Cons:** Pervasive DI change (inject into most endpoints), requires test factory updates.
+- **Timeline:** 2–3 hours (backend)
+- **Risk:** Medium — changes touch many endpoints; well-tested pattern but larger surface area.
+
+### Option 5: EF Core Value Converter + Test Configuration
+- **Approach:** Configure EF Core `ValueConverter` on datetime properties to use test time when in test environment.
+- **Implementation points:**
+  - `Infrastructure/Persistence/Configurations/` — update entity configurations (Space.cs, SpaceMember.cs, etc.)
+  - Add converter logic: `builder.Property(s => s.CreatedAt).HasConversion(v => v, v => TestClock.Now ?? v)`
+  - Set `TestClock.Now` in TestWebApplicationFactory startup
+- **Pros:** Minimal code footprint, all entities affected uniformly, works transparently in SaveChangesAsync.
+- **Cons:** EF-specific pattern, less visible to future developers, harder to debug.
+- **Timeline:** 1.5 hours (backend)
+- **Risk:** Medium — EF interceptor behavior can be subtle; test setup complexity.
+
+---
+
+**Proposed Backend Approach:**
+1. **Ship Option 1** (client-side fixtures) immediately. Zoe's skill doc already covers it. No backend work needed.
+2. **Evaluate Option 2** after 1–2 months. If re-baselining becomes painful, add `IDateTimeProvider` to entity initializers. Minimal risk, permanent.
+3. **Hold Options 3–5** as future enhancements if broader test infrastructure is needed.
+
+**Why not full mock clock yet?** The harness (Playwright) and backend are independent; Zoe's Tier 1 (fixed seed dates in test fixtures) solves 90% of the problem without backend changes. Server-side determinism becomes relevant only if:
+- Tests need to control time during long-running operations (not applicable here: simple POST/PUT).
+- Multiple test runs need exact same timestamps (already solved by fixed fixture dates).
+- API contracts require timestamp stability at the millisecond level (not a stated requirement).
+
+**Actionable Summary for Backend:**
+- `Space.CreatedAt`, `SpaceMember.JoinedAt`, `SpaceItem.SharedAt`, `SharedLink.CreatedAt` are the four churn points.
+- No backend code changes needed today; client-side fixture discipline solves it.
+- If backend determinism is needed later, `IDateTimeProvider` injection (Option 2) is the lowest-risk, highest-clarity approach.
+- All options are isolated to non-product code paths (test environment or optional headers).
 
 ## Team Updates (2026-03-27)
 
@@ -1084,3 +1202,70 @@ Updated CLI to consume the new journal deletion shape with filenames. Key learni
 - Tests: `tests/SharedSpaces.Cli.Core.Tests/SyncServiceTests.cs`
 
 **Result:** All 57 CLI tests passing, clean build. Journal now provides filename directly, eliminating need for local manifest or in-memory mapping for journal-based deletions.
+
+## Team Update: Share Link Implementation Session (2026-03-30)
+
+**Issue #151 (GitHub Pages SPA routing) + Issue #161 (stateless share links) - Completed**
+
+**Coordinated with:** Wash (Frontend Dev), Zoe (Tester)
+
+**Your contribution:**
+- Added nullable ServerUrl field to SharedLinkResponse DTO
+- ServerUrl populated on link creation with requesting host's base URL
+- Enables client-side stateless share link decoding (token + API URL combined in URL)
+- 209 server integration tests passing
+
+**Cross-agent outcomes:**
+- Wash: Implemented 404.html redirect pattern for GitHub Pages SPA routing, created share-link.ts encode/decode module, updated 4 URL construction sites
+- Zoe: Wrote 31 E2E/unit tests (2 server, 16 share-link, 13 shared-item-api)
+
+**Key decisions executed:**
+1. 404.html redirect pattern (no --base ./ change needed)
+2. Base64url encode token + API URL as query string for stateless links
+3. Backward compatibility for legacy GUID tokens
+
+**Session documented in:**
+- .squad/log/2026-03-30T19-19-08-share-link-implementation.md
+- .squad/orchestration-log/2026-03-30T19-19-08-kaylee.md
+- Decisions merged into .squad/decisions.md
+
+
+## Cross-Agent Update: Deterministic Screenshot Data (2026-04-01)
+
+**From Mal (Lead):**
+After your research on server-generated timestamps, Mal evaluated the deterministic data strategies and recommended the factory-layer timestamp override approach. The decision is to extend the seed/factory layer to allow fixed timestamps for screenshot-created entities, rather than adding API override paths or response interception.
+
+**Next step:** Implement timestamp override capability in the seed/factory layer so screenshot tests can pass fixed timestamps when creating entities.
+
+**Reference:** `.squad/log/2026-04-01T11-40-15Z-deterministic-api-research.md`
+
+### Learnings
+- Screenshot seeding now uses optional `seededAt` request fields that are only honored when the request also includes a valid `X-Admin-Secret`, so normal production writes still fall back to `DateTime.UtcNow`.
+- Shared timestamp override plumbing lives in `src/SharedSpaces.Server/Features/Seeding/SeededTimestampResolver.cs`, while admin-secret comparison is centralized in `src/SharedSpaces.Server/Features/Admin/AdminSecretValidator.cs`.
+- The screenshot fixture entry point is `src/SharedSpaces.Client/e2e/screenshots.spec.ts`; it now seeds deterministic timestamps for space creation, member join, item share, and shared-link creation paths.
+
+## Team Updates (2026-04-01)
+
+**Deterministic screenshot seeding implementation completed:**
+- **Kaylee (Backend):** Implemented admin-gated seededAt parameter support on POST /v1/spaces, POST /v1/tokens, PUT /v1/spaces/{spaceId}/items/{itemId}, and POST /v1/spaces/{spaceId}/shared-links. Centralized timestamp resolution in SeededTimestampResolver.cs and admin-secret validation in AdminSecretValidator.cs. Preserved production behavior (no overrides without admin secret). Added tests; build + test suite passing.
+- **Zoe (Client/Tests):** Updated src/SharedSpaces.Client/e2e/screenshots.spec.ts with fixed seed date (2026-03-30T12:00:00Z) and deterministic seeding calls with X-Admin-Secret header. Configured Playwright with pinned locale (en-US), timezone (UTC), and frozen in-page clock. All 58 screenshots captured successfully; full suite validated.
+- **Coordination:** No conflicts between backend analysis, factory decision, and implementation — all agents aligned on admin-gated API parameter approach.
+- **Result:** Screenshot baselines now stable for 30+ days. Monthly re-baselining needed only on month boundaries when relative-time strings drift. Full E2E flow validated.
+
+## Team Updates (2026-04-02)
+
+**Screenshot stability work completed and pushed:**
+- **Kaylee (Backend):** Implemented deterministic ID generation (IGuidGenerator, IInvitationPinGenerator) keyed to `DeterministicTime:SeededUtcNow`. Updated SpaceEndpoints.cs, TokenEndpoints.cs, SharedLinkEndpoints.cs, and InvitationEndpoints.cs to assign fixed IDs/tokens during seeded runs. All 16 admin panel screenshots stabilized (spaces, invitations, members, share-modal). Server build + test suite passing. Branch: fix/screenshot-test-fixes, commit 2f9729b.
+- **Wash (Frontend):** Implemented admin UI sorting (members by displayName→joinedAt→id, invitations by id). Updated admin-view.ts with reactive sort methods. Added Playwright wait strategy for `admin-view.spaceCardState` loading flags. Client tests passing; screenshot captures stable.
+- **Zoe (Tester):** Verified all 16 admin screenshots stable across 5+ test runs (no visual regressions, deterministic PNG hashes). Confirmed Playwright capture timing fixes work reliably.
+- **Pattern established:** Backend seeded generators + client-side sorting + test harness wait strategies = stable screenshot test cycle. Reusable for future determinism requirements.
+- **PR ready for merge to main.**
+
+## Learnings
+### 2026-04-02 — Screenshot-stable server IDs
+- Deterministic screenshot runs need stable server-generated identifiers as well as stable timestamps; key both off `DeterministicTime:SeededUtcNow`.
+- `src/SharedSpaces.Server/Program.cs` now wires `ISystemClock`, `IInvitationPinGenerator`, and `IGuidGenerator`; the create paths in `Features/Spaces`, `Invitations`, `Tokens`, and `SharedLinks` should assign IDs/tokens explicitly.
+- The backend-owned screenshot churn points are the visible space/invitation IDs in admin screenshots and the shared-link token embedded in `space-share-modal` URLs.
+
+
+

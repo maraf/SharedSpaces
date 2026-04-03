@@ -1,9 +1,9 @@
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using QRCoder;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Admin;
+using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Infrastructure.Persistence;
 
 namespace SharedSpaces.Server.Features.Invitations;
@@ -54,7 +54,9 @@ public static class InvitationEndpoints
         CreateInvitationRequest request,
         AppDbContext db,
         IConfiguration configuration,
-        HttpRequest httpRequest)
+        HttpRequest httpRequest,
+        IInvitationPinGenerator invitationPinGenerator,
+        IGuidGenerator guidGenerator)
     {
         var space = await db.Spaces.FindAsync(spaceId);
         if (space == null)
@@ -74,11 +76,12 @@ public static class InvitationEndpoints
 
         for (var attempt = 0; ; attempt++)
         {
-            pin = GeneratePin();
+            pin = invitationPinGenerator.GeneratePin();
             hashedPin = InvitationPinHasher.HashPin(pin, adminSecret);
 
             invitation = new SpaceInvitation
             {
+                Id = guidGenerator.NewGuid(),
                 SpaceId = spaceId,
                 Pin = hashedPin
             };
@@ -140,11 +143,6 @@ public static class InvitationEndpoints
         await db.SaveChangesAsync(cancellationToken);
 
         return Results.NoContent();
-    }
-
-    private static string GeneratePin()
-    {
-        return RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
     }
 
     private static bool IsUniqueConstraintViolation(DbUpdateException ex)
