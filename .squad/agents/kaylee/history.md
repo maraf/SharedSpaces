@@ -1041,3 +1041,46 @@ Reviewer flagged that `CreateSharedLink` did not validate `Name` length against 
 - .squad/log/2026-03-30T19-19-08-share-link-implementation.md
 - .squad/orchestration-log/2026-03-30T19-19-08-kaylee.md
 - Decisions merged into .squad/decisions.md
+
+## Learnings
+
+### Journal Deletion Content (2026-04-03)
+
+Added `Content` field to `DeletedItem` entity to support CLI filename mapping after restart. Key learnings:
+
+- **Entity changes:** `DeletedItem.Content` is nullable string — populated for file items (filename), null for text items
+- **Configuration pattern:** Used `.IsRequired(false)` in EF Core configuration for nullable properties
+- **Multiple deletion sites:** Found three places creating DeletedItem records:
+  1. Direct item deletion (ItemEndpoints.cs line ~425)
+  2. Transfer with "move" action (ItemEndpoints.cs line ~715)
+  3. Transfer second site (ItemEndpoints.cs line ~925)
+- **Content population logic:** `Content = isFile ? item.Content : null` where `isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase)`
+- **DTO pattern:** Created `DeletedItemResponse(Guid Id, string? Content)` to replace `Guid[]` in journal response
+- **Test updates:** Local record definitions in test files need updating separately from server DTOs
+- **Migration approach:** Added nullable column — safe additive migration with no data loss
+
+**File paths:**
+- Entity: `src/SharedSpaces.Server/Domain/DeletedItem.cs`
+- Configuration: `src/SharedSpaces.Server/Infrastructure/Persistence/Configurations/DeletedItemConfiguration.cs`
+- DTOs: `src/SharedSpaces.Server/Features/Journal/Models.cs`
+- Creation sites: `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs` (UpsertDeletedItemAsync + callers)
+- Tests: `tests/SharedSpaces.Server.Tests/JournalEndpointTests.cs`
+
+### CLI Journal Deletion Shape (2026-04-03)
+
+Updated CLI to consume the new journal deletion shape with filenames. Key learnings:
+
+- **DTO update pattern:** Changed `JournalResponse.Deleted` from `Guid[]` to `DeletedItemResponse[]` to match server
+- **Deletion extraction:** Extracted `DeleteLocalItem(Guid itemId, string? knownFilename)` method to handle both journal (with filename) and SignalR (without filename) paths
+- **Fallback logic:** When `knownFilename` is provided (from journal), use it directly; when null (from SignalR), fall back to `_downloadedItems` lookup
+- **Loop update:** In `ApplyRemoteChangesAsync`, changed from iterating `Guid[]` to iterating `DeletedItemResponse[]` using `DistinctBy(d => d.Id)`
+- **Test helper update:** Updated `MockJournal` helper to accept `IEnumerable<DeletedItemResponse>?` instead of `IEnumerable<Guid>?`
+- **Backward compatibility:** `OnItemDeleted` still works for SignalR events by calling `DeleteLocalItem(itemDeleted.Id, null)`
+- **Bool return pattern:** Preserved bool return types throughout deletion methods for conditional checkpoint acknowledgment
+
+**File paths:**
+- DTOs: `src/SharedSpaces.Cli.Core/Services/SharedSpacesApiClient.cs`
+- Sync service: `src/SharedSpaces.Cli.Core/Services/SyncService.cs`
+- Tests: `tests/SharedSpaces.Cli.Core.Tests/SyncServiceTests.cs`
+
+**Result:** All 57 CLI tests passing, clean build. Journal now provides filename directly, eliminating need for local manifest or in-memory mapping for journal-based deletions.
