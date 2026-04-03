@@ -32,7 +32,7 @@ public class SyncServiceTests : IDisposable
         Guid spaceId,
         string serverUrl,
         IEnumerable<SpaceItemResponse>? addedOrUpdated = null,
-        IEnumerable<Guid>? deleted = null,
+        IEnumerable<DeletedItemResponse>? deleted = null,
         bool fullSyncRequired = false,
         DateTimeOffset? checkpoint = null)
     {
@@ -40,7 +40,7 @@ public class SyncServiceTests : IDisposable
             FullSyncRequired: fullSyncRequired,
             Checkpoint: checkpoint ?? DateTimeOffset.UtcNow,
             AddedOrUpdated: addedOrUpdated?.ToArray() ?? Array.Empty<SpaceItemResponse>(),
-            Deleted: deleted?.ToArray() ?? Array.Empty<Guid>());
+            Deleted: deleted?.ToArray() ?? Array.Empty<DeletedItemResponse>());
 
         _mockHttp.AddResponse(
             $"{serverUrl}/v1/spaces/{spaceId}/journal",
@@ -947,7 +947,7 @@ public class SyncServiceTests : IDisposable
             spaceId,
             serverUrl,
             addedOrUpdated: Array.Empty<SpaceItemResponse>(),
-            deleted: Array.Empty<Guid>(),
+            deleted: Array.Empty<DeletedItemResponse>(),
             checkpoint: checkpoint);
 
         // Mock ListItems to return empty (file not on server anymore)

@@ -95,9 +95,18 @@ public sealed class SyncService : IAsyncDisposable
     public bool OnItemDeleted(ItemDeletedEvent itemDeleted)
     {
         Console.WriteLine($"[Event] ItemDeleted: {itemDeleted.Id}");
+        return DeleteLocalItem(itemDeleted.Id, knownFilename: null);
+    }
 
-        if (!_downloadedItems.TryGetValue(itemDeleted.Id, out var filename))
-            return true;
+    private bool DeleteLocalItem(Guid itemId, string? knownFilename)
+    {
+        string? filename = knownFilename;
+
+        if (filename is null)
+        {
+            if (!_downloadedItems.TryGetValue(itemId, out filename))
+                return true;
+        }
 
         if (!string.IsNullOrEmpty(filename))
         {
@@ -119,7 +128,7 @@ public sealed class SyncService : IAsyncDisposable
             _knownFiles.TryRemove(filename, out _);
         }
 
-        _downloadedItems.TryRemove(itemDeleted.Id, out _);
+        _downloadedItems.TryRemove(itemId, out _);
         return true;
     }
 
@@ -504,12 +513,12 @@ public sealed class SyncService : IAsyncDisposable
         Console.WriteLine($"[Journal] Applying {addedOrUpdatedFiles.Count} added/updated file(s) and {deletedCount} deletion(s).");
         var applySucceeded = true;
 
-        foreach (var deletedId in journal.Deleted.Distinct())
+        foreach (var deletedItem in journal.Deleted.DistinctBy(d => d.Id))
         {
-            if (_pendingUploads.ContainsKey(deletedId))
+            if (_pendingUploads.ContainsKey(deletedItem.Id))
                 continue;
 
-            applySucceeded &= OnItemDeleted(new ItemDeletedEvent(deletedId, _spaceGuid));
+            applySucceeded &= DeleteLocalItem(deletedItem.Id, deletedItem.Content);
         }
 
         foreach (var item in addedOrUpdatedFiles)

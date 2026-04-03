@@ -227,7 +227,11 @@ public sealed record JournalResponse(
     [property: JsonPropertyName("fullSyncRequired")] bool FullSyncRequired,
     [property: JsonPropertyName("checkpoint")] DateTimeOffset Checkpoint,
     [property: JsonPropertyName("addedOrUpdated")] SpaceItemResponse[] AddedOrUpdated,
-    [property: JsonPropertyName("deleted")] Guid[] Deleted);
+    [property: JsonPropertyName("deleted")] DeletedItemResponse[] Deleted);
+
+public sealed record DeletedItemResponse(
+    [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("content")] string? Content);
 
 public sealed record JournalCheckpointRequest(
     [property: JsonPropertyName("checkpoint")] DateTimeOffset Checkpoint);
