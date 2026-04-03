@@ -21,6 +21,7 @@ public sealed class SyncService : IAsyncDisposable
     private PeriodicTimer? _pollingTimer;
     private Task? _pollingTask;
     private CancellationTokenSource? _validationDelayCts;
+    private Task _validationTask = Task.CompletedTask;
     private readonly object _validationLock = new();
 
     internal TimeSpan JournalValidationDelay { get; set; } = TimeSpan.FromSeconds(5);
@@ -289,20 +290,27 @@ public sealed class SyncService : IAsyncDisposable
         lock (_validationLock)
         {
             _validationDelayCts?.Cancel();
-            _validationDelayCts?.Dispose();
-            _validationDelayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var delayCts = _validationDelayCts;
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _validationDelayCts = cts;
 
-            _ = Task.Run(async () =>
+            _validationTask = Task.Run(async () =>
             {
                 try
                 {
-                    await Task.Delay(JournalValidationDelay, delayCts.Token);
-                    await ValidateViaJournalAsync(ct);
+                    await Task.Delay(JournalValidationDelay, cts.Token);
+                    await ValidateViaJournalAsync(cts.Token);
                 }
                 catch (OperationCanceledException)
                 {
                     // Debounce reset or shutdown — expected
+                }
+                catch (ObjectDisposedException)
+                {
+                    // CTS disposed during race — safe to ignore
+                }
+                finally
+                {
+                    cts.Dispose();
                 }
             }, CancellationToken.None);
         }
@@ -686,10 +694,9 @@ public sealed class SyncService : IAsyncDisposable
         StopPolling();
         lock (_validationLock)
         {
-            _validationDelayCts?.Cancel();
-            _validationDelayCts?.Dispose();
-            _validationDelayCts = null;
+            try { _validationDelayCts?.Cancel(); } catch (ObjectDisposedException) { }
         }
+        try { await _validationTask.ConfigureAwait(false); } catch { }
         if (_pollingTask != null)
         {
             try { await _pollingTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
