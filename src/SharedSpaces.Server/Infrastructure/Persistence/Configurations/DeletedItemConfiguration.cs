@@ -18,6 +18,9 @@ public class DeletedItemConfiguration : IEntityTypeConfiguration<DeletedItem>
         builder.Property(d => d.DeletedAt)
             .IsRequired();
 
+        builder.Property(d => d.Content)
+            .IsRequired(false);
+
         builder.HasIndex(d => new { d.SpaceId, d.DeletedAt });
 
         builder.HasOne(d => d.Space)
