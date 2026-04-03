@@ -100,13 +100,20 @@ public sealed class SyncService : IAsyncDisposable
 
     private bool DeleteLocalItem(Guid itemId, string? knownFilename)
     {
-        string? filename = knownFilename;
+        // Prefer the in-memory mapping (already sanitized from download).
+        // Fall back to sanitizing the server-provided name, then give up.
+        string? filename = null;
+        if (_downloadedItems.TryGetValue(itemId, out var tracked) && !string.IsNullOrEmpty(tracked))
+        {
+            filename = tracked;
+        }
+        else if (!string.IsNullOrEmpty(knownFilename))
+        {
+            filename = SanitizeFileName(knownFilename, itemId);
+        }
 
         if (filename is null)
-        {
-            if (!_downloadedItems.TryGetValue(itemId, out filename))
-                return true;
-        }
+            return true;
 
         if (!string.IsNullOrEmpty(filename))
         {
