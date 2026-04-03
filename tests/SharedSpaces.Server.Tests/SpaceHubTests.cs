@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.Channels;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -377,22 +378,30 @@ public class SpaceHubTests
         var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
 
         var receivedEvent = new TaskCompletionSource<ItemAddedEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var connectedChannel = Channel.CreateBounded<bool>(2);
         await using var connection = CreateHubConnection(factory, space.Id, token);
         connection.On<ItemAddedEvent>("ItemAdded", evt =>
         {
             receivedEvent.TrySetResult(evt);
         });
+        connection.On("Connected", () =>
+        {
+            connectedChannel.Writer.TryWrite(true);
+        });
 
         await connection.StartAsync();
+        await connectedChannel.Reader.ReadAsync();
+
         await connection.StopAsync();
 
         await connection.StartAsync();
+        await connectedChannel.Reader.ReadAsync();
 
         var itemId = Guid.NewGuid();
         var response = await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
         response.EnsureSuccessStatusCode();
 
-        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+        var receivedTask = await Task.WhenAny(receivedEvent.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         receivedTask.Should().Be(receivedEvent.Task, "ItemAdded event should be received after reconnect");
 
         var evt = await receivedEvent.Task;
