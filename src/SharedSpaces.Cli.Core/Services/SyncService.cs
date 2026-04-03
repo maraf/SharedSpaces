@@ -20,6 +20,10 @@ public sealed class SyncService : IAsyncDisposable
     private DateTime _lastDisconnect = DateTime.MinValue;
     private PeriodicTimer? _pollingTimer;
     private Task? _pollingTask;
+    private CancellationTokenSource? _validationDelayCts;
+    private readonly object _validationLock = new();
+
+    internal TimeSpan JournalValidationDelay { get; set; } = TimeSpan.FromSeconds(5);
 
     public SyncService(
         SharedSpacesApiClient apiClient,
@@ -155,11 +159,13 @@ public sealed class SyncService : IAsyncDisposable
         _hubConnection.On<ItemAddedEvent>("ItemAdded", async itemAdded =>
         {
             await OnItemAddedAsync(itemAdded, ct);
+            ScheduleJournalValidation(ct);
         });
 
         _hubConnection.On<ItemDeletedEvent>("ItemDeleted", itemDeleted =>
         {
             OnItemDeleted(itemDeleted);
+            ScheduleJournalValidation(ct);
         });
 
         _hubConnection.Reconnecting += error =>
@@ -276,6 +282,44 @@ public sealed class SyncService : IAsyncDisposable
         Console.WriteLine("[Polling] Stopping HTTP polling.");
         _pollingTimer?.Dispose();
         _pollingTimer = null;
+    }
+
+    internal void ScheduleJournalValidation(CancellationToken ct)
+    {
+        lock (_validationLock)
+        {
+            _validationDelayCts?.Cancel();
+            _validationDelayCts?.Dispose();
+            _validationDelayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var delayCts = _validationDelayCts;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(JournalValidationDelay, delayCts.Token);
+                    await ValidateViaJournalAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Debounce reset or shutdown — expected
+                }
+            }, CancellationToken.None);
+        }
+    }
+
+    private async Task ValidateViaJournalAsync(CancellationToken ct)
+    {
+        try
+        {
+            Console.WriteLine("[Validation] Fetching journal to validate sync state...");
+            var journal = await _apiClient.GetJournalAsync(_serverUrl, _spaceId, _jwtToken, ct);
+            await ApplyRemoteChangesAsync(journal, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"[Validation] Journal validation failed: {ex.Message}");
+        }
     }
 
     private async Task<bool> DownloadAndSaveFileAsync(Guid itemId, string filename, long fileSize, DateTime sharedAt, CancellationToken ct)
@@ -640,6 +684,12 @@ public sealed class SyncService : IAsyncDisposable
     {
         _watcher?.Dispose();
         StopPolling();
+        lock (_validationLock)
+        {
+            _validationDelayCts?.Cancel();
+            _validationDelayCts?.Dispose();
+            _validationDelayCts = null;
+        }
         if (_pollingTask != null)
         {
             try { await _pollingTask.ConfigureAwait(false); } catch (OperationCanceledException) { }

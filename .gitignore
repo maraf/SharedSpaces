@@ -20,3 +20,4 @@ artifacts/
 *.db
 *.db-shm
 *.db-wal
+build.log

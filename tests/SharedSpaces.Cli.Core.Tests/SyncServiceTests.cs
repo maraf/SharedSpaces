@@ -1034,6 +1034,69 @@ public class SyncServiceTests : IDisposable
         Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds).Should().BeLessOrEqualTo(2,
             "downloaded file should have LastWriteTimeUtc set to SharedAt from server");
     }
+
+    // ===== Journal Validation After SignalR Events =====
+
+    [Fact]
+    public async Task JournalValidation_TriggeredAfterDebounceDelay()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        MockJournal(spaceId, serverUrl);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        service.JournalValidationDelay = TimeSpan.FromMilliseconds(100);
+
+        // Simulate a SignalR delete event followed by scheduled validation
+        service.OnItemDeleted(new ItemDeletedEvent(Guid.NewGuid(), spaceId));
+        service.ScheduleJournalValidation(CancellationToken.None);
+
+        // Wait for the debounce to fire
+        await Task.Delay(300);
+
+        var requests = _mockHttp.GetRequests();
+        requests.Should().Contain(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"),
+            "journal should be fetched after SignalR event + validation delay");
+        requests.Should().Contain(r => r.Method == HttpMethod.Post && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal/checkpoint"),
+            "checkpoint should be acknowledged after successful validation");
+    }
+
+    [Fact]
+    public async Task JournalValidation_DebouncesMultipleEvents()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        MockJournal(spaceId, serverUrl);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir);
+        service.JournalValidationDelay = TimeSpan.FromMilliseconds(200);
+
+        // Fire multiple events in quick succession — only the last should trigger validation
+        service.ScheduleJournalValidation(CancellationToken.None);
+        await Task.Delay(50);
+        service.ScheduleJournalValidation(CancellationToken.None);
+        await Task.Delay(50);
+        service.ScheduleJournalValidation(CancellationToken.None);
+
+        // After 100ms, the delay hasn't expired yet for the last schedule
+        await Task.Delay(50);
+        var earlyRequests = _mockHttp.GetRequests()
+            .Count(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
+        earlyRequests.Should().Be(0, "validation should not fire yet — debounce timer was reset");
+
+        // Wait for debounce to complete
+        await Task.Delay(300);
+
+        var journalRequests = _mockHttp.GetRequests()
+            .Count(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
+        journalRequests.Should().Be(1, "only one journal validation should fire after debounce settles");
+    }
 }
 
 public class MockHttpMessageHandler : HttpMessageHandler
