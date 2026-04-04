@@ -6186,3 +6186,121 @@ Pushed local HEAD commit `fcac5e2` (chore(squad): log screenshot stability work 
 ## Outcome
 ✅ PR branch ready for CI/review pipeline
 
+
+---
+
+## Background Sync Architecture Review (2026-04-03)
+
+**Reviewer:** Mal (Lead/Architect)  
+**Status:** Approved with recommendations
+
+### Summary
+
+The current implementation is **sound and production-ready**. It avoids IndexedDB token mirroring by delegating sync to the main thread via `postMessage`, which is the simplest safe path.
+
+### Architecture Analysis
+
+**Current Flow**
+1. SW receives `sync` event with tag `offline-queue-sync`
+2. SW broadcasts `offline-queue-sync-requested` to all clients via `postMessage`
+3. Main thread (`space-view.ts`) receives message and calls `syncOfflineQueue()`
+4. `processOfflineQueue()` reads token from component state (originally from localStorage)
+5. Uploads happen from main thread context with full JWT access
+
+**Why This Is Correct**
+
+**No IndexedDB token mirroring needed.** The SW never makes authenticated requests  it only signals the main thread. This avoids:directly 
+- Token freshness/revocation sync complexity
+- Security surface of tokens in IndexedDB (accessible to any page script)
+- Migration complexity for existing localStorage users
+
+**Background Sync API limitations.** The `sync` event fires when connectivity is restored, but *only if a client is available*. If no tabs are open, the sync event cannot complete authenticated work  there's no token to use. The current design correctly handles this constraint.anyway 
+
+ localStorage)
+
+**No migration needed.** Tokens remain in `localStorage` under `sharedspaces:tokens`. The current implementation already reads from there via `token-storage.ts`. Users with existing tokens will continue to work without interruption.
+
+### Auth/Retry Semantics
+
+The `offline-sync.ts` implementation is correct:
+- **4xx errors**: Item removed from queue (won't succeed on retry)
+- **Network errors**: Item stays in queue for future attempt
+- **Token in memory**: Passed from `space-view.ts` component state
+
+**One edge case:** If a user's token is revoked while items are queued, uploads will fail with 401/403 (server rejects revoked tokens). This is handled  item removed from queue, user sees "failed" count.correctly 
+
+### Server-Side Contracts
+
+**No changes needed.** The existing `PUT /v1/spaces/{spaceId}/items/{itemId}` endpoints work for offline queue uploads. JWT validation via `SpaceMemberAuthorizationMiddleware` handles revocation checks. Idempotency is built-in (PUT/upsert semantics with client-generated IDs).
+
+### Recommendations
+
+1. **Keep the current architecture.** Main-thread sync is simpler and sufficient. True SW-driven sync (with IndexedDB tokens) would add complexity without meaningful benefit given the "tab must be open" constraint.
+2. **Consider future enhancement:** If we want sync when tabs are closed, we'd need a different approach (e.g., push notifications + SW fetch with IndexedDB tokens). That's a larger scope change for Phase 6+.
+3. **No localStorage migration code needed.** The storage layer is unchanged.
+
+### Blocking Concerns
+
+**None.** Ready for PR.
+
+### PR Checklist
+
+- [x] All existing tests pass
+- [x] No new server-side changes required
+- [x] localStorage token format unchanged
+- [x] Offline queue flows verified manually
+
+---
+
+## Background Sync Token Mirroring (2026-04-04)
+
+**Author:** Wash  
+**Status:** Implemented
+
+### Decision
+
+For offline queue uploads, the client now keeps the existing `localStorage` token format for app behavior **and** mirrors those tokens into IndexedDB so the service worker can authenticate `sync` event uploads even when no tabs are open.
+
+### Why
+
+- `localStorage` is unavailable inside the service worker.
+- The previous `sync` flow depended on an open client tab to do the upload work.
+- Marek explicitly asked for a migration path so existing users keep working without rejoining spaces.
+
+### Outcome
+
+1. **No server changes  uploads still use the existing authenticated `PUT /v1/spaces/{spaceId}/items/{itemId}` endpoint.required** 
+2. **Backward compatible  any legacy tokens still living only in `localStorage` are mirrored automatically on normal client startup/access.migration** 
+3. **Retry semantics  successful uploads are removed, permanent auth/validation failures are dropped, transient failures stay queued for a later retry.preserved** 
+4. **Open clients stay  the service worker posts sync completion messages so `space-view` refreshes queued counts and item lists.fresh** 
+
+---
+
+## Background Sync Test Coverage (2026-04-04)
+
+**Author:** Zoe  
+**Status:** Implemented
+
+### Context
+
+The background-sync worker now depends on a service-worker-readable token store, but existing users may still only have JWTs in `localStorage`. We also need a clear regression line between permanent sync failures and retryable ones.
+
+### Decision
+
+1. Legacy token migration stays lazy and transparent. Test coverage assumes `localStorage` remains the compatibility source, while reads and writes mirror tokens into IndexedDB `auth-tokens` for service worker use.
+2. Only permanent auth and validation failures are dropped. The queue should remove true 4xx rejections, but keep network failures, `5xx`, and backoff-style statuses (`408`, `425`, `429`) for retry.
+3. Cover worker sync at the shared helper seam. `processAllOfflineQueues()` is the right client-level test seam because it validates multi-space token lookup and queue draining without a brittle service-worker harness.
+
+### Rationale
+
+- Prevent silent regressions for already-joined users after the token-store migration.
+- Lock in retry semantics so transient server issues do not delete queued shares.
+- Keep tests robust and fast while still verifying the important contract the service worker depends on.
+
+### Coverage Added
+
+- `src/SharedSpaces.Client/src/lib/token-storage.test.ts`: token mirroring, legacy migration, mirrored removal
+- `src/SharedSpaces.Client/src/lib/idb-storage.test.ts`: IndexedDB mirror storage helpers
+- `src/SharedSpaces.Client/src/lib/offline-sync.test.ts`: shared sync helper path, background-sync request, retry vs permanent failure semantics
+- `src/SharedSpaces.Client/src/lib/sw-registration.test.ts`: service worker registration lookup failure fallback
+
