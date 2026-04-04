@@ -390,12 +390,12 @@ public class SpaceHubTests
         });
 
         await connection.StartAsync();
-        await connectedChannel.Reader.ReadAsync();
+        await WaitForConnectedAsync("after the initial start");
 
         await connection.StopAsync();
 
         await connection.StartAsync();
-        await connectedChannel.Reader.ReadAsync();
+        await WaitForConnectedAsync("after reconnect");
 
         var itemId = Guid.NewGuid();
         var response = await PutTextItemAsync(client, space.Id, itemId, "Test message", token);
@@ -406,6 +406,19 @@ public class SpaceHubTests
 
         var evt = await receivedEvent.Task;
         evt.Id.Should().Be(itemId);
+
+        async Task WaitForConnectedAsync(string because)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                await connectedChannel.Reader.ReadAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException($"Timed out waiting for Connected invocation {because}.");
+            }
+        }
     }
 
     [Fact]
