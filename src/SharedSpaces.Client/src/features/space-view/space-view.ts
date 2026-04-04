@@ -122,6 +122,8 @@ export class SpaceView extends BaseElement {
   private pendingItemIds = new Set<string>();
   private dragCounter = 0;
   private journalVerifyTimer: number | null = null;
+  private journalVerificationInFlight: Promise<void> | null = null;
+  private journalVerificationRequested = false;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -506,16 +508,40 @@ export class SpaceView extends BaseElement {
       return;
     }
 
+    this.journalVerificationRequested = true;
+
+    if (this.journalVerificationInFlight) {
+      return;
+    }
+
     if (this.journalVerifyTimer !== null) {
       globalThis.clearTimeout(this.journalVerifyTimer);
     }
 
     this.journalVerifyTimer = globalThis.setTimeout(() => {
       this.journalVerifyTimer = null;
-      this.verifyJournalState().catch((error) => {
-        console.warn('Failed to verify journal state:', error);
-      });
+      this.runJournalVerification();
     }, 1200);
+  }
+
+  private runJournalVerification() {
+    if (!this.journalVerificationRequested || this.journalVerificationInFlight) {
+      return;
+    }
+
+    this.journalVerificationRequested = false;
+    const verification = this.verifyJournalState();
+    this.journalVerificationInFlight = verification;
+
+    verification.catch((error) => {
+      console.warn('Failed to verify journal state:', error);
+    }).finally(() => {
+      this.journalVerificationInFlight = null;
+
+      if (this.journalVerificationRequested) {
+        this.scheduleJournalVerification();
+      }
+    });
   }
 
   private async verifyJournalState() {

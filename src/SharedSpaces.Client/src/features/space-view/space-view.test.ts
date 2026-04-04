@@ -1223,6 +1223,59 @@ describe('SpaceView - Deduplication Logic', () => {
   });
 });
 
+describe('SpaceView - Journal Sync Verification', () => {
+  let element: SpaceView;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    element = document.createElement('space-view') as SpaceView;
+    element.serverUrl = 'http://localhost:5000';
+    element.spaceId = 'journal-space';
+    (element as any).token = 'test-jwt-token';
+    (element as any).isOnline = true;
+    (element as any).journalSyncEnabled = true;
+  });
+
+  afterEach(() => {
+    element.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('coalesces overlapping verification requests while a sync is already running', async () => {
+    const pendingSyncs: Array<() => void> = [];
+    const loadDataWithJournalSync = vi
+      .spyOn(element as any, 'loadDataWithJournalSync')
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            pendingSyncs.push(resolve);
+          }),
+      );
+
+    (element as any).scheduleJournalVerification();
+    (element as any).scheduleJournalVerification();
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(loadDataWithJournalSync).toHaveBeenCalledTimes(1);
+
+    (element as any).scheduleJournalVerification();
+    (element as any).scheduleJournalVerification();
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(loadDataWithJournalSync).toHaveBeenCalledTimes(1);
+
+    pendingSyncs.shift()?.();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1200);
+
+    expect(loadDataWithJournalSync).toHaveBeenCalledTimes(2);
+
+    pendingSyncs.shift()?.();
+    await Promise.resolve();
+  });
+});
+
 describe('SpaceView - Delete Confirmation', () => {
   const serverUrl = 'http://localhost:5000';
   const spaceId = '550e8400-e29b-41d4-a716-446655440000';
