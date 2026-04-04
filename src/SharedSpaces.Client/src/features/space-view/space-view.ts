@@ -121,6 +121,7 @@ export class SpaceView extends BaseElement {
   private signalRClient?: SignalRClient;
   private pendingItemIds = new Set<string>();
   private dragCounter = 0;
+  private journalVerifyTimer: number | null = null;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -128,13 +129,17 @@ export class SpaceView extends BaseElement {
     if (!synced) {
       this.syncOfflineQueue();
     }
+    this.scheduleJournalVerification();
   };
   private handleOffline = () => { this.isOnline = false; };
   private handleVisibilityChange = () => {
-    if (document.visibilityState === 'visible' && this.connectionState === 'disconnected') {
-      this.startSignalR().catch((error) => {
-        console.error('Failed to start SignalR after visibility change', error);
-      });
+    if (document.visibilityState === 'visible') {
+      this.scheduleJournalVerification();
+      if (this.connectionState === 'disconnected') {
+        this.startSignalR().catch((error) => {
+          console.error('Failed to start SignalR after visibility change', error);
+        });
+      }
     }
   };
   private handleSwMessage = (event: MessageEvent) => {
@@ -219,6 +224,10 @@ export class SpaceView extends BaseElement {
     document.removeEventListener('keydown', this.handleKebabKeydown);
     document.removeEventListener('scroll', this.handleKebabScroll, { capture: true });
     globalThis.removeEventListener('resize', this.handleKebabScroll);
+    if (this.journalVerifyTimer !== null) {
+      globalThis.clearTimeout(this.journalVerifyTimer);
+      this.journalVerifyTimer = null;
+    }
   }
 
   private resolveToken(): string | undefined {
@@ -385,6 +394,18 @@ export class SpaceView extends BaseElement {
         await clearJournalCache(this.serverUrl, this.spaceId);
       }
 
+      this.syncMessage = newValue
+        ? 'Large space mode enabled for this browser.'
+        : 'Large space mode disabled for this browser.';
+      globalThis.setTimeout(() => {
+        if (
+          this.syncMessage === 'Large space mode enabled for this browser.'
+          || this.syncMessage === 'Large space mode disabled for this browser.'
+        ) {
+          this.syncMessage = '';
+        }
+      }, 3000);
+
       // Reload data to apply the new mode
       await this.loadData();
     } catch (error) {
@@ -417,9 +438,10 @@ export class SpaceView extends BaseElement {
       onStateChange: (state: ConnectionState) => {
         this.connectionState = state;
         
-        // On reconnect, refresh items to catch any missed events
+        // After (re)connect, verify against the journal to catch anything
+        // that SignalR may have missed while the browser was away.
         if (state === 'connected') {
-          this.refreshItemsAfterReconnect();
+          this.scheduleJournalVerification();
         }
       },
     });
@@ -461,6 +483,7 @@ export class SpaceView extends BaseElement {
 
     // Update journal cache if enabled
     this.updateJournalCacheAfterChange();
+    this.scheduleJournalVerification();
   }
 
   private handleItemDeleted(payload: ItemDeletedPayload) {
@@ -469,6 +492,38 @@ export class SpaceView extends BaseElement {
 
     // Update journal cache if enabled
     this.updateJournalCacheAfterChange();
+    this.scheduleJournalVerification();
+  }
+
+  private scheduleJournalVerification() {
+    if (
+      !this.journalSyncEnabled
+      || !this.isOnline
+      || !this.serverUrl
+      || !this.spaceId
+      || !this.token
+    ) {
+      return;
+    }
+
+    if (this.journalVerifyTimer !== null) {
+      globalThis.clearTimeout(this.journalVerifyTimer);
+    }
+
+    this.journalVerifyTimer = globalThis.setTimeout(() => {
+      this.journalVerifyTimer = null;
+      this.verifyJournalState().catch((error) => {
+        console.warn('Failed to verify journal state:', error);
+      });
+    }, 1200);
+  }
+
+  private async verifyJournalState() {
+    if (!this.journalSyncEnabled || !this.serverUrl || !this.spaceId || !this.token) {
+      return;
+    }
+
+    await this.loadDataWithJournalSync();
   }
 
   private async updateJournalCacheAfterChange() {
@@ -1362,7 +1417,7 @@ export class SpaceView extends BaseElement {
               Large Space Mode
             </p>
             <p class="text-xs text-slate-500">
-              Optimize startup for large spaces by caching items locally
+              Cache items in this browser and catch up with journal sync before live updates.
             </p>
           </div>
           <button

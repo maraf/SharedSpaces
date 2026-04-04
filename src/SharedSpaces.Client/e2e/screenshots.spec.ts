@@ -532,7 +532,7 @@ test.describe('Screenshot Capture', () => {
       // Pre-populate offline queue with pending items for this dead server
       await page.evaluate(({ serverUrl, spaceId }) => {
         return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.open('shared-spaces-db', 1);
+          const request = indexedDB.open('shared-spaces-db', 2);
           request.onerror = () => reject(request.error);
           request.onsuccess = () => {
             const db = request.result;
@@ -867,7 +867,7 @@ test.describe('Screenshot Capture', () => {
       // Seed IndexedDB with pending share items
       await page.evaluate(() => {
         return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.open('shared-spaces-db', 1);
+          const request = indexedDB.open('shared-spaces-db', 2);
           request.onupgradeneeded = () => {
             const db = request.result;
             if (!db.objectStoreNames.contains('pending-shares'))

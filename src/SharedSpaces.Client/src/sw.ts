@@ -8,9 +8,11 @@ declare const self: ServiceWorkerGlobalScope;
 // Schema shared with src/lib/idb-storage.ts (app-side typed wrapper).
 // If you change DB_NAME, DB_VERSION, or store names, update both files.
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PENDING_SHARES_STORE = 'pending-shares';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
+const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
+const JOURNAL_CACHE_STORE = 'journal-cache';
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -22,6 +24,12 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         db.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(JOURNAL_SYNC_SETTINGS_STORE)) {
+        db.createObjectStore(JOURNAL_SYNC_SETTINGS_STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(JOURNAL_CACHE_STORE)) {
+        db.createObjectStore(JOURNAL_CACHE_STORE, { keyPath: 'key' });
       }
     };
     request.onsuccess = () => resolve(request.result);
