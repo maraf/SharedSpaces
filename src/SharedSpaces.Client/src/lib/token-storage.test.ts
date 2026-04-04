@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import {
   getTokens,
@@ -12,14 +12,19 @@ import {
   clearLastSelectedSpace,
   getServiceWorkerToken,
   getServiceWorkerTokens,
+  waitForTokenMirrorWritesForTests,
 } from './token-storage';
-import { clearStoredAuthTokens } from './idb-storage';
+import { clearStoredAuthTokens, getStoredToken } from './idb-storage';
+
+async function resetTokenStorageState(): Promise<void> {
+  await waitForTokenMirrorWritesForTests();
+  localStorage.clear();
+  await clearStoredAuthTokens();
+}
 
 describe('token-storage', () => {
-  beforeEach(async () => {
-    localStorage.clear();
-    await clearStoredAuthTokens();
-  });
+  beforeEach(resetTokenStorageState);
+  afterEach(resetTokenStorageState);
 
   describe('getTokens', () => {
     it('returns empty object when storage is empty', () => {
@@ -152,6 +157,22 @@ describe('token-storage', () => {
       await expect(
         getServiceWorkerToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000'),
       ).resolves.toBe('legacy-token');
+    });
+
+    it('keeps plain localStorage reads side-effect free while still repairing the mirror on demand', async () => {
+      const serverUrl = 'http://localhost:5000';
+      const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+      const key = `${serverUrl}:${spaceId}`;
+      localStorage.setItem('sharedspaces:tokens', JSON.stringify({ [key]: 'legacy-token' }));
+
+      expect(getTokens()).toEqual({ [key]: 'legacy-token' });
+      expect(getToken(serverUrl, spaceId)).toBe('legacy-token');
+      await expect(getStoredToken(serverUrl, spaceId)).resolves.toBeUndefined();
+
+      await expect(getServiceWorkerToken(serverUrl, spaceId)).resolves.toBe('legacy-token');
+      await vi.waitFor(async () => {
+        expect(await getStoredToken(serverUrl, spaceId)).toBe('legacy-token');
+      });
     });
 
     it('removes mirrored tokens when a token is deleted', async () => {

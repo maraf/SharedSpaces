@@ -211,7 +211,7 @@ async function syncOfflineQueueInBackground(): Promise<SyncSummary> {
     const token = await getStoredToken(item.serverUrl, item.spaceId);
     if (!token) {
       failed++;
-      retryable++;
+      console.warn('[SW] Skipping queued item without a mirrored auth token', item.id);
       continue;
     }
 

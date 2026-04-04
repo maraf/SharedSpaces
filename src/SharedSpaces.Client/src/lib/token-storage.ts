@@ -1,6 +1,7 @@
 import {
   getStoredAuthToken,
   getStoredAuthTokens,
+  setStoredToken,
   setStoredAuthTokens,
 } from './idb-storage';
 
@@ -15,6 +16,11 @@ export interface TokenStore {
 }
 
 let tokenMirrorSync: Promise<void> = Promise.resolve();
+
+/** Test helper to await queued IndexedDB mirror writes before cleanup. */
+export async function waitForTokenMirrorWritesForTests(): Promise<void> {
+  await tokenMirrorSync;
+}
 
 function getTokenKey(serverUrl: string, spaceId: string): string {
   return `${serverUrl}:${spaceId}`;
@@ -52,14 +58,21 @@ function queueTokenMirror(tokens: TokenStore): void {
     .catch(() => undefined);
 }
 
+function queueSingleTokenMirror(serverUrl: string, spaceId: string, token: string): void {
+  tokenMirrorSync = tokenMirrorSync
+    .catch(() => undefined)
+    .then(async () => {
+      await setStoredToken(serverUrl, spaceId, token);
+    })
+    .catch(() => undefined);
+}
+
 /**
  * Get all stored tokens
  * @returns Record of 'serverUrl:spaceId' -> JWT token
  */
 export function getTokens(): Record<string, string> {
-  const tokens = readTokensFromLocalStorage();
-  queueTokenMirror(tokens);
-  return tokens;
+  return readTokensFromLocalStorage();
 }
 
 /**
@@ -105,7 +118,7 @@ export async function getServiceWorkerToken(
   const legacyTokens = readTokensFromLocalStorage();
   const token = legacyTokens[getTokenKey(serverUrl, spaceId)];
   if (token !== undefined) {
-    queueTokenMirror(legacyTokens);
+    queueSingleTokenMirror(serverUrl, spaceId, token);
   }
 
   return token;
