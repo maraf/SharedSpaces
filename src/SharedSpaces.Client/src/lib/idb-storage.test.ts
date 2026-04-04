@@ -11,33 +11,27 @@ import {
   clearOfflineQueue,
   getOfflineQueueForSpace,
   clearOfflineQueueForSpace,
+  getStoredToken,
+  setStoredToken,
+  removeStoredToken,
+  clearStoredTokens,
+  syncStoredTokens,
   type OfflineQueueItem,
 } from './idb-storage';
-
-// fake-indexeddb/auto replaces globalThis.indexedDB — but the module caches
-// its DB promise, so we need to reset it between tests.  The simplest way
-// is to delete all databases and re-import, but since the module caches a
-// singleton promise we instead clear stores between tests.
 
 beforeEach(async () => {
   await clearPendingShares();
   await clearOfflineQueue();
+  await clearStoredTokens();
 });
 
 describe('idb-storage', () => {
-  // --- Pending Shares ---
-
   describe('pending shares', () => {
     it('starts empty', async () => {
       expect(await getPendingShares()).toEqual([]);
     });
 
     it('removePendingShare removes a single item', async () => {
-      // Manually add via addToOfflineQueue sibling — pending shares have
-      // no public "add" (SW does it), so we reach in via the store's put.
-      // Instead we can add two, remove one, and verify the other remains.
-      // But since there's no addPendingShare export, we test remove on a
-      // non-existent id (should be a no-op) and verify the store is still empty.
       await removePendingShare('nonexistent');
       expect(await getPendingShares()).toEqual([]);
     });
@@ -47,8 +41,6 @@ describe('idb-storage', () => {
       expect(await getPendingShares()).toEqual([]);
     });
   });
-
-  // --- Offline Queue ---
 
   describe('offline queue', () => {
     const item1: OfflineQueueItem = {
@@ -184,6 +176,34 @@ describe('idb-storage', () => {
       const queue = await getOfflineQueue();
       expect(queue[0].fileData).toBeInstanceOf(ArrayBuffer);
       expect(new Uint8Array(queue[0].fileData!)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    });
+  });
+
+  describe('service worker token mirror', () => {
+    it('stores and retrieves a mirrored token', async () => {
+      await setStoredToken('http://server1', 'space-A', 'jwt-token');
+
+      await expect(getStoredToken('http://server1', 'space-A')).resolves.toBe('jwt-token');
+    });
+
+    it('removes a mirrored token', async () => {
+      await setStoredToken('http://server1', 'space-A', 'jwt-token');
+      await removeStoredToken('http://server1', 'space-A');
+
+      await expect(getStoredToken('http://server1', 'space-A')).resolves.toBeUndefined();
+    });
+
+    it('syncStoredTokens replaces the IndexedDB mirror with the latest local tokens', async () => {
+      await setStoredToken('http://old-server', 'space-old', 'old-token');
+
+      await syncStoredTokens({
+        'http://server1:space-A': 'token-a',
+        'http://server2:space-B': 'token-b',
+      });
+
+      await expect(getStoredToken('http://server1', 'space-A')).resolves.toBe('token-a');
+      await expect(getStoredToken('http://server2', 'space-B')).resolves.toBe('token-b');
+      await expect(getStoredToken('http://old-server', 'space-old')).resolves.toBeUndefined();
     });
   });
 });

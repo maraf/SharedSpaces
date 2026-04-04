@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import 'fake-indexeddb/auto';
 import {
   getTokens,
   setToken,
@@ -9,11 +10,15 @@ import {
   getLastSelectedSpace,
   setLastSelectedSpace,
   clearLastSelectedSpace,
+  getServiceWorkerToken,
+  getServiceWorkerTokens,
 } from './token-storage';
+import { clearStoredAuthTokens } from './idb-storage';
 
 describe('token-storage', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear();
+    await clearStoredAuthTokens();
   });
 
   describe('getTokens', () => {
@@ -25,7 +30,7 @@ describe('token-storage', () => {
     it('returns all stored tokens', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440001', 'token2');
-      
+
       const tokens = getTokens();
       expect(tokens).toEqual({
         'http://localhost:5000:550e8400-e29b-41d4-a716-446655440000': 'token1',
@@ -43,7 +48,7 @@ describe('token-storage', () => {
   describe('setToken', () => {
     it('stores a token for a specific server+space key', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'my-jwt-token');
-      
+
       const tokens = getTokens();
       expect(tokens['http://localhost:5000:550e8400-e29b-41d4-a716-446655440000']).toBe('my-jwt-token');
     });
@@ -52,7 +57,7 @@ describe('token-storage', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
       setToken('http://localhost:5001', '550e8400-e29b-41d4-a716-446655440000', 'token2');
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440001', 'token3');
-      
+
       const tokens = getTokens();
       expect(Object.keys(tokens)).toHaveLength(3);
       expect(tokens['http://localhost:5000:550e8400-e29b-41d4-a716-446655440000']).toBe('token1');
@@ -63,7 +68,7 @@ describe('token-storage', () => {
     it('overwrites existing token for the same key', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'old-token');
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'new-token');
-      
+
       const tokens = getTokens();
       expect(tokens['http://localhost:5000:550e8400-e29b-41d4-a716-446655440000']).toBe('new-token');
       expect(Object.keys(tokens)).toHaveLength(1);
@@ -73,7 +78,7 @@ describe('token-storage', () => {
   describe('getToken', () => {
     it('retrieves a stored token by server+space key', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'my-token');
-      
+
       const token = getToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
       expect(token).toBe('my-token');
     });
@@ -85,14 +90,14 @@ describe('token-storage', () => {
 
     it('returns undefined for different server URL', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
-      
+
       const token = getToken('http://localhost:5001', '550e8400-e29b-41d4-a716-446655440000');
       expect(token).toBeUndefined();
     });
 
     it('returns undefined for different space ID', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
-      
+
       const token = getToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440001');
       expect(token).toBeUndefined();
     });
@@ -102,9 +107,9 @@ describe('token-storage', () => {
     it('removes a specific token by server+space key', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440001', 'token2');
-      
+
       removeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
-      
+
       const tokens = getTokens();
       expect(tokens['http://localhost:5000:550e8400-e29b-41d4-a716-446655440000']).toBeUndefined();
       expect(tokens['http://localhost:5000:550e8400-e29b-41d4-a716-446655440001']).toBe('token2');
@@ -119,9 +124,51 @@ describe('token-storage', () => {
     it('leaves empty object after removing last token', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
       removeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
-      
+
       const tokens = getTokens();
       expect(tokens).toEqual({});
+    });
+  });
+
+  describe('service worker token mirror', () => {
+    it('mirrors newly stored tokens to the service-worker-readable store', async () => {
+      setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'mirror-me');
+
+      await vi.waitFor(async () => {
+        expect(
+          await getServiceWorkerToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000'),
+        ).toBe('mirror-me');
+      });
+    });
+
+    it('migrates legacy localStorage-only tokens into the service-worker-readable store on first access', async () => {
+      const legacyTokens = {
+        'http://localhost:5000:550e8400-e29b-41d4-a716-446655440000': 'legacy-token',
+        'http://localhost:5001:550e8400-e29b-41d4-a716-446655440001': 'other-token',
+      };
+      localStorage.setItem('sharedspaces:tokens', JSON.stringify(legacyTokens));
+
+      await expect(getServiceWorkerTokens()).resolves.toEqual(legacyTokens);
+      await expect(
+        getServiceWorkerToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000'),
+      ).resolves.toBe('legacy-token');
+    });
+
+    it('removes mirrored tokens when a token is deleted', async () => {
+      setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'temp-token');
+      await vi.waitFor(async () => {
+        expect(
+          await getServiceWorkerToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000'),
+        ).toBe('temp-token');
+      });
+
+      removeToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
+
+      await vi.waitFor(async () => {
+        expect(
+          await getServiceWorkerToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000'),
+        ).toBeUndefined();
+      });
     });
   });
 
@@ -217,9 +264,9 @@ describe('token-storage', () => {
       setToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000', 'token1');
       setPrimaryDisplayName('Alice');
       setLastSelectedSpace('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000');
-      
+
       clearLastSelectedSpace();
-      
+
       expect(getToken('http://localhost:5000', '550e8400-e29b-41d4-a716-446655440000')).toBe('token1');
       expect(getPrimaryDisplayName()).toBe('Alice');
     });

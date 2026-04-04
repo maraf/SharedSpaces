@@ -62,6 +62,18 @@ describe('sw-registration', () => {
       expect(result).toBe(false);
     });
 
+    it('returns false when the service worker registration lookup fails', async () => {
+      Object.defineProperty(navigator, 'serviceWorker', {
+        value: {
+          ready: Promise.reject(new Error('registration failed')),
+        },
+        configurable: true,
+      });
+
+      const result = await requestBackgroundSync();
+      expect(result).toBe(false);
+    });
+
     it('returns false when sync.register throws', async () => {
       Object.defineProperty(navigator, 'serviceWorker', {
         value: {

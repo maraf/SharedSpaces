@@ -1,3 +1,9 @@
+import {
+  getStoredAuthToken,
+  getStoredAuthTokens,
+  setStoredAuthTokens,
+} from './idb-storage';
+
 // Token storage utilities for managing JWTs in localStorage
 
 const STORAGE_KEY_TOKENS = 'sharedspaces:tokens';
@@ -8,11 +14,13 @@ export interface TokenStore {
   [serverSpaceKey: string]: string;
 }
 
-/**
- * Get all stored tokens
- * @returns Record of 'serverUrl:spaceId' -> JWT token
- */
-export function getTokens(): Record<string, string> {
+let tokenMirrorSync: Promise<void> = Promise.resolve();
+
+function getTokenKey(serverUrl: string, spaceId: string): string {
+  return `${serverUrl}:${spaceId}`;
+}
+
+function readTokensFromLocalStorage(): TokenStore {
   try {
     const stored = localStorage.getItem(STORAGE_KEY_TOKENS);
     if (!stored) return {};
@@ -20,17 +28,87 @@ export function getTokens(): Record<string, string> {
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       return {};
     }
-    // Only keep string values
-    const result: Record<string, string> = {};
+
+    const result: TokenStore = {};
     for (const [key, value] of Object.entries(parsed)) {
       if (typeof value === 'string') {
         result[key] = value;
       }
     }
+
     return result;
   } catch {
     return {};
   }
+}
+
+function queueTokenMirror(tokens: TokenStore): void {
+  const snapshot = { ...tokens };
+  tokenMirrorSync = tokenMirrorSync
+    .catch(() => undefined)
+    .then(async () => {
+      await setStoredAuthTokens(snapshot);
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * Get all stored tokens
+ * @returns Record of 'serverUrl:spaceId' -> JWT token
+ */
+export function getTokens(): Record<string, string> {
+  const tokens = readTokensFromLocalStorage();
+  queueTokenMirror(tokens);
+  return tokens;
+}
+
+/**
+ * Ensure the service-worker-readable token store is populated from localStorage.
+ */
+export async function syncTokensToServiceWorkerStore(): Promise<Record<string, string>> {
+  const tokens = readTokensFromLocalStorage();
+  await setStoredAuthTokens(tokens);
+  return tokens;
+}
+
+/**
+ * Get all tokens from the service-worker-readable store, migrating legacy
+ * localStorage-only users on demand.
+ */
+export async function getServiceWorkerTokens(): Promise<Record<string, string>> {
+  const storedTokens = await getStoredAuthTokens();
+  if (Object.keys(storedTokens).length > 0) {
+    return storedTokens;
+  }
+
+  const legacyTokens = readTokensFromLocalStorage();
+  if (Object.keys(legacyTokens).length > 0) {
+    await setStoredAuthTokens(legacyTokens);
+  }
+
+  return legacyTokens;
+}
+
+/**
+ * Get a token from the service-worker-readable store, falling back to legacy
+ * localStorage and repairing the mirror when needed.
+ */
+export async function getServiceWorkerToken(
+  serverUrl: string,
+  spaceId: string,
+): Promise<string | undefined> {
+  const storedToken = await getStoredAuthToken(serverUrl, spaceId);
+  if (storedToken !== undefined) {
+    return storedToken;
+  }
+
+  const legacyTokens = readTokensFromLocalStorage();
+  const token = legacyTokens[getTokenKey(serverUrl, spaceId)];
+  if (token !== undefined) {
+    queueTokenMirror(legacyTokens);
+  }
+
+  return token;
 }
 
 /**
@@ -40,10 +118,10 @@ export function getTokens(): Record<string, string> {
  * @param token - JWT token string
  */
 export function setToken(serverUrl: string, spaceId: string, token: string): void {
-  const tokens = getTokens();
-  const key = `${serverUrl}:${spaceId}`;
-  tokens[key] = token;
+  const tokens = readTokensFromLocalStorage();
+  tokens[getTokenKey(serverUrl, spaceId)] = token;
   localStorage.setItem(STORAGE_KEY_TOKENS, JSON.stringify(tokens));
+  queueTokenMirror(tokens);
 }
 
 /**
@@ -54,8 +132,7 @@ export function setToken(serverUrl: string, spaceId: string, token: string): voi
  */
 export function getToken(serverUrl: string, spaceId: string): string | undefined {
   const tokens = getTokens();
-  const key = `${serverUrl}:${spaceId}`;
-  return tokens[key];
+  return tokens[getTokenKey(serverUrl, spaceId)];
 }
 
 /**
@@ -64,10 +141,10 @@ export function getToken(serverUrl: string, spaceId: string): string | undefined
  * @param spaceId - Space GUID
  */
 export function removeToken(serverUrl: string, spaceId: string): void {
-  const tokens = getTokens();
-  const key = `${serverUrl}:${spaceId}`;
-  delete tokens[key];
+  const tokens = readTokensFromLocalStorage();
+  delete tokens[getTokenKey(serverUrl, spaceId)];
   localStorage.setItem(STORAGE_KEY_TOKENS, JSON.stringify(tokens));
+  queueTokenMirror(tokens);
 }
 
 /**
