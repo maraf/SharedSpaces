@@ -1,15 +1,31 @@
 import {
   addToOfflineQueue,
+  getOfflineQueue,
   getOfflineQueueForSpace,
   removeFromOfflineQueue,
   type OfflineQueueItem,
 } from './idb-storage';
+import { getServiceWorkerToken } from './token-storage';
 import { shareText, shareFile, SpaceApiError } from '../features/space-view/space-api';
 import { requestBackgroundSync } from './sw-registration';
 
 export interface SyncResult {
   synced: number;
   failed: number;
+}
+
+function isOnline(): boolean {
+  return typeof navigator === 'undefined' || !('onLine' in navigator) || navigator.onLine;
+}
+
+function isPermanentSyncFailure(error: unknown): boolean {
+  return error instanceof SpaceApiError
+    && typeof error.status === 'number'
+    && error.status >= 400
+    && error.status < 500
+    && error.status !== 408
+    && error.status !== 425
+    && error.status !== 429;
 }
 
 /**
@@ -51,18 +67,48 @@ export async function getOfflineQueueCount(
 }
 
 /**
- * Process all queued items for a space — upload each via the space API.
+ * Process every queued space that has a mirrored token available for the
+ * service worker, skipping spaces that still need a foreground migration.
+ */
+export async function processAllOfflineQueues(): Promise<SyncResult> {
+  if (!isOnline()) return { synced: 0, failed: 0 };
+
+  const queue = await getOfflineQueue();
+  if (queue.length === 0) return { synced: 0, failed: 0 };
+
+  const processedSpaces = new Set<string>();
+  let synced = 0;
+  let failed = 0;
+
+  for (const item of queue) {
+    const key = `${item.serverUrl}:${item.spaceId}`;
+    if (processedSpaces.has(key)) continue;
+    processedSpaces.add(key);
+
+    const token = await getServiceWorkerToken(item.serverUrl, item.spaceId);
+    if (!token) continue;
+
+    const result = await processOfflineQueue(item.serverUrl, item.spaceId, token);
+    synced += result.synced;
+    failed += result.failed;
+  }
+
+  return { synced, failed };
+}
+
+/**
+ * Process all queued items for a space by uploading each via the space API.
  *
  * - Successfully uploaded items are removed from the queue.
- * - Items rejected by the server (4xx) are removed (won't succeed on retry).
- * - Network errors leave the item in the queue for a future attempt.
+ * - Permanent 4xx auth/validation failures are removed (won't succeed on retry).
+ * - Transient and network failures stay queued for a future attempt.
  */
 export async function processOfflineQueue(
   serverUrl: string,
   spaceId: string,
   token: string,
 ): Promise<SyncResult> {
-  if (!navigator.onLine) return { synced: 0, failed: 0 };
+  if (!isOnline()) return { synced: 0, failed: 0 };
 
   const queue = await getOfflineQueueForSpace(serverUrl, spaceId);
   if (queue.length === 0) return { synced: 0, failed: 0 };
@@ -76,7 +122,7 @@ export async function processOfflineQueue(
       await removeFromOfflineQueue(item.id);
       synced++;
     } catch (error) {
-      if (error instanceof SpaceApiError && error.status) {
+      if (isPermanentSyncFailure(error)) {
         await removeFromOfflineQueue(item.id);
       }
       failed++;

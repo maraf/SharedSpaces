@@ -131,9 +131,14 @@ export class SpaceView extends BaseElement {
   private handleSwMessage = (event: MessageEvent) => {
     if (event.data?.type === 'pending-share-added') {
       this.loadPendingShares();
+      return;
     }
     if (event.data?.type === 'offline-queue-sync-requested') {
-      this.syncOfflineQueue();
+      void this.syncOfflineQueue();
+      return;
+    }
+    if (event.data?.type === 'offline-queue-sync-complete') {
+      void this.handleBackgroundSyncComplete(event.data.result);
     }
   };
   private handleKebabClickOutside = (event: MouseEvent) => {
@@ -212,11 +217,11 @@ export class SpaceView extends BaseElement {
     globalThis.removeEventListener('resize', this.handleKebabScroll);
   }
 
-  private resolveToken(): string | undefined {
+  private resolveToken(): Promise<string | undefined> {
     if (this.serverUrl && this.spaceId) {
       return getToken(this.serverUrl, this.spaceId);
     }
-    return undefined;
+    return Promise.resolve(undefined);
   }
 
   private redirectToJoin() {
@@ -231,16 +236,16 @@ export class SpaceView extends BaseElement {
 
   private async removeSpace() {
     if (!this.serverUrl || !this.spaceId) return;
-    
+
     // Clean up SignalR connection
     await this.stopSignalR();
-    
+
     // Remove token from storage
-    removeToken(this.serverUrl, this.spaceId);
+    await removeToken(this.serverUrl, this.spaceId);
 
     // Clear any queued offline items for this space
     await clearOfflineQueueForSpace(this.serverUrl, this.spaceId).catch(() => {});
-    
+
     // Redirect to join view and tell app-shell to reload spaces
     this.dispatchEvent(
       new CustomEvent<AppViewChangeDetail>('view-change', {
@@ -254,7 +259,7 @@ export class SpaceView extends BaseElement {
   private async loadData() {
     if (!this.serverUrl || !this.spaceId) return;
 
-    this.token = this.resolveToken();
+    this.token = await this.resolveToken();
     if (!this.token) {
       this.redirectToJoin();
       return;
@@ -273,7 +278,7 @@ export class SpaceView extends BaseElement {
     try {
       const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
       this.items = itemList;
-      
+
       // Start SignalR connection after successful data load
       await this.startSignalR();
     } catch (error) {
@@ -282,14 +287,14 @@ export class SpaceView extends BaseElement {
         this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
         return;
       }
-      
+
       // Check if it's a network error
       if (error instanceof SpaceApiError && !error.status) {
         this.connectionErrorType = 'network';
         this.errorMessage = 'Unable to connect to the server. The server may be offline or unreachable.';
         return;
       }
-      
+
       this.errorMessage =
         error instanceof SpaceApiError
           ? error.message
@@ -321,7 +326,7 @@ export class SpaceView extends BaseElement {
       },
       onStateChange: (state: ConnectionState) => {
         this.connectionState = state;
-        
+
         // On reconnect, refresh items to catch any missed events
         if (state === 'connected') {
           this.refreshItemsAfterReconnect();
@@ -511,24 +516,57 @@ export class SpaceView extends BaseElement {
     try {
       const result = await processOfflineQueue(this.serverUrl, this.spaceId, this.token);
       await this.refreshOfflineQueue();
+      this.showSyncResult(result);
 
-      if (result.synced > 0 || result.failed > 0) {
-        if (result.synced > 0 && result.failed > 0) {
-          this.syncMessage = `Synced ${result.synced} item${result.synced !== 1 ? 's' : ''}, ${result.failed} failed`;
-        } else if (result.synced > 0) {
-          this.syncMessage = `${result.synced} queued item${result.synced !== 1 ? 's' : ''} uploaded`;
-        } else {
-          this.syncMessage = `${result.failed} queued item${result.failed !== 1 ? 's' : ''} failed to upload`;
-        }
-
-        if (result.synced > 0) {
-          this.refreshItemsAfterReconnect();
-        }
-        setTimeout(() => { this.syncMessage = ''; }, 5000);
+      if (result.synced > 0) {
+        this.refreshItemsAfterReconnect();
       }
     } catch {
       // Queue processing failed
     }
+  }
+
+  private async handleBackgroundSyncComplete(
+    result: { synced?: number; failed?: number; spaces?: Array<{ serverUrl: string; spaceId: string }> } | undefined,
+  ) {
+    if (!this.serverUrl || !this.spaceId) return;
+
+    const affectedSpaces = Array.isArray(result?.spaces) ? result.spaces : [];
+    const affectsCurrentSpace = affectedSpaces.length === 0
+      || affectedSpaces.some(
+        (space) => space.serverUrl === this.serverUrl && space.spaceId === this.spaceId,
+      );
+
+    if (!affectsCurrentSpace) return;
+
+    await this.refreshOfflineQueue();
+    this.showSyncResult({
+      synced: result?.synced ?? 0,
+      failed: result?.failed ?? 0,
+    });
+
+    if ((result?.synced ?? 0) > 0) {
+      this.refreshItemsAfterReconnect();
+    }
+  }
+
+  private showSyncResult(result: { synced: number; failed: number }) {
+    if (result.synced === 0 && result.failed === 0) return;
+
+    if (result.synced > 0 && result.failed > 0) {
+      this.syncMessage = `Synced ${result.synced} item${result.synced !== 1 ? 's' : ''}, ${result.failed} failed`;
+    } else if (result.synced > 0) {
+      this.syncMessage = `${result.synced} queued item${result.synced !== 1 ? 's' : ''} uploaded`;
+    } else {
+      this.syncMessage = `${result.failed} queued item${result.failed !== 1 ? 's' : ''} failed to upload`;
+    }
+
+    const message = this.syncMessage;
+    setTimeout(() => {
+      if (this.syncMessage === message) {
+        this.syncMessage = '';
+      }
+    }, 5000);
   }
 
   private handleTextInput = (e: Event) => {
@@ -1258,10 +1296,10 @@ export class SpaceView extends BaseElement {
 
         <ul class="space-y-2">
           ${this.pendingShares.map((share) => {
-            const icon = share.type === 'file' 
+            const icon = share.type === 'file'
               ? getFileTypeIcon(share.fileName ?? 'file')
               : getTextItemIcon();
-            
+
             const content = html`
               <!-- Left: Icon -->
               <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -1333,10 +1371,10 @@ export class SpaceView extends BaseElement {
 
         <ul class="space-y-2">
           ${this.offlineQueueItems.map((item) => {
-            const icon = item.type === 'file' 
+            const icon = item.type === 'file'
               ? getFileTypeIcon(item.fileName ?? 'file')
               : getTextItemIcon();
-            
+
             const content = html`
               <!-- Left: Icon -->
               <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">

@@ -244,3 +244,11 @@
 - **Wash (Frontend):** Client-side sorting ensures predictable render order; Playwright waits ensure async UI settling.
 - **Pattern validated:** Deterministic screenshot testing pipeline now fully operational. Reusable for future features requiring stable visual baselines.
 - **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b). All tests passing: Playwright screenshots 100% stable, Vitest suite 447 tests green, xUnit server tests green.**
+
+## Learnings
+
+- **Background sync token migration tests (2026-04-04):**
+  - Added targeted Vitest coverage in `token-storage.test.ts`, `idb-storage.test.ts`, `offline-sync.test.ts`, `sw-registration.test.ts`, and `space-view.test.ts` for the worker-backed offline sync path.
+  - The safest migration contract is lazy repair: keep `localStorage` as the legacy compatibility source, but mirror tokens into IndexedDB `auth-tokens` whenever tokens are read or written so installed PWAs and service workers can sync without forcing users to re-join spaces.
+  - Retry semantics matter: permanent auth/validation failures can be dropped, but `5xx`, network errors, and retry-after style statuses (`408`, `425`, `429`) must stay queued.
+  - `processAllOfflineQueues()` is the best test seam for service-worker sync behavior at the client layer because it covers multi-space token lookup and queue draining without needing a fragile SW event harness.
