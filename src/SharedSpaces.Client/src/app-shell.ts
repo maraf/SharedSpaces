@@ -78,6 +78,8 @@ export class AppShell extends BaseElement {
   private headerElement?: HTMLElement;
   private headerResizeObserver?: ResizeObserver;
   private mobileMediaQuery?: MediaQueryList;
+  private initialSpaceLoad: Promise<void> = Promise.resolve();
+  private initialPendingShareLoad: Promise<void> = Promise.resolve();
 
 
 
@@ -112,22 +114,24 @@ export class AppShell extends BaseElement {
       return;
     }
 
-    this.loadSpacesFromStorage();
-
     const invitation = parseInvitationFromUrl();
     if (invitation) {
       this.view = 'join';
-    } else {
-      // Auto-select last space if no invitation and no explicit navigation
-      this.autoSelectLastSpace();
     }
+
+    this.initialSpaceLoad = this.loadSpacesFromStorage().then(() => {
+      if (!invitation) {
+        // Auto-select last space if no invitation and no explicit navigation
+        this.autoSelectLastSpace();
+      }
+    });
 
     // Listen for SW messages (registration handled by vite-plugin-pwa)
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
 
 
     // Check pending shares from IndexedDB
-    this.refreshPendingShareCount();
+    this.initialPendingShareLoad = this.refreshPendingShareCount();
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.addEventListener('pending-shares-changed', this.handlePendingSharesChanged);
 
@@ -162,6 +166,13 @@ export class AppShell extends BaseElement {
     this.mobileMediaQuery?.removeEventListener?.('change', this.handleBreakpointChange);
     document.removeEventListener('keydown', this.handleKeyDown);
     document.body.classList.remove('overflow-hidden');
+  }
+
+  protected override async getUpdateComplete(): Promise<boolean> {
+    await super.getUpdateComplete();
+    await this.initialSpaceLoad;
+    await this.initialPendingShareLoad;
+    return super.getUpdateComplete();
   }
 
   override willUpdate(changed: Map<string, unknown>) {
@@ -248,28 +259,32 @@ export class AppShell extends BaseElement {
     }
   }
 
-  private loadSpacesFromStorage() {
-    const tokens = getTokens();
-    const entries: SpaceEntry[] = [];
-    for (const [key, token] of Object.entries(tokens)) {
-      try {
-        const claims = jwtDecode<StoredJwtClaims>(token);
-        const parts = key.split(':');
-        const serverUrl = parts.slice(0, -1).join(':');
-        const spaceId = parts[parts.length - 1];
-        entries.push({
-          serverUrl: claims.server_url || serverUrl,
-          spaceId: claims.space_id || spaceId,
-          spaceName: claims.space_name || spaceId.substring(0, 8),
-          token,
-        });
-      } catch {
-        // Skip invalid tokens
+  private async loadSpacesFromStorage() {
+    try {
+      const tokens = await getTokens();
+      const entries: SpaceEntry[] = [];
+      for (const [key, token] of Object.entries(tokens)) {
+        try {
+          const claims = jwtDecode<StoredJwtClaims>(token);
+          const parts = key.split(':');
+          const serverUrl = parts.slice(0, -1).join(':');
+          const spaceId = parts[parts.length - 1];
+          entries.push({
+            serverUrl: claims.server_url || serverUrl,
+            spaceId: claims.space_id || spaceId,
+            spaceName: claims.space_name || spaceId.substring(0, 8),
+            token,
+          });
+        } catch {
+          // Skip invalid tokens
+        }
       }
+      this.spaces = entries.sort((a, b) =>
+        a.spaceName.localeCompare(b.spaceName, undefined, { sensitivity: 'base' }),
+      );
+    } catch {
+      this.spaces = [];
     }
-    this.spaces = entries.sort((a, b) =>
-      a.spaceName.localeCompare(b.spaceName, undefined, { sensitivity: 'base' }),
-    );
   }
 
 
@@ -291,7 +306,7 @@ export class AppShell extends BaseElement {
       clearLastSelectedSpace();
     }
   }
-  private handleViewChange = (event: CustomEvent<AppViewChangeDetail>) => {
+  private handleViewChange = async (event: CustomEvent<AppViewChangeDetail>) => {
     const { view, spaceId, serverUrl, token, displayName, reloadSpaces } = event.detail;
 
     this.view = view;
@@ -304,12 +319,12 @@ export class AppShell extends BaseElement {
         displayName: displayName ?? this.authState.displayName,
       };
       // Refresh space list after joining
-      this.loadSpacesFromStorage();
+      await this.loadSpacesFromStorage();
       // Persist last selected space for auto-reconnect on next start
       setLastSelectedSpace(serverUrl, spaceId);
     } else if (reloadSpaces) {
       // Reload spaces when explicitly requested (e.g., after removing a space)
-      this.loadSpacesFromStorage();
+      await this.loadSpacesFromStorage();
     }
   };
 

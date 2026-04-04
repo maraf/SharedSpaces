@@ -1324,3 +1324,5 @@ ew URLSearchParams() for clean parsing
 - **Zoe (Tester):** Verified screenshot stability; all 16 admin images locked.
 - **Pattern established:** Client-side sorting + backend deterministic IDs + test harness waits = reproducible visual tests.
 - **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b).**
+
+- **True service-worker background sync (2026-04-04):** Offline queue uploads no longer depend on an open tab. Keep JWTs in `localStorage` for the app shell, mirror them into IndexedDB for service-worker access, and let the SW process queued `PUT` uploads directly during the `sync` event. Successful items are deleted, permanent auth/validation failures are dropped, transient/network failures stay queued for retry, and open `space-view` clients refresh when `offline-queue-sync-complete` arrives.

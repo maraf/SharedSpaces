@@ -629,3 +629,17 @@ After reviewing Kaylee's research on server-generated timestamps, you decided to
 - Wash history corrected: ARIA roles were deliberately NOT added; updated narrative to reflect decision
 - Commit message prefix fixed: "ix(client)" → "fix(client)"
 - All changes pushed in single commit 793c76d
+
+### Background Sync Architecture Review (2026-04-03)
+
+**Context:** Reviewed offline queue / background sync implementation for true SW-driven sync capability.
+
+**Finding:** The initial assumption here was wrong. Browsers can fire the Background Sync `sync` event with no open client tab, so true SW-driven uploads need worker-readable auth state instead of delegating back to the page.
+
+**Key insight:** Mirroring membership JWTs from `localStorage` into IndexedDB gives the service worker access to auth during background sync while keeping the existing token format and join flow unchanged.
+
+**Migration:** Existing users keep working via lazy migration: legacy `localStorage` tokens are mirrored into IndexedDB on mutation and on-demand repair paths, so no forced rejoin is required.
+
+**Server-side:** No contract changes required. Existing PUT endpoints + JWT validation handle offline uploads correctly.
+
+**Decision:** Approved for PR. See `.squad/decisions/inbox/mal-background-sync-review.md` for full analysis.

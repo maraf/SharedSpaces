@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import './app-shell';
 import { AppShell } from './app-shell';
 import type { ConnectionState } from './lib/signalr-client';
+import * as tokenStorage from './lib/token-storage';
 
 // Mock @microsoft/signalr (required because app-shell imports space-view which imports signalr-client)
 const mockConnection = {
@@ -55,27 +56,47 @@ vi.mock('jwt-decode', () => ({
 }));
 
 // Mock idb-storage (async IndexedDB operations)
+const mockStoredAuthTokens = new Map<string, string>();
 vi.mock('./lib/idb-storage', () => ({
   getPendingShares: vi.fn().mockResolvedValue([]),
   removePendingShare: vi.fn().mockResolvedValue(undefined),
   clearPendingShares: vi.fn().mockResolvedValue(undefined),
+  getStoredAuthToken: vi.fn().mockImplementation(async (serverUrl: string, spaceId: string) =>
+    mockStoredAuthTokens.get(`${serverUrl}:${spaceId}`)),
+  getStoredAuthTokens: vi.fn().mockImplementation(async () =>
+    Object.fromEntries(mockStoredAuthTokens.entries())),
+  setStoredToken: vi.fn().mockImplementation(async (serverUrl: string, spaceId: string, token: string) => {
+    mockStoredAuthTokens.set(`${serverUrl}:${spaceId}`, token);
+  }),
+  setStoredAuthTokens: vi.fn().mockImplementation(async (tokens: Record<string, string>) => {
+    mockStoredAuthTokens.clear();
+    for (const [key, value] of Object.entries(tokens)) {
+      mockStoredAuthTokens.set(key, value);
+    }
+  }),
+  clearStoredAuthTokens: vi.fn().mockImplementation(async () => {
+    mockStoredAuthTokens.clear();
+  }),
 }));
 
 describe('AppShell - Connection State on View Change', () => {
   const spaceId = '550e8400-e29b-41d4-a716-446655440000';
   let element: AppShell;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    await tokenStorage.resetTokenStorageForTests();
+    localStorage.clear();
 
     element = document.createElement('app-shell') as AppShell;
     document.body.appendChild(element);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (element.parentNode) {
       element.remove();
     }
+    await tokenStorage.resetTokenStorageForTests();
     vi.restoreAllMocks();
   });
 

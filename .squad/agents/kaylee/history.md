@@ -1130,6 +1130,78 @@ Reviewer flagged that `CreateSharedLink` did not validate `Name` length against 
 - **Validation pattern:** Project consistently uses `Results.BadRequest(new { Error = "..." })` with capital-E `Error` key
 - **Server URL pattern:** `$"{httpContext.Request.Scheme}://{httpContext.Request.Host}"` is the standard way to compute the server's base URL (used in TokenEndpoints, InvitationEndpoints, and now SharedLinkEndpoints)
 - **Nullable record defaults for backward compat:** Adding optional fields to shared response records with `= null` default avoids breaking list/query endpoints that don't need the new field
+- **CLI sync no longer uses local manifests:** Journal sync is fully server-tracked via `SpaceMember.LastSyncAt`. The server returns deltas since the client's last checkpoint, so no local `.sharedspaces-sync.json` file is needed. Initial sync always performs full reconciliation (lists all items) to handle cases where the in-memory `_downloadedItems` dictionary is empty after restart.
+- **DateTimeOffset vs DateTime in DTOs:** Server uses `DateTimeOffset` for `JournalCheckpointRequest.Checkpoint` but `DateTime` for `JournalResponse.Checkpoint`. The CLI uses `DateTimeOffset` on both for safety. `System.Text.Json` handles the `DateTime` → `DateTimeOffset` deserialization transparently.
+- **Atomic file download claims in CLI:** `DownloadAndSaveFileAsync` uses `TryAdd(itemId, safeName)` as an atomic claim to prevent double-downloads when the same item appears in multiple events (e.g., journal delta + SignalR broadcast during polling).
+
+## Team Update: Share Link Implementation Session (2026-03-30)
+
+**Issue #151 (GitHub Pages SPA routing) + Issue #161 (stateless share links) - Completed**
+
+**Coordinated with:** Wash (Frontend Dev), Zoe (Tester)
+
+**Your contribution:**
+- Added nullable ServerUrl field to SharedLinkResponse DTO
+- ServerUrl populated on link creation with requesting host's base URL
+- Enables client-side stateless share link decoding (token + API URL combined in URL)
+- 209 server integration tests passing
+
+**Cross-agent outcomes:**
+- Wash: Implemented 404.html redirect pattern for GitHub Pages SPA routing, created share-link.ts encode/decode module, updated 4 URL construction sites
+- Zoe: Wrote 31 E2E/unit tests (2 server, 16 share-link, 13 shared-item-api)
+
+**Key decisions executed:**
+1. 404.html redirect pattern (no --base ./ change needed)
+2. Base64url encode token + API URL as query string for stateless links
+3. Backward compatibility for legacy GUID tokens
+
+**Session documented in:**
+- .squad/log/2026-03-30T19-19-08-share-link-implementation.md
+- .squad/orchestration-log/2026-03-30T19-19-08-kaylee.md
+- Decisions merged into .squad/decisions.md
+
+## Learnings
+
+### Journal Deletion Content (2026-04-03)
+
+Added `Content` field to `DeletedItem` entity to support CLI filename mapping after restart. Key learnings:
+
+- **Entity changes:** `DeletedItem.Content` is nullable string — populated for file items (filename), null for text items
+- **Configuration pattern:** Used `.IsRequired(false)` in EF Core configuration for nullable properties
+- **Multiple deletion sites:** Found three places creating DeletedItem records:
+  1. Direct item deletion (ItemEndpoints.cs line ~425)
+  2. Transfer with "move" action (ItemEndpoints.cs line ~715)
+  3. Transfer second site (ItemEndpoints.cs line ~925)
+- **Content population logic:** `Content = isFile ? item.Content : null` where `isFile = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase)`
+- **DTO pattern:** Created `DeletedItemResponse(Guid Id, string? Content)` to replace `Guid[]` in journal response
+- **Test updates:** Local record definitions in test files need updating separately from server DTOs
+- **Migration approach:** Added nullable column — safe additive migration with no data loss
+
+**File paths:**
+- Entity: `src/SharedSpaces.Server/Domain/DeletedItem.cs`
+- Configuration: `src/SharedSpaces.Server/Infrastructure/Persistence/Configurations/DeletedItemConfiguration.cs`
+- DTOs: `src/SharedSpaces.Server/Features/Journal/Models.cs`
+- Creation sites: `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs` (UpsertDeletedItemAsync + callers)
+- Tests: `tests/SharedSpaces.Server.Tests/JournalEndpointTests.cs`
+
+### CLI Journal Deletion Shape (2026-04-03)
+
+Updated CLI to consume the new journal deletion shape with filenames. Key learnings:
+
+- **DTO update pattern:** Changed `JournalResponse.Deleted` from `Guid[]` to `DeletedItemResponse[]` to match server
+- **Deletion extraction:** Extracted `DeleteLocalItem(Guid itemId, string? knownFilename)` method to handle both journal (with filename) and SignalR (without filename) paths
+- **Fallback logic:** When `knownFilename` is provided (from journal), use it directly; when null (from SignalR), fall back to `_downloadedItems` lookup
+- **Loop update:** In `ApplyRemoteChangesAsync`, changed from iterating `Guid[]` to iterating `DeletedItemResponse[]` using `DistinctBy(d => d.Id)`
+- **Test helper update:** Updated `MockJournal` helper to accept `IEnumerable<DeletedItemResponse>?` instead of `IEnumerable<Guid>?`
+- **Backward compatibility:** `OnItemDeleted` still works for SignalR events by calling `DeleteLocalItem(itemDeleted.Id, null)`
+- **Bool return pattern:** Preserved bool return types throughout deletion methods for conditional checkpoint acknowledgment
+
+**File paths:**
+- DTOs: `src/SharedSpaces.Cli.Core/Services/SharedSpacesApiClient.cs`
+- Sync service: `src/SharedSpaces.Cli.Core/Services/SyncService.cs`
+- Tests: `tests/SharedSpaces.Cli.Core.Tests/SyncServiceTests.cs`
+
+**Result:** All 57 CLI tests passing, clean build. Journal now provides filename directly, eliminating need for local manifest or in-memory mapping for journal-based deletions.
 
 ## Team Update: Share Link Implementation Session (2026-03-30)
 

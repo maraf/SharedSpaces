@@ -99,7 +99,9 @@ public class JournalEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadJsonAsync<JournalResponse>(response);
         body.FullSyncRequired.Should().BeFalse();
-        body.Deleted.Should().Contain(item.Id);
+        body.Deleted.Should().ContainSingle();
+        body.Deleted[0].Id.Should().Be(item.Id);
+        body.Deleted[0].Content.Should().BeNull(); // text item
     }
 
     [Fact]
@@ -487,6 +489,7 @@ public class JournalEndpointTests
             deletedItem.Should().NotBeNull();
             deletedItem!.SpaceId.Should().Be(space.Id);
             deletedItem.DeletedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+            deletedItem.Content.Should().BeNull(); // text item
         });
     }
 
@@ -526,7 +529,56 @@ public class JournalEndpointTests
             var deletedItem = await db.DeletedItems.SingleOrDefaultAsync(d => d.ItemId == item.Id);
             deletedItem.Should().NotBeNull();
             deletedItem!.SpaceId.Should().Be(sourceSpace.Id);
+            deletedItem.Content.Should().BeNull(); // text item
         });
+    }
+
+    [Fact]
+    public async Task DeleteItem_FileItem_StoresContentInDeletedItemRecord()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        // Opt member into journaling
+        await GetJournalAsync(client, space.Id, token);
+
+        // Create a file item
+        var filename = "test-file.txt";
+        var fileItem = await factory.CreateItemAsync(
+            space.Id, member.Id,
+            contentType: "file",
+            content: filename,
+            sharedAt: DateTime.UtcNow,
+            fileSize: 1024);
+
+        var deleteResponse = await DeleteItemAsync(client, space.Id, fileItem.Id, token);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var deletedItem = await db.DeletedItems.SingleOrDefaultAsync(d => d.ItemId == fileItem.Id);
+            deletedItem.Should().NotBeNull();
+            deletedItem!.Content.Should().Be(filename); // file item should have filename
+        });
+
+        // Also verify it appears in journal
+        var beforeDelete = DateTime.UtcNow.AddSeconds(-5);
+        await factory.WithDbContextAsync(async db =>
+        {
+            var trackedMember = await db.SpaceMembers.SingleAsync(m => m.Id == member.Id);
+            trackedMember.LastSyncAt = beforeDelete;
+            await db.SaveChangesAsync();
+        });
+
+        var journalResponse = await GetJournalAsync(client, space.Id, token);
+        var body = await ReadJsonAsync<JournalResponse>(journalResponse);
+        body.Deleted.Should().ContainSingle();
+        body.Deleted[0].Id.Should().Be(fileItem.Id);
+        body.Deleted[0].Content.Should().Be(filename);
     }
 
     [Fact]
@@ -718,7 +770,9 @@ public class JournalEndpointTests
         bool FullSyncRequired,
         DateTime Checkpoint,
         SpaceItemResponse[] AddedOrUpdated,
-        Guid[] Deleted);
+        DeletedItemResponse[] Deleted);
+
+    private sealed record DeletedItemResponse(Guid Id, string? Content);
 
     private sealed record SpaceItemResponse(
         Guid Id,

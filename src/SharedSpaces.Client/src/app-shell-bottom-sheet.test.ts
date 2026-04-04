@@ -49,6 +49,7 @@ vi.mock('jwt-decode', () => ({
 
 const mockGetTokens = vi.fn<() => Record<string, string>>();
 const mockGetToken = vi.fn();
+const mockGetPendingShares = vi.fn();
 vi.mock('./lib/token-storage', () => ({
   getTokens: () => mockGetTokens(),
   getToken: (...args: unknown[]) => mockGetToken(...args),
@@ -62,7 +63,7 @@ vi.mock('./lib/token-storage', () => ({
 }));
 
 vi.mock('./lib/idb-storage', () => ({
-  getPendingShares: vi.fn().mockResolvedValue([]),
+  getPendingShares: (...args: unknown[]) => mockGetPendingShares(...args),
   removePendingShare: vi.fn().mockResolvedValue(undefined),
   clearPendingShares: vi.fn().mockResolvedValue(undefined),
 }));
@@ -101,12 +102,24 @@ function setupSpaces(
 
 function setupEmptySpaces() {
   mockGetTokens.mockReturnValue({});
+  mockGetPendingShares.mockResolvedValue([]);
   mockJwtDecode.mockReturnValue({
     server_url: 'http://localhost:5000',
     space_id: 'test',
     space_name: 'Test',
     display_name: 'User',
   });
+}
+
+function setupPendingShares(count: number) {
+  mockGetPendingShares.mockResolvedValue(
+    Array.from({ length: count }, (_, index) => ({
+      id: `pending-${index}`,
+      type: 'text' as const,
+      content: `pending item ${index}`,
+      timestamp: Date.now() + index,
+    })),
+  );
 }
 
 describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
@@ -116,6 +129,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     document.body.classList.remove('overflow-hidden');
+    mockGetPendingShares.mockResolvedValue([]);
 
     // Default: simulate mobile viewport (max-width: 639px matches)
     matchMediaMock = vi.fn().mockReturnValue({ matches: true });
@@ -262,9 +276,11 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
   describe('pending shares visibility', () => {
     it('does not render pending shares pill in bottom bar when count is 0', async () => {
       setupEmptySpaces();
+      setupPendingShares(0);
       createElement();
-      (element as any).pendingShareCount = 0;
-      await element.updateComplete;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(0);
+      });
 
       const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
       const pendingPill = bottomBar?.querySelector('[data-testid="pending-shares-bar"]');
@@ -273,8 +289,11 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
 
     it('renders pending shares pill in bottom bar when count > 0', async () => {
       setupEmptySpaces();
+      setupPendingShares(3);
       createElement();
-      (element as any).pendingShareCount = 3;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(3);
+      });
       await element.updateComplete;
 
       const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
@@ -285,9 +304,12 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
 
     it('does not render pending shares entry in sheet when count is 0', async () => {
       setupEmptySpaces();
+      setupPendingShares(0);
       createElement();
-      (element as any).pendingShareCount = 0;
       (element as any).sheetOpen = true;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(0);
+      });
       await element.updateComplete;
 
       const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
@@ -297,9 +319,12 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
 
     it('renders pending shares entry in sheet when count > 0', async () => {
       setupEmptySpaces();
+      setupPendingShares(5);
       createElement();
-      (element as any).pendingShareCount = 5;
       (element as any).sheetOpen = true;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(5);
+      });
       await element.updateComplete;
 
       const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
@@ -310,9 +335,11 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
 
     it('does not render desktop pending shares pill when count is 0', async () => {
       setupEmptySpaces();
+      setupPendingShares(0);
       createElement();
-      (element as any).pendingShareCount = 0;
-      await element.updateComplete;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(0);
+      });
 
       const desktopNav = element.querySelector('[data-testid="desktop-pills"]') as HTMLElement;
       const pendingPill = desktopNav?.querySelector('[data-testid="pending-shares-pill"]');
@@ -321,8 +348,11 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
 
     it('renders desktop pending shares pill when count > 0', async () => {
       setupEmptySpaces();
+      setupPendingShares(2);
       createElement();
-      (element as any).pendingShareCount = 2;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(2);
+      });
       await element.updateComplete;
 
       const desktopNav = element.querySelector('[data-testid="desktop-pills"]') as HTMLElement;
@@ -337,8 +367,11 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
   describe('pending shares navigation', () => {
     it('sets view to pending-shares when bottom bar pill is clicked (does NOT toggle sheet)', async () => {
       setupEmptySpaces();
+      setupPendingShares(3);
       createElement();
-      (element as any).pendingShareCount = 3;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(3);
+      });
       await element.updateComplete;
 
       const bottomBar = element.querySelector('[data-testid="bottom-bar"]') as HTMLElement;
@@ -356,9 +389,12 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
 
     it('sets view to pending-shares and closes sheet when sheet entry is clicked', async () => {
       setupEmptySpaces();
+      setupPendingShares(2);
       createElement();
-      (element as any).pendingShareCount = 2;
       (element as any).sheetOpen = true;
+      await vi.waitFor(() => {
+        expect((element as any).pendingShareCount).toBe(2);
+      });
       await element.updateComplete;
 
       const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;

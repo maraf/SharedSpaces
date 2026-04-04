@@ -34,6 +34,7 @@ public class SpaceHub : Hub
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, GetSpaceGroupName(routeSpaceId));
+        await Clients.Caller.SendAsync("Connected");
         await base.OnConnectedAsync();
     }
 

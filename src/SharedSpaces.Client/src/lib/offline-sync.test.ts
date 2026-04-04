@@ -5,13 +5,14 @@ import {
   queueForOffline,
   getOfflineQueueCount,
   processOfflineQueue,
+  processAllOfflineQueues,
 } from './offline-sync';
 import {
   clearOfflineQueue,
   getOfflineQueue,
+  setStoredToken,
 } from './idb-storage';
 
-// Mock space-api
 vi.mock('../features/space-view/space-api', () => ({
   shareText: vi.fn(),
   shareFile: vi.fn(),
@@ -25,12 +26,12 @@ vi.mock('../features/space-view/space-api', () => ({
   },
 }));
 
-// Mock sw-registration
 vi.mock('./sw-registration', () => ({
   requestBackgroundSync: vi.fn().mockResolvedValue(false),
 }));
 
 import { shareText, shareFile, SpaceApiError } from '../features/space-view/space-api';
+import { requestBackgroundSync } from './sw-registration';
 
 const SERVER = 'http://server';
 const SPACE = 'space-1';
@@ -38,6 +39,7 @@ const TOKEN = 'test-token';
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  localStorage.clear();
   await clearOfflineQueue();
   Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
 });
@@ -53,6 +55,13 @@ describe('offline-sync', () => {
       expect(queue[0].content).toBe('hello');
       expect(queue[0].serverUrl).toBe(SERVER);
       expect(queue[0].spaceId).toBe(SPACE);
+    });
+
+    it('requests background sync after queueing an item', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
+
+      expect(requestBackgroundSync).toHaveBeenCalledTimes(1);
+      expect(requestBackgroundSync).toHaveBeenCalledWith();
     });
 
     it('queues a file item', async () => {
@@ -92,6 +101,69 @@ describe('offline-sync', () => {
 
       expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(2);
       expect(await getOfflineQueueCount(SERVER, 'other-space')).toBe(1);
+    });
+  });
+
+  describe('processAllOfflineQueues', () => {
+    it('syncs queued items for legacy localStorage-only users via the shared helper', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
+      await queueForOffline(SERVER, 'other-space', 'text', { content: 'missing token' });
+      localStorage.setItem('sharedspaces:tokens', JSON.stringify({
+        [`${SERVER}:${SPACE}`]: TOKEN,
+      }));
+
+      vi.mocked(shareText).mockResolvedValue({
+        id: '1', spaceId: SPACE, memberId: 'm', contentType: 'text',
+        content: 'hello', fileSize: 0, sharedAt: '',
+      });
+
+      const result = await processAllOfflineQueues();
+
+      expect(result).toEqual({ synced: 1, failed: 0 });
+      expect(shareText).toHaveBeenCalledTimes(1);
+      expect(shareText).toHaveBeenCalledWith(
+        SERVER, SPACE, expect.any(String), 'hello', TOKEN,
+      );
+      expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(0);
+      expect(await getOfflineQueueCount(SERVER, 'other-space')).toBe(1);
+    });
+
+    it('syncs queued items for IndexedDB-first users even when localStorage is empty', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
+      await setStoredToken(SERVER, SPACE, TOKEN);
+
+      vi.mocked(shareText).mockResolvedValue({
+        id: '1', spaceId: SPACE, memberId: 'm', contentType: 'text',
+        content: 'hello', fileSize: 0, sharedAt: '',
+      });
+
+      const result = await processAllOfflineQueues();
+
+      expect(result).toEqual({ synced: 1, failed: 0 });
+      expect(shareText).toHaveBeenCalledWith(
+        SERVER, SPACE, expect.any(String), 'hello', TOKEN,
+      );
+      expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(0);
+    });
+
+    it('prefers the mirrored IndexedDB token over stale legacy localStorage data', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
+      localStorage.setItem('sharedspaces:tokens', JSON.stringify({
+        [`${SERVER}:${SPACE}`]: 'stale-local-token',
+      }));
+      await setStoredToken(SERVER, SPACE, TOKEN);
+
+      vi.mocked(shareText).mockResolvedValue({
+        id: '1', spaceId: SPACE, memberId: 'm', contentType: 'text',
+        content: 'hello', fileSize: 0, sharedAt: '',
+      });
+
+      const result = await processAllOfflineQueues();
+
+      expect(result).toEqual({ synced: 1, failed: 0 });
+      expect(shareText).toHaveBeenCalledWith(
+        SERVER, SPACE, expect.any(String), 'hello', TOKEN,
+      );
     });
   });
 
@@ -154,6 +226,16 @@ describe('offline-sync', () => {
       expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(0);
     });
 
+    it('keeps 5xx server errors in queue for retry', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'retry later' });
+      vi.mocked(shareText).mockRejectedValue(new SpaceApiError('Server error', 503));
+
+      const result = await processOfflineQueue(SERVER, SPACE, TOKEN);
+
+      expect(result).toEqual({ synced: 0, failed: 1 });
+      expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(1);
+    });
+
     it('keeps network-error items in queue for retry', async () => {
       await queueForOffline(SERVER, SPACE, 'text', { content: 'retry me' });
       vi.mocked(shareText).mockRejectedValue(new SpaceApiError('Network error'));
@@ -194,7 +276,6 @@ describe('offline-sync', () => {
 
       expect(result).toEqual({ synced: 1, failed: 0 });
       expect(shareText).toHaveBeenCalledTimes(1);
-      // Other space's item still in queue
       expect(await getOfflineQueueCount(SERVER, 'other')).toBe(1);
     });
   });
