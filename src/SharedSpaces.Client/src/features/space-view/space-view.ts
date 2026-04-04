@@ -21,6 +21,8 @@ import {
   createSharedLink,
   getSharedLinks,
   deleteSharedLink,
+  getJournal,
+  updateJournalCheckpoint,
   SpaceApiError,
   type SpaceItemResponse,
   type SharedLinkResponse,
@@ -31,6 +33,11 @@ import {
   clearOfflineQueueForSpace,
   getOfflineQueueForSpace,
   removeFromOfflineQueue,
+  getJournalSyncEnabled,
+  setJournalSyncEnabled,
+  getJournalCache,
+  setJournalCache,
+  clearJournalCache,
   type PendingShareItem,
   type OfflineQueueItem,
 } from '../../lib/idb-storage';
@@ -104,6 +111,8 @@ export class SpaceView extends BaseElement {
   @state() private shareCopiedLinkId: string | null = null;
   @state() private shareModalName = '';
   @state() private openMenuItemId: string | null = null;
+  @state() private journalSyncEnabled = false;
+  @state() private journalSyncLoading = false;
 
   private _previewRequestId = 0;
 
@@ -268,11 +277,15 @@ export class SpaceView extends BaseElement {
     await Promise.all([
       this.refreshOfflineQueue(),
       this.loadPendingShares(),
+      this.loadJournalSyncSetting(),
     ]);
 
     try {
-      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
-      this.items = itemList;
+      if (this.journalSyncEnabled) {
+        await this.loadDataWithJournalSync();
+      } else {
+        await this.loadDataWithFullFetch();
+      }
       
       // Start SignalR connection after successful data load
       await this.startSignalR();
@@ -296,6 +309,88 @@ export class SpaceView extends BaseElement {
           : 'Failed to load space data.';
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  private async loadJournalSyncSetting() {
+    if (!this.serverUrl || !this.spaceId) return;
+    try {
+      this.journalSyncEnabled = await getJournalSyncEnabled(this.serverUrl, this.spaceId);
+    } catch {
+      this.journalSyncEnabled = false;
+    }
+  }
+
+  private async loadDataWithFullFetch() {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+    const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+    this.items = itemList;
+  }
+
+  private async loadDataWithJournalSync() {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    // 1. Load cached items from IndexedDB
+    const cache = await getJournalCache(this.serverUrl, this.spaceId);
+    if (cache) {
+      this.items = cache.items;
+    }
+
+    // 2. Fetch journal delta
+    const journal = await getJournal(this.serverUrl, this.spaceId, this.token);
+
+    // 3. If full sync required, fall back to full fetch
+    if (journal.fullSyncRequired) {
+      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+      this.items = itemList;
+      await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, itemList);
+      await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
+      return;
+    }
+
+    // 4. Apply delta to cached items
+    const itemMap = new Map(this.items.map((item) => [item.id, item]));
+    
+    // Apply deletions
+    for (const deletedId of journal.deleted) {
+      itemMap.delete(deletedId);
+    }
+    
+    // Apply additions/updates
+    for (const item of journal.addedOrUpdated) {
+      itemMap.set(item.id, item);
+    }
+    
+    // Convert back to sorted array (newest first)
+    this.items = Array.from(itemMap.values()).sort(
+      (a, b) => new Date(b.sharedAt).getTime() - new Date(a.sharedAt).getTime(),
+    );
+
+    // 5. Update cache and checkpoint
+    await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, this.items);
+    await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
+  }
+
+  private async toggleJournalSync() {
+    if (!this.serverUrl || !this.spaceId) return;
+
+    this.journalSyncLoading = true;
+    try {
+      const newValue = !this.journalSyncEnabled;
+      await setJournalSyncEnabled(this.serverUrl, this.spaceId, newValue);
+      this.journalSyncEnabled = newValue;
+
+      if (!newValue) {
+        // When disabling, clear the cache
+        await clearJournalCache(this.serverUrl, this.spaceId);
+      }
+
+      // Reload data to apply the new mode
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to toggle journal sync:', error);
+    } finally {
+      this.journalSyncLoading = false;
     }
   }
 
@@ -363,19 +458,44 @@ export class SpaceView extends BaseElement {
     };
 
     this.items = [newItem, ...this.items];
+
+    // Update journal cache if enabled
+    this.updateJournalCacheAfterChange();
   }
 
   private handleItemDeleted(payload: ItemDeletedPayload) {
     // Remove item from list (silently ignore if not found)
     this.items = this.items.filter((item) => item.id !== payload.id);
+
+    // Update journal cache if enabled
+    this.updateJournalCacheAfterChange();
+  }
+
+  private async updateJournalCacheAfterChange() {
+    if (!this.journalSyncEnabled || !this.serverUrl || !this.spaceId) return;
+
+    try {
+      const cache = await getJournalCache(this.serverUrl, this.spaceId);
+      if (cache) {
+        // Update cached items while keeping existing checkpoint
+        await setJournalCache(this.serverUrl, this.spaceId, cache.checkpoint, this.items);
+      }
+    } catch (error) {
+      // Non-critical; cache will be refreshed on next startup
+      console.warn('Failed to update journal cache:', error);
+    }
   }
 
   private async refreshItemsAfterReconnect() {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
 
     try {
-      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
-      this.items = itemList;
+      if (this.journalSyncEnabled) {
+        await this.loadDataWithJournalSync();
+      } else {
+        const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+        this.items = itemList;
+      }
     } catch (error) {
       // Refresh failure is non-critical; user can manually refresh
       console.warn('Failed to refresh items after reconnect:', error);
@@ -1177,6 +1297,7 @@ export class SpaceView extends BaseElement {
         ${this.renderOfflineBanner()}
         ${this.renderServerUnreachableBanner()}
         ${this.renderSyncStatus()}
+        ${this.renderJournalSyncToggle()}
         ${this.renderUploadArea()}
         ${this.renderPendingSharesSection()}
         ${this.renderPendingUploadsSection()}
@@ -1226,6 +1347,41 @@ export class SpaceView extends BaseElement {
             class="shrink-0 rounded-full border border-sky-700 bg-sky-900/30 px-4 py-1.5 text-xs font-semibold text-sky-300 transition hover:border-sky-600 hover:bg-sky-900/50"
           >
             Reconnect
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderJournalSyncToggle() {
+    return html`
+      <div class="rounded-lg border border-slate-700 bg-slate-900 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-200">
+              Large Space Mode
+            </p>
+            <p class="text-xs text-slate-500">
+              Optimize startup for large spaces by caching items locally
+            </p>
+          </div>
+          <button
+            @click=${this.toggleJournalSync}
+            ?disabled=${this.journalSyncLoading}
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${this
+              .journalSyncEnabled
+              ? 'bg-sky-600'
+              : 'bg-slate-700'}"
+            role="switch"
+            aria-checked=${this.journalSyncEnabled}
+            aria-label="Toggle large space mode"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${this
+                .journalSyncEnabled
+                ? 'translate-x-6'
+                : 'translate-x-1'}"
+            ></span>
           </button>
         </div>
       </div>

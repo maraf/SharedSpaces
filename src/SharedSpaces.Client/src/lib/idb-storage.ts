@@ -3,9 +3,11 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PENDING_SHARES_STORE = 'pending-shares';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
+const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
+const JOURNAL_CACHE_STORE = 'journal-cache';
 
 export interface PendingShareItem {
   id: string;
@@ -31,18 +33,47 @@ export interface OfflineQueueItem {
   timestamp: number;
 }
 
+export interface JournalSyncSetting {
+  key: string; // `${serverUrl}|${spaceId}`
+  enabled: boolean;
+  updatedAt: number;
+}
+
+export interface JournalCacheEntry {
+  key: string; // `${serverUrl}|${spaceId}`
+  checkpoint: string; // ISO 8601 timestamp
+  items: Array<{
+    id: string;
+    spaceId: string;
+    memberId: string;
+    contentType: 'text' | 'file';
+    content: string;
+    fileSize: number;
+    sharedAt: string;
+  }>;
+  updatedAt: number;
+}
+
 let dbInstance: Promise<IDBPDatabase> | null = null;
 
 function getDB(): Promise<IDBPDatabase> {
   if (dbInstance) return dbInstance;
 
   dbInstance = openDB(DB_NAME, DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains(PENDING_SHARES_STORE)) {
         db.createObjectStore(PENDING_SHARES_STORE, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         db.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: 'id' });
+      }
+      if (oldVersion < 2) {
+        if (!db.objectStoreNames.contains(JOURNAL_SYNC_SETTINGS_STORE)) {
+          db.createObjectStore(JOURNAL_SYNC_SETTINGS_STORE, { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains(JOURNAL_CACHE_STORE)) {
+          db.createObjectStore(JOURNAL_CACHE_STORE, { keyPath: 'key' });
+        }
       }
     },
   }).catch((err) => {
@@ -121,4 +152,68 @@ export async function removeFromOfflineQueue(id: string): Promise<void> {
 export async function clearOfflineQueue(): Promise<void> {
   const db = await getDB();
   await db.clear(OFFLINE_QUEUE_STORE);
+}
+
+// --- Journal Sync Settings ---
+
+export async function getJournalSyncEnabled(
+  serverUrl: string,
+  spaceId: string,
+): Promise<boolean> {
+  const db = await getDB();
+  const key = `${serverUrl}|${spaceId}`;
+  const setting = await db.get(JOURNAL_SYNC_SETTINGS_STORE, key);
+  return setting?.enabled ?? false;
+}
+
+export async function setJournalSyncEnabled(
+  serverUrl: string,
+  spaceId: string,
+  enabled: boolean,
+): Promise<void> {
+  const db = await getDB();
+  const key = `${serverUrl}|${spaceId}`;
+  const setting: JournalSyncSetting = {
+    key,
+    enabled,
+    updatedAt: Date.now(),
+  };
+  await db.put(JOURNAL_SYNC_SETTINGS_STORE, setting);
+}
+
+// --- Journal Cache ---
+
+export async function getJournalCache(
+  serverUrl: string,
+  spaceId: string,
+): Promise<JournalCacheEntry | undefined> {
+  const db = await getDB();
+  const key = `${serverUrl}|${spaceId}`;
+  return db.get(JOURNAL_CACHE_STORE, key);
+}
+
+export async function setJournalCache(
+  serverUrl: string,
+  spaceId: string,
+  checkpoint: string,
+  items: JournalCacheEntry['items'],
+): Promise<void> {
+  const db = await getDB();
+  const key = `${serverUrl}|${spaceId}`;
+  const entry: JournalCacheEntry = {
+    key,
+    checkpoint,
+    items,
+    updatedAt: Date.now(),
+  };
+  await db.put(JOURNAL_CACHE_STORE, entry);
+}
+
+export async function clearJournalCache(
+  serverUrl: string,
+  spaceId: string,
+): Promise<void> {
+  const db = await getDB();
+  const key = `${serverUrl}|${spaceId}`;
+  await db.delete(JOURNAL_CACHE_STORE, key);
 }

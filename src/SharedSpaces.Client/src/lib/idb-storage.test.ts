@@ -11,6 +11,11 @@ import {
   clearOfflineQueue,
   getOfflineQueueForSpace,
   clearOfflineQueueForSpace,
+  getJournalSyncEnabled,
+  setJournalSyncEnabled,
+  getJournalCache,
+  setJournalCache,
+  clearJournalCache,
   type OfflineQueueItem,
 } from './idb-storage';
 
@@ -184,6 +189,111 @@ describe('idb-storage', () => {
       const queue = await getOfflineQueue();
       expect(queue[0].fileData).toBeInstanceOf(ArrayBuffer);
       expect(new Uint8Array(queue[0].fileData!)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    });
+  });
+
+  // --- Journal Sync Settings ---
+
+  describe('journal sync settings', () => {
+    it('defaults to false for new space', async () => {
+      expect(await getJournalSyncEnabled('http://server1', 'space-A')).toBe(false);
+    });
+
+    it('setJournalSyncEnabled stores enabled state', async () => {
+      await setJournalSyncEnabled('http://server1', 'space-A', true);
+      expect(await getJournalSyncEnabled('http://server1', 'space-A')).toBe(true);
+    });
+
+    it('setJournalSyncEnabled can toggle back to false', async () => {
+      await setJournalSyncEnabled('http://server1', 'space-A', true);
+      await setJournalSyncEnabled('http://server1', 'space-A', false);
+      expect(await getJournalSyncEnabled('http://server1', 'space-A')).toBe(false);
+    });
+
+    it('settings are scoped by serverUrl and spaceId', async () => {
+      await setJournalSyncEnabled('http://server1', 'space-A', true);
+      await setJournalSyncEnabled('http://server1', 'space-B', false);
+      await setJournalSyncEnabled('http://server2', 'space-A', true);
+
+      expect(await getJournalSyncEnabled('http://server1', 'space-A')).toBe(true);
+      expect(await getJournalSyncEnabled('http://server1', 'space-B')).toBe(false);
+      expect(await getJournalSyncEnabled('http://server2', 'space-A')).toBe(true);
+    });
+  });
+
+  // --- Journal Cache ---
+
+  describe('journal cache', () => {
+    const items = [
+      {
+        id: 'item-1',
+        spaceId: 'space-A',
+        memberId: 'member-1',
+        contentType: 'text' as const,
+        content: 'Hello',
+        fileSize: 0,
+        sharedAt: '2025-01-01T00:00:00Z',
+      },
+      {
+        id: 'item-2',
+        spaceId: 'space-A',
+        memberId: 'member-1',
+        contentType: 'file' as const,
+        content: 'file.txt',
+        fileSize: 1024,
+        sharedAt: '2025-01-02T00:00:00Z',
+      },
+    ];
+
+    it('returns undefined for uncached space', async () => {
+      expect(await getJournalCache('http://server1', 'space-A')).toBeUndefined();
+    });
+
+    it('setJournalCache stores checkpoint and items', async () => {
+      const checkpoint = '2025-01-02T12:00:00Z';
+      await setJournalCache('http://server1', 'space-A', checkpoint, items);
+
+      const cache = await getJournalCache('http://server1', 'space-A');
+      expect(cache).toBeDefined();
+      expect(cache!.checkpoint).toBe(checkpoint);
+      expect(cache!.items).toEqual(items);
+    });
+
+    it('setJournalCache overwrites existing cache', async () => {
+      await setJournalCache('http://server1', 'space-A', '2025-01-01T00:00:00Z', items);
+      await setJournalCache('http://server1', 'space-A', '2025-01-03T00:00:00Z', [items[0]]);
+
+      const cache = await getJournalCache('http://server1', 'space-A');
+      expect(cache!.checkpoint).toBe('2025-01-03T00:00:00Z');
+      expect(cache!.items).toHaveLength(1);
+    });
+
+    it('cache is scoped by serverUrl and spaceId', async () => {
+      await setJournalCache('http://server1', 'space-A', '2025-01-01T00:00:00Z', items);
+      await setJournalCache('http://server1', 'space-B', '2025-01-02T00:00:00Z', [items[1]]);
+
+      const cacheA = await getJournalCache('http://server1', 'space-A');
+      const cacheB = await getJournalCache('http://server1', 'space-B');
+
+      expect(cacheA!.items).toHaveLength(2);
+      expect(cacheB!.items).toHaveLength(1);
+    });
+
+    it('clearJournalCache removes cache for space', async () => {
+      await setJournalCache('http://server1', 'space-A', '2025-01-01T00:00:00Z', items);
+      await clearJournalCache('http://server1', 'space-A');
+
+      expect(await getJournalCache('http://server1', 'space-A')).toBeUndefined();
+    });
+
+    it('clearJournalCache only removes specified space', async () => {
+      await setJournalCache('http://server1', 'space-A', '2025-01-01T00:00:00Z', items);
+      await setJournalCache('http://server1', 'space-B', '2025-01-02T00:00:00Z', [items[1]]);
+
+      await clearJournalCache('http://server1', 'space-A');
+
+      expect(await getJournalCache('http://server1', 'space-A')).toBeUndefined();
+      expect(await getJournalCache('http://server1', 'space-B')).toBeDefined();
     });
   });
 });
