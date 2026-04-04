@@ -3661,3 +3661,54 @@ describe('SpaceView - File Preview Modal', () => {
     });
   });
 });
+
+describe('SpaceView - Background Sync Completion', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+
+  let element: SpaceView;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    element = document.createElement('space-view') as SpaceView;
+    element.serverUrl = serverUrl;
+    element.spaceId = spaceId;
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('refreshes the current space and shows a sync summary when background sync completes', async () => {
+    const refreshOfflineQueue = vi.spyOn(element as any, 'refreshOfflineQueue').mockResolvedValue(undefined);
+    const refreshItemsAfterReconnect = vi.spyOn(element as any, 'refreshItemsAfterReconnect').mockResolvedValue(undefined);
+
+    await (element as any).handleBackgroundSyncComplete({
+      synced: 2,
+      failed: 1,
+      spaces: [{ serverUrl, spaceId }],
+    });
+
+    expect(refreshOfflineQueue).toHaveBeenCalledTimes(1);
+    expect(refreshItemsAfterReconnect).toHaveBeenCalledTimes(1);
+    expect((element as any).syncMessage).toBe('Synced 2 items, 1 failed');
+  });
+
+  it('ignores background sync results for other spaces', async () => {
+    const refreshOfflineQueue = vi.spyOn(element as any, 'refreshOfflineQueue').mockResolvedValue(undefined);
+    const refreshItemsAfterReconnect = vi.spyOn(element as any, 'refreshItemsAfterReconnect').mockResolvedValue(undefined);
+
+    await (element as any).handleBackgroundSyncComplete({
+      synced: 1,
+      failed: 0,
+      spaces: [{ serverUrl: 'http://other-server', spaceId: 'other-space' }],
+    });
+
+    expect(refreshOfflineQueue).not.toHaveBeenCalled();
+    expect(refreshItemsAfterReconnect).not.toHaveBeenCalled();
+    expect((element as any).syncMessage).toBe('');
+  });
+});
