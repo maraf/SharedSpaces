@@ -629,3 +629,17 @@ After reviewing Kaylee's research on server-generated timestamps, you decided to
 - Wash history corrected: ARIA roles were deliberately NOT added; updated narrative to reflect decision
 - Commit message prefix fixed: "ix(client)" → "fix(client)"
 - All changes pushed in single commit 793c76d
+
+### Background Sync Architecture Review (2026-04-03)
+
+**Context:** Reviewed offline queue / background sync implementation for true SW-driven sync capability.
+
+**Finding:** Current architecture is correct and production-ready. The SW delegates sync to main thread via `postMessage`, which avoids IndexedDB token mirroring complexity.
+
+**Key insight:** Background Sync API requires a client tab to be available when `sync` fires. Since tokens live in localStorage (main thread only), and sync can only happen when a tab is open anyway, there's no benefit to mirroring tokens to IndexedDB. The current design is the simplest safe path.
+
+**Migration:** No localStorage migration needed. Token storage format is unchanged — existing users keep working.
+
+**Server-side:** No contract changes required. Existing PUT endpoints + JWT validation handle offline uploads correctly.
+
+**Decision:** Approved for PR. See `.squad/decisions/inbox/mal-background-sync-review.md` for full analysis.
