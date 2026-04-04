@@ -634,11 +634,11 @@ After reviewing Kaylee's research on server-generated timestamps, you decided to
 
 **Context:** Reviewed offline queue / background sync implementation for true SW-driven sync capability.
 
-**Finding:** Current architecture is correct and production-ready. The SW delegates sync to main thread via `postMessage`, which avoids IndexedDB token mirroring complexity.
+**Finding:** The initial assumption here was wrong. Browsers can fire the Background Sync `sync` event with no open client tab, so true SW-driven uploads need worker-readable auth state instead of delegating back to the page.
 
-**Key insight:** Background Sync API requires a client tab to be available when `sync` fires. Since tokens live in localStorage (main thread only), and sync can only happen when a tab is open anyway, there's no benefit to mirroring tokens to IndexedDB. The current design is the simplest safe path.
+**Key insight:** Mirroring membership JWTs from `localStorage` into IndexedDB gives the service worker access to auth during background sync while keeping the existing token format and join flow unchanged.
 
-**Migration:** No localStorage migration needed. Token storage format is unchanged — existing users keep working.
+**Migration:** Existing users keep working via lazy migration: legacy `localStorage` tokens are mirrored into IndexedDB on mutation and on-demand repair paths, so no forced rejoin is required.
 
 **Server-side:** No contract changes required. Existing PUT endpoints + JWT validation handle offline uploads correctly.
 
