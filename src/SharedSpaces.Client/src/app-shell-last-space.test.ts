@@ -58,10 +58,27 @@ vi.mock('jwt-decode', () => ({
 }));
 
 // Mock idb-storage (async IndexedDB operations)
+const mockStoredAuthTokens = new Map<string, string>();
 vi.mock('./lib/idb-storage', () => ({
   getPendingShares: vi.fn().mockResolvedValue([]),
   removePendingShare: vi.fn().mockResolvedValue(undefined),
   clearPendingShares: vi.fn().mockResolvedValue(undefined),
+  getStoredAuthToken: vi.fn().mockImplementation(async (serverUrl: string, spaceId: string) =>
+    mockStoredAuthTokens.get(`${serverUrl}:${spaceId}`)),
+  getStoredAuthTokens: vi.fn().mockImplementation(async () =>
+    Object.fromEntries(mockStoredAuthTokens.entries())),
+  setStoredToken: vi.fn().mockImplementation(async (serverUrl: string, spaceId: string, token: string) => {
+    mockStoredAuthTokens.set(`${serverUrl}:${spaceId}`, token);
+  }),
+  setStoredAuthTokens: vi.fn().mockImplementation(async (tokens: Record<string, string>) => {
+    mockStoredAuthTokens.clear();
+    for (const [key, value] of Object.entries(tokens)) {
+      mockStoredAuthTokens.set(key, value);
+    }
+  }),
+  clearStoredAuthTokens: vi.fn().mockImplementation(async () => {
+    mockStoredAuthTokens.clear();
+  }),
 }));
 
 describe('AppShell - Auto-select Last Space (#104)', () => {
@@ -72,9 +89,12 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
   let element: AppShell;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    await tokenStorage.waitForTokenMirrorWritesForTests();
+    await tokenStorage.resetTokenStorageForTests();
     localStorage.clear();
+    mockStoredAuthTokens.clear();
 
     // Default mock: decode token with matching claims
     mockJwtDecode.mockReturnValue({
@@ -89,34 +109,36 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
     mockParseInvitationFromUrl.mockReturnValue(null);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (element?.parentNode) {
       element.remove();
     }
+    await tokenStorage.waitForTokenMirrorWritesForTests();
+    await tokenStorage.resetTokenStorageForTests();
+    mockStoredAuthTokens.clear();
     vi.restoreAllMocks();
   });
 
   describe('Auto-select on app start', () => {
     it('auto-selects last space when token and last-space both exist', async () => {
       // Setup: User was previously viewing a space
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       // Create element (triggers connectedCallback → autoSelectLastSpace)
       element = document.createElement('app-shell') as AppShell;
       document.body.appendChild(element);
-      await element.updateComplete;
-
-      // Assert: space view activated with correct space
-      expect((element as any).view).toBe('space');
-      expect((element as any).currentSpaceId).toBe(spaceId);
-      expect((element as any).currentServerUrl).toBe(serverUrl);
-      expect((element as any).authState.token).toBe(mockToken);
+      await vi.waitFor(() => {
+        expect((element as any).view).toBe('space');
+        expect((element as any).currentSpaceId).toBe(spaceId);
+        expect((element as any).currentServerUrl).toBe(serverUrl);
+        expect((element as any).authState.token).toBe(mockToken);
+      });
     });
 
     it('does not auto-select when no last-space is saved', async () => {
       // Setup: User has tokens but no last-space saved (fresh install or intentional de-select)
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       // DO NOT set lastSelectedSpace
 
       element = document.createElement('app-shell') as AppShell;
@@ -144,7 +166,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
     it('invitation URL takes priority over auto-select', async () => {
       // Setup: Both last-space AND invitation URL present
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       // Mock invitation parsing to return valid invitation
@@ -169,8 +191,8 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
       const otherToken = 'other-jwt-token';
 
       // Setup: Multiple spaces, last-space points to second one
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
-      tokenStorage.setToken(otherServerUrl, otherSpaceId, otherToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(otherServerUrl, otherSpaceId, otherToken);
       tokenStorage.setLastSelectedSpace(otherServerUrl, otherSpaceId);
 
       // Mock jwt-decode to return correct claims for both tokens
@@ -194,18 +216,17 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
       element = document.createElement('app-shell') as AppShell;
       document.body.appendChild(element);
-      await element.updateComplete;
-
-      // Assert: second space is selected (not first)
-      expect((element as any).view).toBe('space');
-      expect((element as any).currentSpaceId).toBe(otherSpaceId);
-      expect((element as any).currentServerUrl).toBe(otherServerUrl);
-      expect((element as any).authState.token).toBe(otherToken);
+      await vi.waitFor(() => {
+        expect((element as any).view).toBe('space');
+        expect((element as any).currentSpaceId).toBe(otherSpaceId);
+        expect((element as any).currentServerUrl).toBe(otherServerUrl);
+        expect((element as any).authState.token).toBe(otherToken);
+      });
     });
 
     it('handles invalid JWT in last-space gracefully', async () => {
       // Setup: Last-space points to a space with corrupted token
-      tokenStorage.setToken(serverUrl, spaceId, 'invalid-jwt');
+      await tokenStorage.setToken(serverUrl, spaceId, 'invalid-jwt');
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       // Mock jwt-decode to throw on invalid token
@@ -227,7 +248,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
   describe('Intentional de-selection', () => {
     it('clears last-space when user navigates home from space view', async () => {
       // Setup: User is viewing a space
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       element = document.createElement('app-shell') as AppShell;
@@ -253,7 +274,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
     it('does not clear last-space when navigating home from non-space view', async () => {
       // Setup: User on join view, last-space exists from previous session
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       // Mock invitation parsing to return valid invitation
@@ -283,7 +304,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
   describe('Space selection persistence', () => {
     it('persists last-space when user selects a space', async () => {
       // Setup: App starts fresh (no auto-select)
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
 
       element = document.createElement('app-shell') as AppShell;
       document.body.appendChild(element);
@@ -311,8 +332,8 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
       const otherTokenKey = `${otherServerUrl}:${otherSpaceId}`;
 
       // Setup: User viewing first space
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
-      tokenStorage.setToken(otherServerUrl, otherSpaceId, otherToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(otherServerUrl, otherSpaceId, otherToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       mockJwtDecode.mockImplementation((token: string) => {
@@ -355,7 +376,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
     it('preserves last-space across multiple app restarts', async () => {
       // Session 1: User selects space
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       element = document.createElement('app-shell') as AppShell;
       document.body.appendChild(element);
       await element.updateComplete;
@@ -399,7 +420,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
   describe('Edge cases', () => {
     it('handles corrupted last-space localStorage value', async () => {
       // Setup: Token exists but last-space is malformed
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       localStorage.setItem('sharedspaces:lastSelectedSpace', 'malformed-key-no-colon');
 
       element = document.createElement('app-shell') as AppShell;
@@ -414,7 +435,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
     it('handles last-space with server URL containing colon correctly', async () => {
       const serverUrlWithPort = 'http://example.com:8080';
-      tokenStorage.setToken(serverUrlWithPort, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrlWithPort, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrlWithPort, spaceId);
 
       mockJwtDecode.mockReturnValue({
@@ -437,7 +458,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
       const otherSpaceId = '550e8400-e29b-41d4-a716-446655440001';
       
       // Setup: Last-space points to space A, but only token for space B exists
-      tokenStorage.setToken(serverUrl, otherSpaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, otherSpaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);  // Different spaceId
 
       mockJwtDecode.mockReturnValue({
@@ -472,7 +493,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
   describe('Integration with space selection', () => {
     it('selectSpace updates last-space correctly', async () => {
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
 
       element = document.createElement('app-shell') as AppShell;
       document.body.appendChild(element);
@@ -509,8 +530,8 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
         token: 'token2',
       };
 
-      tokenStorage.setToken(space1.serverUrl, space1.spaceId, space1.token);
-      tokenStorage.setToken(space2.serverUrl, space2.spaceId, space2.token);
+      await tokenStorage.setToken(space1.serverUrl, space1.spaceId, space1.token);
+      await tokenStorage.setToken(space2.serverUrl, space2.spaceId, space2.token);
 
       mockJwtDecode.mockImplementation((token: string) => {
         if (token === 'token1') {
@@ -548,7 +569,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
   describe('De-selection behavior', () => {
     it('de-selecting and restarting does not auto-select', async () => {
       // Session 1: User selects space
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       element = document.createElement('app-shell') as AppShell;
       document.body.appendChild(element);
       await element.updateComplete;
@@ -590,7 +611,7 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
 
     it('clearing last-space prevents auto-select on next start', async () => {
       // Setup: Last-space saved
-      tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
       tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
 
       // Explicitly clear it (simulating intentional de-select)

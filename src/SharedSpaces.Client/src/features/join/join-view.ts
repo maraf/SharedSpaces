@@ -125,7 +125,7 @@ export class JoinView extends BaseElement {
       const claims = jwtDecode<JwtClaims>(response.token);
 
       // Store token
-      setToken(claims.server_url, claims.space_id, response.token);
+      await setToken(claims.server_url, claims.space_id, response.token);
 
       // Save display name as primary for future use
       setPrimaryDisplayName(this.displayName.trim());

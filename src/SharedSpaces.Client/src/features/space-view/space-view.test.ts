@@ -1,9 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import 'fake-indexeddb/auto';
 import { nothing } from 'lit';
 import './space-view';
 import { SpaceView } from './space-view';
 import type { ItemAddedPayload } from '../../lib/signalr-client';
 import type { SpaceItemResponse } from './space-api';
+import { clearStoredAuthTokens } from '../../lib/idb-storage';
+import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
+
+async function resetTokenStorageState(): Promise<void> {
+  await waitForTokenMirrorWritesForTests();
+  localStorage.clear();
+  await clearStoredAuthTokens();
+}
+
+async function seedStoredSpaceToken(serverUrl: string, spaceId: string, token: string): Promise<void> {
+  await setToken(serverUrl, spaceId, token);
+  await waitForTokenMirrorWritesForTests();
+}
+
+beforeEach(resetTokenStorageState);
+afterEach(resetTokenStorageState);
 
 // Mock SignalR client
 const mockSignalRConnection = {
@@ -3659,6 +3676,75 @@ describe('SpaceView - File Preview Modal', () => {
       expect((element as any).filePreviewError).toBe('');
       expect((element as any).filePreviewUrl).toBe('blob:ok');
     });
+  });
+});
+
+describe('SpaceView - Token Resolution and Reconnect', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440111';
+  const token = 'stored-jwt-token';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await seedStoredSpaceToken(serverUrl, spaceId, token);
+
+    mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [],
+    });
+    globalThis.fetch = mockFetch;
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.remove();
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('loads its token from shared storage without manual test injection', async () => {
+    const redirectToJoin = vi.spyOn(element as any, 'redirectToJoin');
+
+    document.body.appendChild(element);
+
+    await vi.waitFor(() => {
+      expect((element as any).token).toBe(token);
+      expect(mockFetch).toHaveBeenCalled();
+    });
+    expect(redirectToJoin).not.toHaveBeenCalled();
+  });
+
+  it('keeps the resolved token cached for visibility reconnects after localStorage cleanup', async () => {
+    document.body.appendChild(element);
+    await vi.waitFor(() => {
+      expect((element as any).token).toBe(token);
+    });
+
+    localStorage.removeItem('sharedspaces:tokens');
+
+    const startSignalRSpy = vi.spyOn(element as any, 'startSignalR').mockResolvedValue(undefined);
+    (element as any).connectionState = 'disconnected';
+
+    Object.defineProperty(document, 'visibilityState', {
+      writable: true,
+      configurable: true,
+      value: 'visible',
+    });
+
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await vi.waitFor(() => {
+      expect(startSignalRSpy).toHaveBeenCalledTimes(1);
+    });
+    expect((element as any).token).toBe(token);
   });
 });
 

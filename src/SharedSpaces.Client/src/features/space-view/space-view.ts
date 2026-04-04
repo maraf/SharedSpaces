@@ -217,11 +217,11 @@ export class SpaceView extends BaseElement {
     globalThis.removeEventListener('resize', this.handleKebabScroll);
   }
 
-  private resolveToken(): string | undefined {
+  private resolveToken(): Promise<string | undefined> {
     if (this.serverUrl && this.spaceId) {
       return getToken(this.serverUrl, this.spaceId);
     }
-    return undefined;
+    return Promise.resolve(undefined);
   }
 
   private redirectToJoin() {
@@ -241,7 +241,7 @@ export class SpaceView extends BaseElement {
     await this.stopSignalR();
 
     // Remove token from storage
-    removeToken(this.serverUrl, this.spaceId);
+    await removeToken(this.serverUrl, this.spaceId);
 
     // Clear any queued offline items for this space
     await clearOfflineQueueForSpace(this.serverUrl, this.spaceId).catch(() => {});
@@ -259,7 +259,7 @@ export class SpaceView extends BaseElement {
   private async loadData() {
     if (!this.serverUrl || !this.spaceId) return;
 
-    this.token = this.resolveToken();
+    this.token = await this.resolveToken();
     if (!this.token) {
       this.redirectToJoin();
       return;

@@ -74,7 +74,7 @@ export async function clearPendingShares(): Promise<void> {
   await db.clear(PENDING_SHARES_STORE);
 }
 
-// --- Auth Tokens (mirrored from localStorage for service worker sync) ---
+// --- Auth Tokens (canonical store shared by the app and service worker) ---
 
 export async function getStoredAuthTokens(): Promise<Record<string, string>> {
   const db = await getDB();

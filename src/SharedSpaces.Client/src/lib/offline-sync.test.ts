@@ -10,6 +10,7 @@ import {
 import {
   clearOfflineQueue,
   getOfflineQueue,
+  setStoredToken,
 } from './idb-storage';
 
 vi.mock('../features/space-view/space-api', () => ({
@@ -125,6 +126,44 @@ describe('offline-sync', () => {
       );
       expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(0);
       expect(await getOfflineQueueCount(SERVER, 'other-space')).toBe(1);
+    });
+
+    it('syncs queued items for IndexedDB-first users even when localStorage is empty', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
+      await setStoredToken(SERVER, SPACE, TOKEN);
+
+      vi.mocked(shareText).mockResolvedValue({
+        id: '1', spaceId: SPACE, memberId: 'm', contentType: 'text',
+        content: 'hello', fileSize: 0, sharedAt: '',
+      });
+
+      const result = await processAllOfflineQueues();
+
+      expect(result).toEqual({ synced: 1, failed: 0 });
+      expect(shareText).toHaveBeenCalledWith(
+        SERVER, SPACE, expect.any(String), 'hello', TOKEN,
+      );
+      expect(await getOfflineQueueCount(SERVER, SPACE)).toBe(0);
+    });
+
+    it('prefers the mirrored IndexedDB token over stale legacy localStorage data', async () => {
+      await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
+      localStorage.setItem('sharedspaces:tokens', JSON.stringify({
+        [`${SERVER}:${SPACE}`]: 'stale-local-token',
+      }));
+      await setStoredToken(SERVER, SPACE, TOKEN);
+
+      vi.mocked(shareText).mockResolvedValue({
+        id: '1', spaceId: SPACE, memberId: 'm', contentType: 'text',
+        content: 'hello', fileSize: 0, sharedAt: '',
+      });
+
+      const result = await processAllOfflineQueues();
+
+      expect(result).toEqual({ synced: 1, failed: 0 });
+      expect(shareText).toHaveBeenCalledWith(
+        SERVER, SPACE, expect.any(String), 'hello', TOKEN,
+      );
     });
   });
 
