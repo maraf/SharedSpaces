@@ -1326,3 +1326,11 @@ ew URLSearchParams() for clean parsing
 - **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b).**
 
 - **True service-worker background sync (2026-04-04):** Offline queue uploads no longer depend on an open tab. Keep JWTs in `localStorage` for the app shell, mirror them into IndexedDB for service-worker access, and let the SW process queued `PUT` uploads directly during the `sync` event. Successful items are deleted, permanent auth/validation failures are dropped, transient/network failures stay queued for retry, and open `space-view` clients refresh when `offline-queue-sync-complete` arrives.
+
+
+## Learnings — Font Consistency Fix (#177) — 2026-07-14
+
+- **CSS Cascade Layers gotcha with Tailwind v4:** Unlayered styles in index.css always beat @layer utilities. A redundant button { font: inherit } outside any layer was overriding Tailwind utility classes (text-sm, font-medium) on all button elements. The Tailwind v4 preflight already handles this reset inside @layer base, where utilities properly override it.
+- **Key rule:** Never put form element resets in unlayered CSS when using Tailwind v4. The preflight in @layer base is sufficient.
+- **File items vs text items:** In space-view.ts, previewable file items render as button (for accessibility) while text items render as p. Both use identical Tailwind font classes, so the only difference was the cascade layers conflict.
+- **Key file:** src/SharedSpaces.Client/src/index.css — global styles, must stay compatible with Tailwind v4 layer ordering.

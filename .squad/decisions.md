@@ -6304,3 +6304,174 @@ The background-sync worker now depends on a service-worker-readable token store,
 - `src/SharedSpaces.Client/src/lib/offline-sync.test.ts`: shared sync helper path, background-sync request, retry vs permanent failure semantics
 - `src/SharedSpaces.Client/src/lib/sw-registration.test.ts`: service worker registration lookup failure fallback
 
+# Decision: Remove unlayered form element font reset from index.css
+
+**Author:** Wash (Frontend Dev)
+**Date:** 2026-07-14
+**Issue:** #177
+
+## Context
+
+Tailwind v4 uses CSS Cascade Layers (`@layer base`, `@layer utilities`, etc.). The `index.css` file contained an unlayered `button, input, textarea, select { font: inherit }` rule that was redundant with the Tailwind v4 preflight (which already includes this reset in `@layer base`).
+
+## Problem
+
+In CSS Cascade Layers, unlayered styles always beat layered styles regardless of specificity. This meant the unlayered `font: inherit` on buttons overrode Tailwind utility classes like `text-sm` and `font-medium` (which live in `@layer utilities`). File items in the space view render as `<button>` elements while text items render as `<p>` elements, so file items ignored font utilities and rendered with inherited (larger, lighter) text.
+
+## Decision
+
+Remove the redundant unlayered form element font reset. The Tailwind v4 preflight handles it correctly in `@layer base`, which utilities can properly override.
+
+## Rule Going Forward
+
+Never add unlayered CSS rules for properties that Tailwind utility classes need to control. If custom resets are needed, place them inside `@layer base` to maintain correct cascade ordering.
+
+---
+
+# Decision: Add Content Field to DeletedItem for CLI Filename Mapping
+
+**Date:** 2026-04-03  
+**Context:** PR #171 — CLI sync journal cleanup  
+**Decision maker:** Kaylee (Backend Dev)
+
+## Problem
+
+The CLI couldn't map deleted item IDs back to local filenames after a restart because:
+1. Journal `Deleted` field was just `Guid[]` (item IDs only)
+2. No in-memory state persists across CLI restarts
+3. No local manifest tracks ID-to-filename mappings
+
+The owner directive: "return id+content for files and for text content leave the content=null"
+
+## Decision
+
+Extended the server's `DeletedItem` entity to include a nullable `Content` field:
+- For **file items**: populate with filename (from `SpaceItem.Content`)
+- For **text items**: leave as `null`
+
+Changed journal response from `Guid[] Deleted` to `DeletedItemResponse[] Deleted` where:
+```csharp
+public sealed record DeletedItemResponse(Guid Id, string? Content);
+```
+
+## Implementation Details
+
+### 1. Entity Changes
+- Added `public string? Content { get; set; }` to `DeletedItem.cs`
+- Configured as nullable in `DeletedItemConfiguration.cs` using `.IsRequired(false)`
+
+### 2. Multiple Deletion Sites Updated
+Found and updated **three** places where `DeletedItem` records are created:
+1. Direct item deletion endpoint
+2. Transfer with "move" action (first site)
+3. Transfer with "move" action (second site)
+
+All now populate Content with logic:
+```csharp
+var content = string.Equals(item.ContentType, "file", StringComparison.OrdinalIgnoreCase)
+    ? item.Content
+    : null;
+```
+
+### 3. Journal Response Changes
+- Created `DeletedItemResponse` DTO in `Features/Journal/Models.cs`
+- Updated `JournalResponse.Deleted` type from `Guid[]` to `DeletedItemResponse[]`
+- Modified journal query to select `new DeletedItemResponse(d.ItemId, d.Content)`
+
+### 4. Database Migration
+- Generated migration `AddContentToDeletedItem`
+- Adds nullable TEXT column — safe additive change
+- No data loss, no backfill needed
+
+### 5. Test Updates
+- Updated local `JournalResponse` record in `JournalEndpointTests.cs`
+- Added `DeletedItemResponse` record to test file
+- Updated assertions to check both `Id` and `Content`
+- Added new test: `DeleteItem_FileItem_StoresContentInDeletedItemRecord`
+
+## Consequences
+
+### Positive
+- CLI can delete local files without maintaining a persistent manifest
+- Stateless CLI operation — survives restarts
+- Backward compatible (nullable field, no breaking changes)
+- Clear separation: files have content, text items don't
+
+### Negative
+- Slight storage increase (one string per deleted item)
+- DeletedItem table slightly wider (acceptable overhead)
+
+## Validation
+
+All tests pass (296 total):
+- ✅ `GetJournal_ReturnsDeletedItemIdsSinceStoredCheckpoint` — verifies null for text items
+- ✅ `DeleteItem_CreatesDeletedItemRecord` — verifies Content field stored
+- ✅ `TransferItem_WithMoveAction_CreatesDeletedItemRecord` — verifies Content in move scenario
+- ✅ `DeleteItem_FileItem_StoresContentInDeletedItemRecord` — verifies filename stored for files
+- ✅ `MigrationSnapshotTests` — validates EF model consistency
+
+## Files Modified
+
+### Server
+- `src/SharedSpaces.Server/Domain/DeletedItem.cs`
+- `src/SharedSpaces.Server/Infrastructure/Persistence/Configurations/DeletedItemConfiguration.cs`
+- `src/SharedSpaces.Server/Features/Journal/Models.cs`
+- `src/SharedSpaces.Server/Features/Journal/JournalEndpoints.cs`
+- `src/SharedSpaces.Server/Features/Items/ItemEndpoints.cs`
+- `src/SharedSpaces.Server/Infrastructure/Persistence/Migrations/20260403084250_AddContentToDeletedItem.cs`
+- `src/SharedSpaces.Server/Infrastructure/Persistence/Migrations/AppDbContextModelSnapshot.cs`
+
+### Tests
+- `tests/SharedSpaces.Server.Tests/JournalEndpointTests.cs`
+
+## Next Steps
+
+CLI implementation (separate PR) will:
+1. Update journal sync to expect `DeletedItemResponse[]`
+2. Delete local files using the `Content` field for file items
+3. Clean up journal tracking without requiring a manifest
+
+---
+
+# CLI Journal Deletion with Filename Content
+
+**Date:** 2026-04-03  
+**Author:** Kaylee (Backend Dev)  
+**Context:** PR #171 - CLI sync journal cleanup
+
+## Decision
+
+Extracted a shared `DeleteLocalItem(Guid itemId, string? knownFilename)` method to handle deletion from both journal (with filename) and SignalR (without filename) paths.
+
+## Rationale
+
+The journal endpoint now includes `Content` (filename for files, null for text) in the deletion response. This allows the CLI to delete local files using the filename from the server response, without needing to look up the filename in the local `_downloadedItems` mapping.
+
+However, SignalR events still send `ItemDeletedEvent` with just an ID (no content). To support both paths:
+
+1. **Journal path:** `ApplyRemoteChangesAsync` calls `DeleteLocalItem(deletedItem.Id, deletedItem.Content)` with the filename from the server
+2. **SignalR path:** `OnItemDeleted` calls `DeleteLocalItem(itemDeleted.Id, null)` and the method falls back to looking up `_downloadedItems`
+
+This approach:
+- Simplifies journal-based deletion (no need for local tracking)
+- Maintains backward compatibility with SignalR events
+- Keeps the bool return pattern for conditional checkpoint acknowledgment
+- Avoids code duplication between the two deletion paths
+
+## Implementation Notes
+
+- Updated `JournalResponse.Deleted` from `Guid[]` to `DeletedItemResponse[]`
+- Added new `DeletedItemResponse(Guid Id, string? Content)` record
+- Used `DistinctBy(d => d.Id)` when iterating journal deletions
+- Updated test helper `MockJournal` to accept `DeletedItemResponse[]`
+
+## Testing
+
+All 57 CLI tests passing, including the key test `InitialSync_UsesJournalDeletionForTrackedFilesWithoutListingItems`.
+
+## Future Considerations
+
+If SignalR events are extended to include content/filename in the future, we can pass it through to `DeleteLocalItem` and eliminate the `_downloadedItems` lookup entirely.
+
+---
+
