@@ -1963,92 +1963,118 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragOver).toBe(false);
     });
   });
+});
 
-  describe('Clipboard paste', () => {
-    function createPasteEvent(
-      items: Array<{ kind: string; type: string; file?: File | null }>,
-    ): { event: ClipboardEvent; preventDefault: ReturnType<typeof vi.fn> } {
-      const preventDefault = vi.fn();
+describe('SpaceView - Clipboard paste', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
 
-      return {
-        event: {
-          clipboardData: {
-            items: items.map((item) => ({
-              kind: item.kind,
-              type: item.type,
-              getAsFile: () => item.file ?? null,
-            })),
-          },
-          preventDefault,
-        } as unknown as ClipboardEvent,
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  function createPasteEvent(
+    items: Array<{ kind: string; type: string; file?: File | null }>,
+  ): { event: ClipboardEvent; preventDefault: ReturnType<typeof vi.fn> } {
+    const preventDefault = vi.fn();
+
+    return {
+      event: {
+        clipboardData: {
+          items: items.map((item) => ({
+            kind: item.kind,
+            type: item.type,
+            getAsFile: () => item.file ?? null,
+          })),
+        },
         preventDefault,
-      };
+      } as unknown as ClipboardEvent,
+      preventDefault,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    globalThis.fetch = mockFetch;
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+    (element as any).token = token;
+    (element as any).serverUrl = serverUrl;
+    (element as any).spaceId = spaceId;
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
     }
+    vi.restoreAllMocks();
+  });
 
-    beforeEach(() => {
-      (element as any).serverUrl = serverUrl;
-      (element as any).spaceId = spaceId;
-      (element as any).token = token;
-    });
+  it('uploads pasted images through uploadFiles and generates fallback filenames', async () => {
+    const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+    vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
-    it('uploads pasted images through uploadFiles and generates fallback filenames', async () => {
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
-      vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
+    const unnamedImage = new File(['image-data'], '', { type: 'image/png' });
+    const { event, preventDefault } = createPasteEvent([
+      { kind: 'file', type: 'image/png', file: unnamedImage },
+    ]);
 
-      const unnamedImage = new File(['image-data'], '', { type: 'image/png' });
-      const { event, preventDefault } = createPasteEvent([
-        { kind: 'file', type: 'image/png', file: unnamedImage },
-      ]);
+    await (element as any).handleTextareaPaste(event);
 
-      await (element as any).handleTextareaPaste(event);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(uploadFilesSpy).toHaveBeenCalledOnce();
 
-      expect(preventDefault).toHaveBeenCalledOnce();
-      expect(uploadFilesSpy).toHaveBeenCalledOnce();
+    const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
+    expect(uploadedFiles).toHaveLength(1);
+    expect(uploadedFiles[0].name).toBe('pasted-image-1700000000000-1.png');
+    expect(uploadedFiles[0].type).toBe('image/png');
+  });
 
-      const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
-      expect(uploadedFiles).toHaveLength(1);
-      expect(uploadedFiles[0].name).toBe('pasted-image-1700000000000-1.png');
-      expect(uploadedFiles[0].type).toBe('image/png');
-    });
+  it('preserves named clipboard images and ignores non-image clipboard items', async () => {
+    const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+    vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
-    it('preserves named clipboard images and ignores non-image clipboard items', async () => {
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
-      vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
+    const namedImage = new File(['image-data'], 'clipboard-photo.jpg', { type: 'image/jpeg' });
+    const unnamedImage = new File(['image-data'], '', { type: 'image/png' });
+    const pdfFile = new File(['pdf-data'], 'notes.pdf', { type: 'application/pdf' });
+    const { event, preventDefault } = createPasteEvent([
+      { kind: 'string', type: 'text/plain' },
+      { kind: 'file', type: 'image/jpeg', file: namedImage },
+      { kind: 'file', type: 'application/pdf', file: pdfFile },
+      { kind: 'file', type: 'image/png', file: unnamedImage },
+    ]);
 
-      const namedImage = new File(['image-data'], 'clipboard-photo.jpg', { type: 'image/jpeg' });
-      const unnamedImage = new File(['image-data'], '', { type: 'image/png' });
-      const pdfFile = new File(['pdf-data'], 'notes.pdf', { type: 'application/pdf' });
-      const { event, preventDefault } = createPasteEvent([
-        { kind: 'string', type: 'text/plain' },
-        { kind: 'file', type: 'image/jpeg', file: namedImage },
-        { kind: 'file', type: 'application/pdf', file: pdfFile },
-        { kind: 'file', type: 'image/png', file: unnamedImage },
-      ]);
+    await (element as any).handleTextareaPaste(event);
 
-      await (element as any).handleTextareaPaste(event);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(uploadFilesSpy).toHaveBeenCalledOnce();
 
-      expect(preventDefault).toHaveBeenCalledOnce();
-      expect(uploadFilesSpy).toHaveBeenCalledOnce();
+    const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
+    expect(uploadedFiles.map((file) => file.name)).toEqual([
+      'clipboard-photo.jpg',
+      'pasted-image-1700000000000-2.png',
+    ]);
+  });
 
-      const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
-      expect(uploadedFiles.map((file) => file.name)).toEqual([
-        'clipboard-photo.jpg',
-        'pasted-image-1700000000000-2.png',
-      ]);
-    });
+  it('does not intercept regular text paste', async () => {
+    const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
 
-    it('does not intercept regular text paste', async () => {
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+    const { event, preventDefault } = createPasteEvent([
+      { kind: 'string', type: 'text/plain' },
+    ]);
 
-      const { event, preventDefault } = createPasteEvent([
-        { kind: 'string', type: 'text/plain' },
-      ]);
+    await (element as any).handleTextareaPaste(event);
 
-      await (element as any).handleTextareaPaste(event);
-
-      expect(preventDefault).not.toHaveBeenCalled();
-      expect(uploadFilesSpy).not.toHaveBeenCalled();
-    });
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(uploadFilesSpy).not.toHaveBeenCalled();
   });
 });
 
