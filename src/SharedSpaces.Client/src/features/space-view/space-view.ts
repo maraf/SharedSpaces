@@ -107,6 +107,13 @@ function normalizeClipboardImageFiles(files: File[]): File[] {
   });
 }
 
+interface FileRenameDraft {
+  id: string;
+  file: File;
+  name: string;
+  pendingShareId?: string;
+}
+
 @customElement('space-view')
 export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'api-base-url' })
@@ -156,6 +163,9 @@ export class SpaceView extends BaseElement {
   @state() private shareCopiedLinkId: string | null = null;
   @state() private shareModalName = '';
   @state() private openMenuItemId: string | null = null;
+  @state() private fileRenameDrafts: FileRenameDraft[] = [];
+  @state() private fileRenamePendingTextShares: PendingShareItem[] = [];
+  @state() private fileRenameError = '';
 
   private _previewRequestId = 0;
 
@@ -506,6 +516,25 @@ export class SpaceView extends BaseElement {
   }
 
   private async uploadAllPendingShares() {
+    const fileDrafts = this.pendingShares
+      .filter((share) => share.type === 'file')
+      .map((share) => {
+        const file = this.pendingShareToFile(share);
+        return file
+          ? this.createFileRenameDraft(file, share.id, share.id)
+          : null;
+      })
+      .filter((draft): draft is FileRenameDraft => draft !== null);
+
+    if (fileDrafts.length > 0) {
+      const textShares = this.pendingShares.filter(
+        (share): share is PendingShareItem =>
+          share.type === 'text' && typeof share.content === 'string',
+      );
+      this.openFileRenameModal(fileDrafts, textShares);
+      return;
+    }
+
     for (const share of [...this.pendingShares]) {
       await this.uploadPendingShare(share);
       if (this.uploadError) break;
@@ -527,6 +556,162 @@ export class SpaceView extends BaseElement {
       new CustomEvent('pending-shares-changed', { bubbles: true, composed: true }),
     );
   }
+
+  private createFileRenameDraft(
+    file: File,
+    id: string,
+    pendingShareId?: string,
+  ): FileRenameDraft {
+    return {
+      id,
+      file,
+      name: file.name,
+      pendingShareId,
+    };
+  }
+
+  private pendingShareToFile(share: PendingShareItem): File | null {
+    if (!share.fileData) return null;
+
+    const blob = new Blob([share.fileData], {
+      type: share.fileType ?? 'application/octet-stream',
+    });
+    return new File([blob], share.fileName ?? 'shared-file', {
+      type: blob.type,
+    });
+  }
+
+  private openFileRenameModal(
+    drafts: FileRenameDraft[],
+    pendingTextShares: PendingShareItem[] = [],
+  ) {
+    this.fileRenameDrafts = drafts;
+    this.fileRenamePendingTextShares = pendingTextShares;
+    this.fileRenameError = '';
+    this.uploadError = '';
+  }
+
+  private promptFilesForUpload(files: File[]) {
+    if (files.length === 0) return;
+
+    this.openFileRenameModal(
+      files.map((file, index) =>
+        this.createFileRenameDraft(
+          file,
+          `${file.name}-${file.lastModified}-${index}`,
+        )),
+    );
+  }
+
+  private requestPendingShareUpload(share: PendingShareItem) {
+    if (share.type !== 'file') {
+      void this.uploadPendingShare(share);
+      return;
+    }
+
+    const file = this.pendingShareToFile(share);
+    if (!file) {
+      void this.uploadPendingShare(share);
+      return;
+    }
+
+    this.openFileRenameModal([
+      this.createFileRenameDraft(file, share.id, share.id),
+    ]);
+  }
+
+  private closeFileRenameModal = () => {
+    if (this.isUploading) return;
+
+    this.fileRenameDrafts = [];
+    this.fileRenamePendingTextShares = [];
+    this.fileRenameError = '';
+  };
+
+  private handleFileRenameInput = (draftId: string, value: string) => {
+    this.fileRenameDrafts = this.fileRenameDrafts.map((draft) =>
+      draft.id === draftId
+        ? { ...draft, name: value }
+        : draft,
+    );
+    this.fileRenameError = '';
+  };
+
+  private async removePendingSharesById(ids: string[]) {
+    if (ids.length === 0) return;
+
+    await Promise.all(ids.map((id) => removePendingShare(id)));
+    const idSet = new Set(ids);
+    this.pendingShares = this.pendingShares.filter((share) => !idSet.has(share.id));
+    this.notifyPendingSharesChanged();
+  }
+
+  private async uploadPendingTextShares(shares: PendingShareItem[]) {
+    for (const share of shares) {
+      await this.uploadPendingShare(share);
+      if (this.uploadError) break;
+    }
+  }
+
+  private confirmFileRenameUpload = async () => {
+    const currentDrafts = this.fileRenameDrafts.map((draft) => ({
+      ...draft,
+      name: draft.name.trim(),
+    }));
+    const invalidDraft = currentDrafts.find((draft) => draft.name.length === 0);
+    if (invalidDraft) {
+      this.fileRenameError = 'File names cannot be empty.';
+      return;
+    }
+
+    this.fileRenameDrafts = currentDrafts;
+    this.fileRenameError = '';
+    this.uploadError = '';
+
+    const renamedFiles = currentDrafts.map((draft) =>
+      new File([draft.file], draft.name, {
+        type: draft.file.type,
+        lastModified: draft.file.lastModified,
+      }));
+    const pendingTextShares = [...this.fileRenamePendingTextShares];
+    const processedCount = await this.uploadFiles(renamedFiles);
+    const processedDrafts = currentDrafts.slice(0, processedCount);
+    const remainingDrafts = currentDrafts.slice(processedCount);
+    const processedPendingShareIds = processedDrafts
+      .map((draft) => draft.pendingShareId)
+      .filter((id): id is string => Boolean(id));
+
+    if (processedPendingShareIds.length > 0) {
+      try {
+        await this.removePendingSharesById(processedPendingShareIds);
+      } catch {
+        this.fileRenameDrafts = remainingDrafts;
+        this.fileRenamePendingTextShares = pendingTextShares;
+        this.fileRenameError = 'Files uploaded, but clearing the pending share failed.';
+        return;
+      }
+    }
+
+    if (remainingDrafts.length > 0) {
+      if (this.connectionErrorType === 'auth') {
+        this.closeFileRenameModal();
+        return;
+      }
+
+      this.fileRenameDrafts = remainingDrafts;
+      this.fileRenamePendingTextShares = pendingTextShares;
+      this.fileRenameError = this.uploadError || 'Failed to upload file.';
+      return;
+    }
+
+    this.fileRenameDrafts = [];
+    this.fileRenamePendingTextShares = [];
+    this.fileRenameError = '';
+
+    if (pendingTextShares.length > 0) {
+      await this.uploadPendingTextShares(pendingTextShares);
+    }
+  };
 
   private async dismissOfflineQueueItem(item: OfflineQueueItem) {
     try {
@@ -738,7 +923,7 @@ export class SpaceView extends BaseElement {
     const input = e.target as HTMLInputElement;
     const files = input.files;
     if (!files || files.length === 0) return;
-    await this.uploadFiles(Array.from(files));
+    this.promptFilesForUpload(Array.from(files));
     input.value = '';
   };
 
@@ -786,7 +971,7 @@ export class SpaceView extends BaseElement {
     this.dragOver = false;
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    await this.uploadFiles(Array.from(files));
+    this.promptFilesForUpload(Array.from(files));
   };
 
   private triggerFileSelect = () => {
@@ -796,11 +981,12 @@ export class SpaceView extends BaseElement {
     }
   };
 
-  private async uploadFiles(files: File[]) {
-    if (!this.serverUrl || !this.spaceId || !this.token) return;
+  private async uploadFiles(files: File[]): Promise<number> {
+    if (!this.serverUrl || !this.spaceId || !this.token) return 0;
 
     this.isUploading = true;
     this.uploadError = '';
+    let processedCount = 0;
 
     try {
       for (const file of files) {
@@ -812,6 +998,7 @@ export class SpaceView extends BaseElement {
             fileType: file.type,
             fileData: arrayBuffer,
           });
+          processedCount++;
           continue;
         }
 
@@ -827,6 +1014,7 @@ export class SpaceView extends BaseElement {
               this.token,
             );
             this.items = [item, ...this.items];
+            processedCount++;
           } finally {
             this.pendingItemIds.delete(itemId);
           }
@@ -839,21 +1027,24 @@ export class SpaceView extends BaseElement {
               fileType: file.type,
               fileData: arrayBuffer,
             });
+            processedCount++;
             continue;
           }
           throw error;
         }
       }
+      return processedCount;
     } catch (error) {
       if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
         this.connectionErrorType = 'auth';
         this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
-        return;
+        return processedCount;
       }
       this.uploadError =
         error instanceof SpaceApiError
           ? error.message
           : 'Failed to upload file.';
+      return processedCount;
     } finally {
       this.isUploading = false;
     }
@@ -1298,6 +1489,7 @@ export class SpaceView extends BaseElement {
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
         ${this.filePreviewItem ? this.renderFilePreviewModal() : nothing}
+        ${this.fileRenameDrafts.length > 0 ? this.renderFileRenameModal() : nothing}
         ${this.transferModalItem ? this.renderTransferModal() : nothing}
         ${this.shareModalItem ? this.renderShareModal() : nothing}
       </div>
@@ -1396,7 +1588,7 @@ export class SpaceView extends BaseElement {
               <!-- Right: Actions -->
               <div class="-mr-2 flex shrink-0 items-center gap-1">
                 <button
-                  @click=${() => this.uploadPendingShare(share)}
+                  @click=${() => this.requestPendingShareUpload(share)}
                   ?disabled=${this.isUploading}
                   class="rounded px-3 py-1.5 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
                   title="Upload this item"
@@ -2061,6 +2253,108 @@ export class SpaceView extends BaseElement {
           </div>
           <div class="overflow-y-auto flex-1 min-h-0 px-6 pb-6">
             ${this.renderFilePreviewContent()}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderFileRenameModal() {
+    const pendingTextShareCount = this.fileRenamePendingTextShares.length;
+
+    return html`
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        @click=${() => {
+          if (!this.isUploading) this.closeFileRenameModal();
+        }}
+      >
+        <div
+          class="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="mb-4 flex items-start justify-between gap-4">
+            <div class="min-w-0 flex-1">
+              <h3 class="mb-1 text-lg font-semibold text-white">Rename before upload</h3>
+              <p class="text-sm text-slate-400">
+                Choose the filenames that will appear in this space.
+              </p>
+            </div>
+            <button
+              @click=${this.closeFileRenameModal}
+              ?disabled=${this.isUploading}
+              class="shrink-0 rounded p-1 text-slate-400 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Close rename modal"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+
+          ${this.fileRenameError
+            ? html`
+                <div class="mb-4 rounded-lg border border-red-500/50 bg-red-950/40 p-3">
+                  <p class="text-sm text-red-300">${this.fileRenameError}</p>
+                </div>
+              `
+            : nothing}
+
+          <div class="space-y-3">
+            ${this.fileRenameDrafts.map((draft, index) => html`
+              <label class="block space-y-1.5">
+                <span class="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
+                  ${this.fileRenameDrafts.length === 1 ? 'Filename' : `File ${index + 1}`}
+                </span>
+                <input
+                  type="text"
+                  .value=${draft.name}
+                  @input=${(e: Event) =>
+                    this.handleFileRenameInput(
+                      draft.id,
+                      (e.target as HTMLInputElement).value,
+                    )}
+                  ?disabled=${this.isUploading}
+                  aria-label=${`Filename for ${draft.file.name}`}
+                  class="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 transition focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <div class="flex items-center justify-between gap-3 text-xs text-slate-500">
+                  <span class="min-w-0 truncate" title=${draft.file.name}>
+                    Original: ${draft.file.name}
+                  </span>
+                  <span class="shrink-0">${this.formatFileSize(draft.file.size)}</span>
+                </div>
+              </label>
+            `)}
+          </div>
+
+          ${pendingTextShareCount > 0
+            ? html`
+                <p class="mt-4 text-xs text-slate-500">
+                  ${pendingTextShareCount}
+                  pending text item${pendingTextShareCount !== 1 ? 's' : ''}
+                  will upload unchanged after the files.
+                </p>
+              `
+            : nothing}
+
+          <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              @click=${this.closeFileRenameModal}
+              ?disabled=${this.isUploading}
+              class="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              @click=${this.confirmFileRenameUpload}
+              ?disabled=${this.isUploading}
+              class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              ${this.isUploading
+                ? 'Uploading…'
+                : pendingTextShareCount > 0
+                  ? 'Upload all'
+                  : 'Upload'}
+            </button>
           </div>
         </div>
       </div>

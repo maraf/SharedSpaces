@@ -11,6 +11,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
+const CLIENT_DB_VERSION = 2;
 
 interface ViewportSpec {
   name: string;
@@ -399,6 +400,31 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space', vp);
     });
 
+    test(`space view - rename modal - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      await page.locator('#file-input-hidden').setInputFiles([{
+        name: 'draft-release-notes.md',
+        mimeType: 'text/markdown',
+        buffer: Buffer.from('# Draft release notes'),
+      }]);
+      await page.waitForFunction(
+        () => document.body.textContent?.includes('Rename before upload'),
+        { timeout: 5_000 },
+      );
+
+      const renameInput = page.locator('input[aria-label="Filename for draft-release-notes.md"]');
+      await renameInput.fill('release-notes-final.md');
+      await page.waitForTimeout(300);
+      await capture(page, 'space-rename-modal', vp, { fullPage: false });
+    });
+
     test(`space view - file preview image - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
@@ -530,9 +556,9 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('app-shell');
 
       // Pre-populate offline queue with pending items for this dead server
-      await page.evaluate(({ serverUrl, spaceId }) => {
+      await page.evaluate(({ serverUrl, spaceId, dbVersion }) => {
         return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.open('shared-spaces-db', 1);
+          const request = indexedDB.open('shared-spaces-db', dbVersion);
           request.onerror = () => reject(request.error);
           request.onsuccess = () => {
             const db = request.result;
@@ -563,7 +589,11 @@ test.describe('Screenshot Capture', () => {
             tx.onerror = () => reject(tx.error);
           };
         });
-      }, { serverUrl: deadServer, spaceId: deadSpaceId });
+      }, {
+        serverUrl: deadServer,
+        spaceId: deadSpaceId,
+        dbVersion: CLIENT_DB_VERSION,
+      });
 
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
@@ -865,15 +895,17 @@ test.describe('Screenshot Capture', () => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
       // Seed IndexedDB with pending share items
-      await page.evaluate(() => {
+      await page.evaluate(({ dbVersion }) => {
         return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.open('shared-spaces-db', 1);
+          const request = indexedDB.open('shared-spaces-db', dbVersion);
           request.onupgradeneeded = () => {
             const db = request.result;
             if (!db.objectStoreNames.contains('pending-shares'))
               db.createObjectStore('pending-shares', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('offline-queue'))
               db.createObjectStore('offline-queue', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('auth-tokens'))
+              db.createObjectStore('auth-tokens');
           };
           request.onsuccess = () => {
             const db = request.result;
@@ -897,7 +929,7 @@ test.describe('Screenshot Capture', () => {
           };
           request.onerror = () => reject(request.error);
         });
-      });
+      }, { dbVersion: CLIENT_DB_VERSION });
       await page.reload();
       await page.waitForSelector('app-shell');
       await page.waitForTimeout(500);

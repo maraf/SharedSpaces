@@ -5,12 +5,19 @@ import './space-view';
 import { SpaceView } from './space-view';
 import type { ItemAddedPayload } from '../../lib/signalr-client';
 import type { SpaceItemResponse } from './space-api';
-import { clearStoredAuthTokens } from '../../lib/idb-storage';
+import {
+  clearOfflineQueue,
+  clearPendingShares,
+  clearStoredAuthTokens,
+  getOfflineQueueForSpace,
+} from '../../lib/idb-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
 
 async function resetTokenStorageState(): Promise<void> {
   await waitForTokenMirrorWritesForTests();
   localStorage.clear();
+  await clearPendingShares();
+  await clearOfflineQueue();
   await clearStoredAuthTokens();
 }
 
@@ -1843,16 +1850,10 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragOver).toBe(false);
     });
 
-    it('handleDrop on compose box resets state and processes files', async () => {
+    it('handleDrop on compose box resets state and opens the rename modal for files', async () => {
       // Set up drag state
       (element as any).dragCounter = 2;
       (element as any).dragOver = true;
-      (element as any).token = token;
-      (element as any).serverUrl = serverUrl;
-      (element as any).spaceId = spaceId;
-
-      // Mock uploadFiles
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
 
       // Create drop event with files
       const dropEvent = createDragEvent('drop', true);
@@ -1868,15 +1869,15 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragCounter).toBe(0);
       expect((element as any).dragOver).toBe(false);
 
-      // uploadFiles should be called with the files
-      expect(uploadFilesSpy).toHaveBeenCalledWith([mockFile]);
+      // The rename modal should be populated instead of uploading immediately
+      expect((element as any).fileRenameDrafts).toHaveLength(1);
+      expect((element as any).fileRenameDrafts[0].file).toBe(mockFile);
+      expect((element as any).fileRenameDrafts[0].name).toBe('test.txt');
     });
 
-    it('handleDrop does not call uploadFiles if no files present', async () => {
+    it('handleDrop does not open the rename modal if no files are present', async () => {
       (element as any).dragCounter = 1;
       (element as any).dragOver = true;
-
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
 
       // Drop event with no files
       const dropEvent = createDragEvent('drop', true);
@@ -1891,8 +1892,8 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragCounter).toBe(0);
       expect((element as any).dragOver).toBe(false);
 
-      // But uploadFiles not called
-      expect(uploadFilesSpy).not.toHaveBeenCalled();
+      // No rename modal should open
+      expect((element as any).fileRenameDrafts).toHaveLength(0);
     });
 
     it('multiple nested dragenter/dragleave pairs work correctly', () => {
@@ -2625,6 +2626,90 @@ describe('SpaceView - Unified Item Card Layout', () => {
         expectedClasses.forEach(cls => {
           expect(card.classList.contains(cls)).toBe(true);
         });
+      });
+    });
+
+    describe('rename before upload', () => {
+      it('uploadAllPendingShares opens the rename modal for file shares and keeps text shares queued for later upload', async () => {
+        (element as any).pendingShares = [
+          {
+            id: 'pending-text',
+            type: 'text',
+            content: 'Shared note',
+            timestamp: Date.now(),
+          },
+          {
+            id: 'pending-file',
+            type: 'file',
+            fileName: 'shared-image.jpg',
+            fileType: 'image/jpeg',
+            fileData: new Uint8Array([1, 2, 3]).buffer,
+            timestamp: Date.now(),
+          },
+        ];
+
+        await (element as any).uploadAllPendingShares();
+
+        expect((element as any).fileRenameDrafts).toHaveLength(1);
+        expect((element as any).fileRenameDrafts[0].name).toBe('shared-image.jpg');
+        expect((element as any).fileRenamePendingTextShares).toHaveLength(1);
+        expect((element as any).fileRenamePendingTextShares[0].content).toBe('Shared note');
+      });
+
+      it('confirmFileRenameUpload passes the edited filename to uploadFiles', async () => {
+        const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(1);
+        const originalFile = new File(['hello'], 'original.txt', { type: 'text/plain' });
+
+        (element as any).fileRenameDrafts = [
+          { id: 'draft-1', file: originalFile, name: originalFile.name },
+        ];
+
+        (element as any).handleFileRenameInput('draft-1', 'renamed.txt');
+        await (element as any).confirmFileRenameUpload();
+
+        expect(uploadFilesSpy).toHaveBeenCalledTimes(1);
+        const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
+        expect(uploadedFiles).toHaveLength(1);
+        expect(uploadedFiles[0].name).toBe('renamed.txt');
+        expect((element as any).fileRenameDrafts).toHaveLength(0);
+      });
+
+      it('queues renamed pending share files for offline upload and clears them from pending shares', async () => {
+        const originalOnline = navigator.onLine;
+        Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+
+        try {
+          (element as any).serverUrl = serverUrl;
+          (element as any).spaceId = spaceId;
+          (element as any).token = token;
+
+          const pendingShare = {
+            id: 'pending-file-offline',
+            type: 'file' as const,
+            fileName: 'shared-image.jpg',
+            fileType: 'image/jpeg',
+            fileData: new Uint8Array([7, 8, 9]).buffer,
+            timestamp: Date.now(),
+          };
+
+          (element as any).pendingShares = [pendingShare];
+          (element as any).requestPendingShareUpload(pendingShare);
+
+          const draftId = (element as any).fileRenameDrafts[0].id;
+          (element as any).handleFileRenameInput(draftId, 'renamed-image.jpg');
+          await (element as any).confirmFileRenameUpload();
+
+          const queue = await getOfflineQueueForSpace(serverUrl, spaceId);
+          expect(queue).toHaveLength(1);
+          expect(queue[0].fileName).toBe('renamed-image.jpg');
+          expect((element as any).pendingShares).toEqual([]);
+          expect((element as any).fileRenameDrafts).toEqual([]);
+        } finally {
+          Object.defineProperty(navigator, 'onLine', {
+            value: originalOnline,
+            configurable: true,
+          });
+        }
       });
     });
   });
