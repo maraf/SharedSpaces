@@ -55,6 +55,58 @@ export interface JoinedSpace {
   token: string;
 }
 
+function hasFileExtension(fileName: string): boolean {
+  const lastDot = fileName.lastIndexOf('.');
+  return lastDot > 0 && lastDot < fileName.length - 1;
+}
+
+function getImageExtension(contentType: string): string {
+  switch (contentType.toLowerCase()) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/bmp':
+      return 'bmp';
+    case 'image/svg+xml':
+      return 'svg';
+    case 'image/avif':
+      return 'avif';
+    case 'image/heic':
+      return 'heic';
+    case 'image/heif':
+      return 'heif';
+    case 'image/tiff':
+    case 'image/tif':
+      return 'tiff';
+    case 'image/png':
+    default:
+      return 'png';
+  }
+}
+
+function normalizeClipboardImageFiles(files: File[]): File[] {
+  const timestamp = Date.now();
+
+  return files.map((file, index) => {
+    const trimmedName = file.name.trim();
+    if (trimmedName && hasFileExtension(trimmedName)) {
+      return file;
+    }
+
+    const extension = getImageExtension(file.type);
+    const baseName = trimmedName.replace(/^\.+|\.+$/g, '')
+      || `pasted-image-${timestamp}-${index + 1}`;
+
+    return new File([file], `${baseName}.${extension}`, {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+  });
+}
+
 @customElement('space-view')
 export class SpaceView extends BaseElement {
   @property({ type: String, attribute: 'api-base-url' })
@@ -655,6 +707,31 @@ export class SpaceView extends BaseElement {
       e.preventDefault();
       this.handleTextSubmit();
     }
+  };
+
+  private getClipboardImageFiles(event: ClipboardEvent): File[] {
+    const items = event.clipboardData?.items;
+    if (!items) return [];
+
+    return Array.from(items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+  }
+
+  private handleTextareaPaste = async (event: ClipboardEvent) => {
+    const imageFiles = this.getClipboardImageFiles(event);
+    if (
+      imageFiles.length === 0
+      || !this.serverUrl
+      || !this.spaceId
+      || !this.token
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    await this.uploadFiles(normalizeClipboardImageFiles(imageFiles));
   };
 
   private handleFileSelect = async (e: Event) => {
@@ -1441,6 +1518,7 @@ export class SpaceView extends BaseElement {
             .value=${this.textInput}
             @input=${this.handleTextInput}
             @keydown=${this.handleTextKeydown}
+            @paste=${this.handleTextareaPaste}
             ?disabled=${this.isUploading}
             class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
