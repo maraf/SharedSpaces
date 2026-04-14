@@ -61,7 +61,10 @@ function getDB(): Promise<IDBPDatabase> {
 
 export async function getPendingShares(): Promise<PendingShareItem[]> {
   const db = await getDB();
-  return db.getAll(PENDING_SHARES_STORE);
+  return (await db.getAll(PENDING_SHARES_STORE)).sort((a, b) =>
+    (b.timestamp - a.timestamp)
+    || a.id.localeCompare(b.id),
+  );
 }
 
 export async function removePendingShare(id: string): Promise<void> {
