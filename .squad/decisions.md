@@ -6304,7 +6304,7 @@ The background-sync worker now depends on a service-worker-readable token store,
 - `src/SharedSpaces.Client/src/lib/offline-sync.test.ts`: shared sync helper path, background-sync request, retry vs permanent failure semantics
 - `src/SharedSpaces.Client/src/lib/sw-registration.test.ts`: service worker registration lookup failure fallback
 
-# Decision: Remove unlayered form element font reset from index.css
+# Decision: Keep unlayered form reset, remove text-sm from text items for font consistency
 
 **Author:** Wash (Frontend Dev)
 **Date:** 2026-07-14
@@ -6312,19 +6312,19 @@ The background-sync worker now depends on a service-worker-readable token store,
 
 ## Context
 
-Tailwind v4 uses CSS Cascade Layers (`@layer base`, `@layer utilities`, etc.). The `index.css` file contained an unlayered `button, input, textarea, select { font: inherit }` rule that was redundant with the Tailwind v4 preflight (which already includes this reset in `@layer base`).
+Tailwind v4 uses CSS Cascade Layers (`@layer base`, `@layer utilities`, etc.). The `index.css` file contains an unlayered `button, input, textarea, select { font: inherit }` rule that makes form elements inherit the body font. File items in the space view render as `<button>` elements while text items render as `<p>` elements.
 
 ## Problem
 
-In CSS Cascade Layers, unlayered styles always beat layered styles regardless of specificity. This meant the unlayered `font: inherit` on buttons overrode Tailwind utility classes like `text-sm` and `font-medium` (which live in `@layer utilities`). File items in the space view render as `<button>` elements while text items render as `<p>` elements, so file items ignored font utilities and rendered with inherited (larger, lighter) text.
+Text items used `text-sm font-medium` utility classes, which made them render smaller and bolder than file items. File items inherit the body font via the unlayered `font: inherit` rule (which beats layered Tailwind utilities). This created an inconsistent appearance between the two item types.
 
 ## Decision
 
-Remove the redundant unlayered form element font reset. The Tailwind v4 preflight handles it correctly in `@layer base`, which utilities can properly override.
+Keep the unlayered `font: inherit` rule (it's intentional, provides consistent form element styling). Instead, remove `text-sm font-medium` from text item `<p>` elements so they also inherit the body font, matching file items.
 
 ## Rule Going Forward
 
-Never add unlayered CSS rules for properties that Tailwind utility classes need to control. If custom resets are needed, place them inside `@layer base` to maintain correct cascade ordering.
+When adding unlayered CSS for form elements, verify all item types use consistent fonts. If buttons inherit fonts via unlayered rules, text elements should also inherit rather than using explicit font utilities that create visual inconsistency.
 
 ---
 

@@ -1330,7 +1330,8 @@ ew URLSearchParams() for clean parsing
 
 ## Learnings — Font Consistency Fix (#177) — 2026-07-14
 
-- **CSS Cascade Layers gotcha with Tailwind v4:** Unlayered styles in index.css always beat @layer utilities. A redundant button { font: inherit } outside any layer was overriding Tailwind utility classes (text-sm, font-medium) on all button elements. The Tailwind v4 preflight already handles this reset inside @layer base, where utilities properly override it.
-- **Key rule:** Never put form element resets in unlayered CSS when using Tailwind v4. The preflight in @layer base is sufficient.
-- **File items vs text items:** In space-view.ts, previewable file items render as button (for accessibility) while text items render as p. Both use identical Tailwind font classes, so the only difference was the cascade layers conflict.
-- **Key file:** src/SharedSpaces.Client/src/index.css — global styles, must stay compatible with Tailwind v4 layer ordering.
+- **Intentional unlayered font inheritance:** The unlayered `button, input, textarea, select { font: inherit }` rule in index.css is intentional, not redundant. It ensures form elements inherit the body font consistently across the app.
+- **CSS Cascade Layers behavior:** Unlayered styles beat @layer utilities. The unlayered `font: inherit` on buttons means Tailwind font utilities (text-sm, font-medium) have no effect on button elements — they'll always inherit the body font.
+- **Solution:** Rather than remove the unlayered reset, we removed `text-sm font-medium` from text item `<p>` elements so they also inherit the body font, matching file items (which render as buttons).
+- **File items vs text items:** In space-view.ts, previewable file items render as button (for accessibility) while text items render as p. Both now inherit the body font directly rather than using explicit font utilities, ensuring visual consistency.
+- **Key file:** src/SharedSpaces.Client/src/index.css — global styles with intentional unlayered form resets.
