@@ -17,6 +17,7 @@ import {
   clearStoredTokens,
   syncStoredTokens,
   type OfflineQueueItem,
+  type PendingShareItem,
 } from './idb-storage';
 
 beforeEach(async () => {
@@ -24,6 +25,25 @@ beforeEach(async () => {
   await clearOfflineQueue();
   await clearStoredTokens();
 });
+
+async function seedPendingShares(items: PendingShareItem[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('shared-spaces-db', 2);
+
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('pending-shares', 'readwrite');
+      for (const item of items) {
+        tx.objectStore('pending-shares').put(item);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error('Failed to seed pending shares'));
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
 
 describe('idb-storage', () => {
   describe('pending shares', () => {
@@ -39,6 +59,20 @@ describe('idb-storage', () => {
     it('clearPendingShares removes all items', async () => {
       await clearPendingShares();
       expect(await getPendingShares()).toEqual([]);
+    });
+
+    it('returns pending shares newest-first with stable tie-breakers', async () => {
+      await seedPendingShares([
+        { id: '1000-0001-b', type: 'text', content: 'second', timestamp: 1000 },
+        { id: '2000-0000-c', type: 'text', content: 'latest', timestamp: 2000 },
+        { id: '1000-0000-a', type: 'text', content: 'first', timestamp: 1000 },
+      ]);
+
+      expect((await getPendingShares()).map((item) => item.id)).toEqual([
+        '2000-0000-c',
+        '1000-0000-a',
+        '1000-0001-b',
+      ]);
     });
   });
 
