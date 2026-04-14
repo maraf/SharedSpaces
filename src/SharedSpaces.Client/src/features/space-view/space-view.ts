@@ -1728,7 +1728,7 @@ export class SpaceView extends BaseElement {
       <!-- Center: Content -->
       <div class="min-w-0 flex-1">
         <p
-          class="cursor-pointer truncate text-sm font-medium text-slate-200 hover:text-slate-100"
+          class="cursor-pointer truncate text-slate-200 hover:text-slate-100"
           @click=${() => this.handleTextClick(item)}
           title="Click to view full text"
         >
