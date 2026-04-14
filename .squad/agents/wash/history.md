@@ -1326,3 +1326,18 @@ ew URLSearchParams() for clean parsing
 - **PR ready for merge to main (fix/screenshot-test-fixes, commit 2f9729b).**
 
 - **True service-worker background sync (2026-04-04):** Offline queue uploads no longer depend on an open tab. Keep JWTs in `localStorage` for the app shell, mirror them into IndexedDB for service-worker access, and let the SW process queued `PUT` uploads directly during the `sync` event. Successful items are deleted, permanent auth/validation failures are dropped, transient/network failures stay queued for retry, and open `space-view` clients refresh when `offline-queue-sync-complete` arrives.
+
+
+## Learnings — Font Consistency Fix (#177) — 2026-07-14
+
+- **Intentional unlayered font inheritance:** The unlayered `button, input, textarea, select { font: inherit }` rule in index.css is intentional, not redundant. It ensures form elements inherit the body font consistently across the app.
+- **CSS Cascade Layers behavior:** Unlayered styles beat @layer utilities. The unlayered `font: inherit` on buttons means Tailwind font utilities (text-sm, font-medium) have no effect on button elements — they'll always inherit the body font.
+- **Solution:** Rather than remove the unlayered reset, we removed `text-sm font-medium` from text item `<p>` elements so they also inherit the body font, matching file items (which render as buttons).
+- **File items vs text items:** In space-view.ts, previewable file items render as button (for accessibility) while text items render as p. Both now inherit the body font directly rather than using explicit font utilities, ensuring visual consistency.
+- **Key file:** src/SharedSpaces.Client/src/index.css — global styles with intentional unlayered form resets.
+
+## Learnings — Documentation Alignment After Direction Change — 2026-07-14
+
+- **Keep docs synced with pivot decisions:** When the product direction changes mid-PR (we initially removed `font: inherit`, then reversed to keep it and adjust text items instead), update all documentation artifacts — decisions.md and agent histories — to reflect the actual shipped approach, not the abandoned one.
+- **PR reviewer caught the mismatch:** The copilot-pull-request-reviewer flagged that the decision doc described removing the unlayered rule, but the code kept it. This highlighted the value of keeping decision records accurate.
+- **Documentation as source of truth:** Squad decision records aren't just historical notes — they guide future work. Stale or incorrect decisions create confusion for both humans and agents.
