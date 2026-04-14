@@ -1335,3 +1335,9 @@ ew URLSearchParams() for clean parsing
 - **Solution:** Rather than remove the unlayered reset, we removed `text-sm font-medium` from text item `<p>` elements so they also inherit the body font, matching file items (which render as buttons).
 - **File items vs text items:** In space-view.ts, previewable file items render as button (for accessibility) while text items render as p. Both now inherit the body font directly rather than using explicit font utilities, ensuring visual consistency.
 - **Key file:** src/SharedSpaces.Client/src/index.css — global styles with intentional unlayered form resets.
+
+## Learnings — Documentation Alignment After Direction Change — 2026-07-14
+
+- **Keep docs synced with pivot decisions:** When the product direction changes mid-PR (we initially removed `font: inherit`, then reversed to keep it and adjust text items instead), update all documentation artifacts — decisions.md and agent histories — to reflect the actual shipped approach, not the abandoned one.
+- **PR reviewer caught the mismatch:** The copilot-pull-request-reviewer flagged that the decision doc described removing the unlayered rule, but the code kept it. This highlighted the value of keeping decision records accurate.
+- **Documentation as source of truth:** Squad decision records aren't just historical notes — they guide future work. Stale or incorrect decisions create confusion for both humans and agents.
