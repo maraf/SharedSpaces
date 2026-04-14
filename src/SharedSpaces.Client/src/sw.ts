@@ -247,29 +247,37 @@ async function handleShareTarget(request: Request): Promise<Response> {
     const title = formData.get('title') || '';
     const text = formData.get('text') || '';
     const url = formData.get('url') || '';
-    const file = formData.get('file');
-    const id = crypto.randomUUID();
-    const timestamp = Date.now();
+    const files = formData
+      .getAll('files')
+      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
-    if (file && file instanceof File && file.size > 0) {
-      const arrayBuffer = await file.arrayBuffer();
-      await storePendingShare({
-        id,
-        type: 'file',
-        fileName: file.name,
-        fileType: file.type,
-        fileData: arrayBuffer,
-        fileSize: file.size,
-        timestamp,
-      });
+    const legacyFile = formData.get('file');
+    if (files.length === 0 && legacyFile instanceof File && legacyFile.size > 0) {
+      files.push(legacyFile);
+    }
+
+    if (files.length > 0) {
+      const timestamp = Date.now();
+
+      for (const file of files) {
+        await storePendingShare({
+          id: crypto.randomUUID(),
+          type: 'file',
+          fileName: file.name,
+          fileType: file.type,
+          fileData: await file.arrayBuffer(),
+          fileSize: file.size,
+          timestamp,
+        });
+      }
     } else {
       const content = [title, text, url].filter(Boolean).join('\n');
       if (content) {
         await storePendingShare({
-          id,
+          id: crypto.randomUUID(),
           type: 'text',
           content,
-          timestamp,
+          timestamp: Date.now(),
         });
       }
     }
