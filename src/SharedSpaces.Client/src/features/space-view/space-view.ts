@@ -395,6 +395,7 @@ export class SpaceView extends BaseElement {
   private async loadDataWithFullFetch() {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
     const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+    this.evictCachedBlobsForRemovedItems(this.items, itemList);
     this.items = itemList;
   }
 
@@ -413,6 +414,7 @@ export class SpaceView extends BaseElement {
     // 3. If full sync required, fall back to full fetch
     if (journal.fullSyncRequired) {
       const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+      this.evictCachedBlobsForRemovedItems(this.items, itemList);
       this.items = itemList;
       await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, itemList);
       await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
@@ -421,17 +423,20 @@ export class SpaceView extends BaseElement {
 
     // 4. Apply delta to cached items
     const itemMap = new Map(this.items.map((item) => [item.id, item]));
-    
-    // Apply deletions
+
+    // Apply deletions (and evict any cached blobs for them)
     for (const deletedId of journal.deleted) {
       itemMap.delete(deletedId);
+      if (this.serverUrl && this.spaceId) {
+        removeCachedFile(this.serverUrl, this.spaceId, deletedId).catch(() => {});
+      }
     }
-    
+
     // Apply additions/updates
     for (const item of journal.addedOrUpdated) {
       itemMap.set(item.id, item);
     }
-    
+
     // Convert back to sorted array (newest first)
     this.items = Array.from(itemMap.values()).sort(
       (a, b) => new Date(b.sharedAt).getTime() - new Date(a.sharedAt).getTime(),
@@ -440,6 +445,19 @@ export class SpaceView extends BaseElement {
     // 5. Update cache and checkpoint
     await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, this.items);
     await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
+  }
+
+  private evictCachedBlobsForRemovedItems(
+    previous: SpaceItemResponse[],
+    next: SpaceItemResponse[],
+  ): void {
+    if (!this.serverUrl || !this.spaceId || previous.length === 0) return;
+    const nextIds = new Set(next.map((item) => item.id));
+    for (const item of previous) {
+      if (item.contentType === 'file' && !nextIds.has(item.id)) {
+        removeCachedFile(this.serverUrl, this.spaceId, item.id).catch(() => {});
+      }
+    }
   }
 
   private async toggleJournalSync() {
@@ -640,6 +658,7 @@ export class SpaceView extends BaseElement {
         await this.loadDataWithJournalSync();
       } else {
         const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+        this.evictCachedBlobsForRemovedItems(this.items, itemList);
         this.items = itemList;
       }
     } catch (error) {
