@@ -41,6 +41,7 @@ import {
   getCachedFile,
   setCachedFile,
   removeCachedFile,
+  clearCachedFilesForSpace,
   type PendingShareItem,
   type OfflineQueueItem,
 } from '../../lib/idb-storage';
@@ -470,8 +471,10 @@ export class SpaceView extends BaseElement {
       this.journalSyncEnabled = newValue;
 
       if (!newValue) {
-        // When disabling, clear the cache
+        // When disabling, clear caches that were populated only because Large
+        // Space Mode was on (item list journal cache + viewed file blobs).
         await clearJournalCache(this.serverUrl, this.spaceId);
+        await clearCachedFilesForSpace(this.serverUrl, this.spaceId);
       }
 
       this.syncMessage = newValue
@@ -1144,11 +1147,15 @@ export class SpaceView extends BaseElement {
       throw new Error('Cannot fetch file without an active session.');
     }
 
-    try {
-      const cached = await getCachedFile(this.serverUrl, this.spaceId, item.id);
-      if (cached) return cached.blob;
-    } catch {
-      // Cache lookup failures should not block the download path.
+    // Blob caching is opt-in via Large Space Mode. Outside of it we always
+    // hit the network so the user's local storage stays untouched.
+    if (this.journalSyncEnabled) {
+      try {
+        const cached = await getCachedFile(this.serverUrl, this.spaceId, item.id);
+        if (cached) return cached.blob;
+      } catch {
+        // Cache lookup failures should not block the download path.
+      }
     }
 
     const blob = await downloadFile(
@@ -1158,10 +1165,12 @@ export class SpaceView extends BaseElement {
       this.token,
     );
 
-    try {
-      await setCachedFile(this.serverUrl, this.spaceId, item.id, blob);
-    } catch {
-      // Best-effort cache writes; surfacing storage errors would not help the user.
+    if (this.journalSyncEnabled) {
+      try {
+        await setCachedFile(this.serverUrl, this.spaceId, item.id, blob);
+      } catch {
+        // Best-effort cache writes; surfacing storage errors would not help the user.
+      }
     }
 
     return blob;
