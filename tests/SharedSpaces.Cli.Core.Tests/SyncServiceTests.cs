@@ -1097,6 +1097,64 @@ public class SyncServiceTests : IDisposable
             .Count(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
         journalRequests.Should().Be(1, "only one journal validation should fire after debounce settles");
     }
+
+    [Fact]
+    public async Task PassiveMode_PollsJournalOnInterval()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        MockJournal(spaceId, serverUrl);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir)
+        {
+            Passive = true,
+            PassiveInterval = TimeSpan.FromMilliseconds(150),
+        };
+
+        using var cts = new CancellationTokenSource();
+        var runTask = service.RunAsync(cts.Token);
+
+        // Wait long enough for the initial sync + at least 2 passive ticks
+        await Task.Delay(500);
+        cts.Cancel();
+        try { await runTask; } catch (OperationCanceledException) { }
+
+        var journalGets = _mockHttp.GetRequests()
+            .Count(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
+        journalGets.Should().BeGreaterOrEqualTo(3,
+            "passive mode should fetch the journal once for initial sync and again on each tick");
+    }
+
+    [Fact]
+    public async Task PassiveMode_DoesNotOpenSignalRHub()
+    {
+        var spaceId = Guid.NewGuid();
+        var serverUrl = "https://server.example.com";
+        var jwt = "fake-jwt-token";
+
+        MockJournal(spaceId, serverUrl);
+
+        using var apiClient = new SharedSpacesApiClient(_httpClient);
+        await using var service = new SyncService(apiClient, serverUrl, spaceId.ToString(), jwt, _tempDir)
+        {
+            Passive = true,
+            PassiveInterval = TimeSpan.FromMilliseconds(200),
+        };
+
+        using var cts = new CancellationTokenSource();
+        var runTask = service.RunAsync(cts.Token);
+
+        await Task.Delay(300);
+        cts.Cancel();
+        try { await runTask; } catch (OperationCanceledException) { }
+
+        var hubRequests = _mockHttp.GetRequests()
+            .Count(r => r.Url.Contains($"/v1/spaces/{spaceId}/hub", StringComparison.OrdinalIgnoreCase));
+        hubRequests.Should().Be(0, "passive mode must not negotiate or open the SignalR hub");
+    }
 }
 
 public class MockHttpMessageHandler : HttpMessageHandler
