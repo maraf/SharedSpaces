@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 
 import {
@@ -18,11 +18,14 @@ import {
   getOfflineQueueForSpace,
   getPendingShares,
   getStoredToken,
+  getViewedFilesBudget,
+  getViewedFilesStorageStatus,
   pruneCachedFiles,
   removeCachedFile,
   removeFromOfflineQueue,
   removePendingShare,
   removeStoredToken,
+  requestPersistentStorage,
   setCachedFile,
   setJournalCache,
   setJournalSyncEnabled,
@@ -428,6 +431,127 @@ describe('idb-storage', () => {
 
       expect(await getCachedFile(server, spaceId, 'item-1')).toBeDefined();
       expect(await getCachedFile(server, spaceId, 'item-2')).toBeDefined();
+    });
+
+    it('uses the dynamic budget from navigator.storage.estimate when none is provided', async () => {
+      const originalNavigator = globalThis.navigator;
+      const estimate = vi.fn().mockResolvedValue({ quota: 1024, usage: 0 });
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { storage: { estimate } },
+        configurable: true,
+      });
+
+      try {
+        // 1024 * 0.5 = 512, but the floor of 100 MB takes over.
+        const budget = await getViewedFilesBudget();
+        expect(budget).toBeGreaterThanOrEqual(100 * 1024 * 1024);
+      } finally {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: originalNavigator,
+          configurable: true,
+        });
+      }
+    });
+
+    it('caps the dynamic budget at the ceiling for large quotas', async () => {
+      const originalNavigator = globalThis.navigator;
+      const oneTerabyte = 1024 * 1024 * 1024 * 1024;
+      const estimate = vi.fn().mockResolvedValue({ quota: oneTerabyte, usage: 0 });
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { storage: { estimate } },
+        configurable: true,
+      });
+
+      try {
+        const budget = await getViewedFilesBudget();
+        expect(budget).toBe(500 * 1024 * 1024);
+      } finally {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: originalNavigator,
+          configurable: true,
+        });
+      }
+    });
+
+    it('returns the floor when navigator.storage is unavailable', async () => {
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: {},
+        configurable: true,
+      });
+
+      try {
+        const budget = await getViewedFilesBudget();
+        expect(budget).toBe(100 * 1024 * 1024);
+      } finally {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: originalNavigator,
+          configurable: true,
+        });
+      }
+    });
+
+    it('reports cache usage status with quota/usage when available', async () => {
+      const originalNavigator = globalThis.navigator;
+      const estimate = vi.fn().mockResolvedValue({ quota: 999, usage: 42 });
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { storage: { estimate } },
+        configurable: true,
+      });
+
+      try {
+        await setCachedFile(server, spaceId, 'item-1', makeBlob(50));
+        const status = await getViewedFilesStorageStatus();
+        expect(status.used).toBe(50);
+        expect(status.quota).toBe(999);
+        expect(status.usage).toBe(42);
+        expect(status.budget).toBeGreaterThan(0);
+      } finally {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: originalNavigator,
+          configurable: true,
+        });
+      }
+    });
+
+    it('requestPersistentStorage resolves to false when the API is missing', async () => {
+      const originalNavigator = globalThis.navigator;
+      Object.defineProperty(globalThis, 'navigator', {
+        value: {},
+        configurable: true,
+      });
+
+      try {
+        const result = await requestPersistentStorage();
+        expect(result).toBe(false);
+      } finally {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: originalNavigator,
+          configurable: true,
+        });
+      }
+    });
+
+    it('requestPersistentStorage short-circuits when storage is already persisted', async () => {
+      const originalNavigator = globalThis.navigator;
+      const persisted = vi.fn().mockResolvedValue(true);
+      const persist = vi.fn().mockResolvedValue(true);
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { storage: { persisted, persist } },
+        configurable: true,
+      });
+
+      try {
+        const result = await requestPersistentStorage();
+        expect(result).toBe(true);
+        expect(persisted).toHaveBeenCalled();
+        expect(persist).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(globalThis, 'navigator', {
+          value: originalNavigator,
+          configurable: true,
+        });
+      }
     });
   });
 });

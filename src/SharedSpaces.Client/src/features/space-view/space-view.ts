@@ -42,8 +42,11 @@ import {
   setCachedFile,
   removeCachedFile,
   clearCachedFilesForSpace,
+  getViewedFilesStorageStatus,
+  requestPersistentStorage,
   type PendingShareItem,
   type OfflineQueueItem,
+  type StorageBudgetSnapshot,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
 import { getFileTypeIcon, getTextItemIcon } from '../../lib/file-icons';
@@ -169,6 +172,8 @@ export class SpaceView extends BaseElement {
   @state() private openMenuItemId: string | null = null;
   @state() private journalSyncEnabled = false;
   @state() private journalSyncLoading = false;
+  @state() private cacheStorageStatus: StorageBudgetSnapshot | null = null;
+  @state() private storagePersisted = false;
 
   private _previewRequestId = 0;
 
@@ -391,6 +396,30 @@ export class SpaceView extends BaseElement {
     } catch {
       this.journalSyncEnabled = false;
     }
+    if (this.journalSyncEnabled) {
+      void this.refreshCacheStorageStatus();
+    } else {
+      this.cacheStorageStatus = null;
+    }
+  }
+
+  private async refreshCacheStorageStatus(): Promise<void> {
+    try {
+      this.cacheStorageStatus = await getViewedFilesStorageStatus();
+    } catch {
+      this.cacheStorageStatus = null;
+    }
+    try {
+      if (
+        typeof navigator !== 'undefined'
+        && navigator.storage
+        && typeof navigator.storage.persisted === 'function'
+      ) {
+        this.storagePersisted = await navigator.storage.persisted();
+      }
+    } catch {
+      // Best-effort.
+    }
   }
 
   private async loadDataWithFullFetch() {
@@ -470,11 +499,21 @@ export class SpaceView extends BaseElement {
       await setJournalSyncEnabled(this.serverUrl, this.spaceId, newValue);
       this.journalSyncEnabled = newValue;
 
-      if (!newValue) {
+      if (newValue) {
+        // Ask the browser to keep our storage around so the cache survives
+        // eviction. Best-effort; user may decline or the API may be missing.
+        try {
+          this.storagePersisted = await requestPersistentStorage();
+        } catch {
+          this.storagePersisted = false;
+        }
+        void this.refreshCacheStorageStatus();
+      } else {
         // When disabling, clear caches that were populated only because Large
         // Space Mode was on (item list journal cache + viewed file blobs).
         await clearJournalCache(this.serverUrl, this.spaceId);
         await clearCachedFilesForSpace(this.serverUrl, this.spaceId);
+        this.cacheStorageStatus = null;
       }
 
       this.syncMessage = newValue
@@ -575,7 +614,11 @@ export class SpaceView extends BaseElement {
 
     // Drop any cached file blob for the deleted item.
     if (this.serverUrl && this.spaceId) {
-      removeCachedFile(this.serverUrl, this.spaceId, payload.id).catch(() => {});
+      removeCachedFile(this.serverUrl, this.spaceId, payload.id)
+        .then(() => {
+          if (this.journalSyncEnabled) void this.refreshCacheStorageStatus();
+        })
+        .catch(() => {});
     }
 
     // Update journal cache if enabled
@@ -1123,7 +1166,11 @@ export class SpaceView extends BaseElement {
 
     // Drop any cached file blob for the deleted item.
     if (item.contentType === 'file') {
-      removeCachedFile(this.serverUrl, this.spaceId, item.id).catch(() => {});
+      removeCachedFile(this.serverUrl, this.spaceId, item.id)
+        .then(() => {
+          if (this.journalSyncEnabled) void this.refreshCacheStorageStatus();
+        })
+        .catch(() => {});
     }
 
     try {
@@ -1168,6 +1215,7 @@ export class SpaceView extends BaseElement {
     if (this.journalSyncEnabled) {
       try {
         await setCachedFile(this.serverUrl, this.spaceId, item.id, blob);
+        void this.refreshCacheStorageStatus();
       } catch {
         // Best-effort cache writes; surfacing storage errors would not help the user.
       }
@@ -1639,6 +1687,47 @@ export class SpaceView extends BaseElement {
             ></span>
           </button>
         </div>
+        ${this.journalSyncEnabled ? this.renderCacheUsage() : nothing}
+      </div>
+    `;
+  }
+
+  private renderCacheUsage() {
+    const status = this.cacheStorageStatus;
+    if (!status) return nothing;
+
+    const usedLabel = this.formatFileSize(status.used);
+    const budgetLabel = this.formatFileSize(status.budget);
+    const percent = status.budget > 0
+      ? Math.min(100, Math.round((status.used / status.budget) * 100))
+      : 0;
+
+    return html`
+      <div class="mt-3 border-t border-slate-800 pt-3" data-testid="cache-usage">
+        <div class="flex items-center justify-between gap-3 text-xs text-slate-400">
+          <span>Cached files</span>
+          <span class="text-slate-300">
+            ${usedLabel} / ${budgetLabel}
+          </span>
+        </div>
+        <div
+          class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow=${percent}
+          aria-label="Cached files usage"
+        >
+          <div
+            class="h-full bg-sky-500 transition-all"
+            style="width: ${percent}%"
+          ></div>
+        </div>
+        <p class="mt-2 text-[11px] text-slate-500">
+          ${this.storagePersisted
+            ? 'Storage is persistent: cached files survive browser cleanup.'
+            : 'Storage is best-effort: the browser may evict cached files when disk space runs low.'}
+        </p>
       </div>
     `;
   }

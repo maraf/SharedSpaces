@@ -11,10 +11,13 @@ const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
 const JOURNAL_CACHE_STORE = 'journal-cache';
 const VIEWED_FILES_STORE = 'viewed-files';
 
-// Default budget for cached file blobs. When new entries push the cache past
-// this size, the oldest entries (by accessedAt) are evicted until the cache
-// is back under budget.
-const DEFAULT_VIEWED_FILES_BUDGET_BYTES = 100 * 1024 * 1024; // 100 MB
+// Floor for the dynamic cache budget. Even on devices that report a tiny
+// quota (or report nothing at all), we will try to keep at least this much.
+const VIEWED_FILES_BUDGET_FLOOR_BYTES = 100 * 1024 * 1024; // 100 MB
+// Ceiling so we never starve other apps on a desktop with terabytes of disk.
+const VIEWED_FILES_BUDGET_CEILING_BYTES = 500 * 1024 * 1024; // 500 MB
+// Fraction of `navigator.storage.estimate().quota` we are willing to consume.
+const VIEWED_FILES_BUDGET_QUOTA_FRACTION = 0.5;
 
 export interface PendingShareItem {
   id: string;
@@ -353,7 +356,7 @@ export async function setCachedFile(
   itemId: string,
   blob: Blob,
   mimeType?: string,
-  budgetBytes: number = DEFAULT_VIEWED_FILES_BUDGET_BYTES,
+  budgetBytes?: number,
 ): Promise<void> {
   const db = await getDB();
   const entry: CachedFileEntry = {
@@ -367,7 +370,8 @@ export async function setCachedFile(
     accessedAt: Date.now(),
   };
   await db.put(VIEWED_FILES_STORE, entry);
-  await pruneCachedFiles(budgetBytes);
+  const budget = budgetBytes ?? (await getViewedFilesBudget());
+  await pruneCachedFiles(budget);
 }
 
 export async function removeCachedFile(
@@ -401,16 +405,17 @@ export async function getCachedFilesTotalSize(): Promise<number> {
 }
 
 export async function pruneCachedFiles(
-  budgetBytes: number = DEFAULT_VIEWED_FILES_BUDGET_BYTES,
+  budgetBytes?: number,
 ): Promise<void> {
-  if (budgetBytes < 0) return;
+  const budget = budgetBytes ?? (await getViewedFilesBudget());
+  if (budget < 0) return;
 
   const db = await getDB();
   const tx = db.transaction(VIEWED_FILES_STORE, 'readwrite');
   const all = (await tx.store.getAll()) as CachedFileEntry[];
   let total = all.reduce((sum, entry) => sum + entry.size, 0);
 
-  if (total <= budgetBytes) {
+  if (total <= budget) {
     await tx.done;
     return;
   }
@@ -418,7 +423,7 @@ export async function pruneCachedFiles(
   // Evict oldest first.
   const sorted = [...all].sort((a, b) => a.accessedAt - b.accessedAt);
   for (const entry of sorted) {
-    if (total <= budgetBytes) break;
+    if (total <= budget) break;
     await tx.store.delete(entry.key);
     total -= entry.size;
   }
@@ -429,4 +434,92 @@ export async function pruneCachedFiles(
 export async function clearAllCachedFiles(): Promise<void> {
   const db = await getDB();
   await db.clear(VIEWED_FILES_STORE);
+}
+
+// --- Storage budget / persistence helpers ---
+
+export interface StorageBudgetSnapshot {
+  used: number;
+  budget: number;
+  quota: number | null;
+  usage: number | null;
+}
+
+/**
+ * Returns the byte budget the viewed-files cache should respect. The budget
+ * is derived from `navigator.storage.estimate()` — capped at a fixed ceiling
+ * and floored to a sensible minimum so the cache stays useful even when the
+ * browser doesn't expose an estimate.
+ */
+export async function getViewedFilesBudget(): Promise<number> {
+  try {
+    if (
+      typeof navigator !== 'undefined'
+      && navigator.storage
+      && typeof navigator.storage.estimate === 'function'
+    ) {
+      const estimate = await navigator.storage.estimate();
+      const quota = estimate.quota ?? 0;
+      if (quota > 0) {
+        const dynamic = Math.floor(quota * VIEWED_FILES_BUDGET_QUOTA_FRACTION);
+        return Math.min(
+          VIEWED_FILES_BUDGET_CEILING_BYTES,
+          Math.max(VIEWED_FILES_BUDGET_FLOOR_BYTES, dynamic),
+        );
+      }
+    }
+  } catch {
+    // Fall through to the static floor.
+  }
+  return VIEWED_FILES_BUDGET_FLOOR_BYTES;
+}
+
+/**
+ * Snapshot of how much the viewed-files cache is using and how much is
+ * available, suitable for surfacing to the user.
+ */
+export async function getViewedFilesStorageStatus(): Promise<StorageBudgetSnapshot> {
+  const used = await getCachedFilesTotalSize();
+  const budget = await getViewedFilesBudget();
+  let quota: number | null = null;
+  let usage: number | null = null;
+  try {
+    if (
+      typeof navigator !== 'undefined'
+      && navigator.storage
+      && typeof navigator.storage.estimate === 'function'
+    ) {
+      const estimate = await navigator.storage.estimate();
+      quota = estimate.quota ?? null;
+      usage = estimate.usage ?? null;
+    }
+  } catch {
+    // Best-effort; leave quota/usage null.
+  }
+  return { used, budget, quota, usage };
+}
+
+/**
+ * Asks the browser to mark this origin's storage as persistent so the cache
+ * survives storage-pressure eviction. Returns `true` if persistence was
+ * granted (or already in effect), `false` otherwise. Best-effort — silently
+ * resolves to `false` when the API is unavailable.
+ */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (
+      typeof navigator !== 'undefined'
+      && navigator.storage
+      && typeof navigator.storage.persist === 'function'
+    ) {
+      if (typeof navigator.storage.persisted === 'function') {
+        const already = await navigator.storage.persisted();
+        if (already) return true;
+      }
+      return await navigator.storage.persist();
+    }
+  } catch {
+    // Ignore — caller will treat false as "not persistent".
+  }
+  return false;
 }
