@@ -82,7 +82,7 @@ public sealed class SyncService : IAsyncDisposable
             if (PassiveInterval <= TimeSpan.Zero)
                 throw new InvalidOperationException("PassiveInterval must be positive.");
 
-            Console.WriteLine($"[Passive] Mode enabled — polling journal every {PassiveInterval.TotalSeconds:0}s. SignalR is disabled.");
+            Console.WriteLine($"[Passive] Mode enabled — polling journal every {PassiveInterval.TotalSeconds:0.###}s. SignalR is disabled.");
         }
 
         ScanExistingFiles();

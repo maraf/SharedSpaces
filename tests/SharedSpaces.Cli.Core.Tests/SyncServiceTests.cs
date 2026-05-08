@@ -1117,8 +1117,17 @@ public class SyncServiceTests : IDisposable
         using var cts = new CancellationTokenSource();
         var runTask = service.RunAsync(cts.Token);
 
-        // Wait long enough for the initial sync + at least 2 passive ticks
-        await Task.Delay(500);
+        // Poll until we observe the expected number of journal GETs (initial sync + 2 passive ticks),
+        // capping at a generous timeout to avoid timing-sensitive flakiness.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            var count = _mockHttp.GetRequests()
+                .Count(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
+            if (count >= 3) break;
+            await Task.Delay(25);
+        }
+
         cts.Cancel();
         try { await runTask; } catch (OperationCanceledException) { }
 
