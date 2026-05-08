@@ -52,15 +52,22 @@ sharedspaces spaces --json
 
 ### `sharedspaces sync`
 
-Sync files from a space to a local folder. Downloads existing files, then watches for changes in both directions in real-time.
+Sync files from a space to a local folder. By default, downloads existing files and then watches for changes in both directions in real-time. A [passive mode](#passive-mode) is also available for periodic, low-bandwidth syncing.
 
 ```bash
 sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/shared
 ```
 
-Both `--space-id` and `--folder` are required. The folder is created if it doesn't exist.
+Options:
 
-The sync engine:
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--space-id <guid>` | yes | ID of the space to sync from |
+| `--folder <path>` | yes | Local folder for synced files (created if missing) |
+| `--passive` | no | Skip the SignalR hub and poll the journal on a fixed interval. See [Passive mode](#passive-mode). |
+| `--interval <seconds>` | no | Passive poll interval. Default `300`, minimum `5`. Only valid with `--passive`. |
+
+The default (active) sync engine:
 - **Downloads** all existing files on startup
 - **Streams** new files and deletions in real-time via SignalR
 - **Uploads** new files added to the local folder automatically

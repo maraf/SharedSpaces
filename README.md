@@ -118,7 +118,7 @@ sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/sha
 | `join <url>` | Exchange an invitation PIN for an access token and store it locally |
 | `spaces` | List all joined spaces (supports `--json` for machine-readable output) |
 | `upload <file>` | Upload a file to a space (`--space-id` required) |
-| `sync` | Two-way real-time file sync between a space and a local folder (`--space-id`, `--folder` required) |
+| `sync` | Two-way file sync between a space and a local folder (`--space-id`, `--folder` required; `--passive` for periodic polling instead of real-time SignalR) |
 
 ### How sync works
 
