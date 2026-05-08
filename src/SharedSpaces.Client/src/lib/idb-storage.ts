@@ -3,12 +3,18 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const PENDING_SHARES_STORE = 'pending-shares';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
 const AUTH_TOKENS_STORE = 'auth-tokens';
 const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
 const JOURNAL_CACHE_STORE = 'journal-cache';
+const VIEWED_FILES_STORE = 'viewed-files';
+
+// Default budget for cached file blobs. When new entries push the cache past
+// this size, the oldest entries (by accessedAt) are evicted until the cache
+// is back under budget.
+const DEFAULT_VIEWED_FILES_BUDGET_BYTES = 100 * 1024 * 1024; // 100 MB
 
 export interface PendingShareItem {
   id: string;
@@ -77,6 +83,10 @@ function getDB(): Promise<IDBPDatabase> {
       if (!db.objectStoreNames.contains(JOURNAL_CACHE_STORE)) {
         db.createObjectStore(JOURNAL_CACHE_STORE, { keyPath: 'key' });
       }
+      if (!db.objectStoreNames.contains(VIEWED_FILES_STORE)) {
+        const store = db.createObjectStore(VIEWED_FILES_STORE, { keyPath: 'key' });
+        store.createIndex('accessedAt', 'accessedAt');
+      }
     },
   }).catch((err) => {
     dbInstance = null;
@@ -90,7 +100,10 @@ function getDB(): Promise<IDBPDatabase> {
 
 export async function getPendingShares(): Promise<PendingShareItem[]> {
   const db = await getDB();
-  return db.getAll(PENDING_SHARES_STORE);
+  return (await db.getAll(PENDING_SHARES_STORE)).sort((a, b) =>
+    (b.timestamp - a.timestamp)
+    || a.id.localeCompare(b.id),
+  );
 }
 
 export async function removePendingShare(id: string): Promise<void> {
@@ -294,4 +307,126 @@ export async function clearJournalCache(
   const db = await getDB();
   const key = `${serverUrl}|${spaceId}`;
   await db.delete(JOURNAL_CACHE_STORE, key);
+}
+
+// --- Viewed File Blob Cache ---
+//
+// Caches file blobs the user has previewed/downloaded so they don't need to
+// be re-fetched from the server on subsequent views. Entries are keyed per
+// `${serverUrl}|${spaceId}|${itemId}` and tracked by `accessedAt` for LRU
+// eviction once the cache exceeds the configured budget.
+
+export interface CachedFileEntry {
+  key: string;
+  serverUrl: string;
+  spaceId: string;
+  itemId: string;
+  blob: Blob;
+  mimeType: string;
+  size: number;
+  accessedAt: number;
+}
+
+function getCachedFileKey(serverUrl: string, spaceId: string, itemId: string): string {
+  return `${serverUrl}|${spaceId}|${itemId}`;
+}
+
+export async function getCachedFile(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+): Promise<CachedFileEntry | undefined> {
+  const db = await getDB();
+  const key = getCachedFileKey(serverUrl, spaceId, itemId);
+  const entry = (await db.get(VIEWED_FILES_STORE, key)) as CachedFileEntry | undefined;
+  if (!entry) return undefined;
+
+  // Refresh accessedAt so the LRU keeps recently used entries.
+  entry.accessedAt = Date.now();
+  await db.put(VIEWED_FILES_STORE, entry);
+  return entry;
+}
+
+export async function setCachedFile(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+  blob: Blob,
+  mimeType?: string,
+  budgetBytes: number = DEFAULT_VIEWED_FILES_BUDGET_BYTES,
+): Promise<void> {
+  const db = await getDB();
+  const entry: CachedFileEntry = {
+    key: getCachedFileKey(serverUrl, spaceId, itemId),
+    serverUrl,
+    spaceId,
+    itemId,
+    blob,
+    mimeType: mimeType ?? blob.type ?? 'application/octet-stream',
+    size: blob.size,
+    accessedAt: Date.now(),
+  };
+  await db.put(VIEWED_FILES_STORE, entry);
+  await pruneCachedFiles(budgetBytes);
+}
+
+export async function removeCachedFile(
+  serverUrl: string,
+  spaceId: string,
+  itemId: string,
+): Promise<void> {
+  const db = await getDB();
+  await db.delete(VIEWED_FILES_STORE, getCachedFileKey(serverUrl, spaceId, itemId));
+}
+
+export async function clearCachedFilesForSpace(
+  serverUrl: string,
+  spaceId: string,
+): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(VIEWED_FILES_STORE, 'readwrite');
+  const all = (await tx.store.getAll()) as CachedFileEntry[];
+  for (const entry of all) {
+    if (entry.serverUrl === serverUrl && entry.spaceId === spaceId) {
+      await tx.store.delete(entry.key);
+    }
+  }
+  await tx.done;
+}
+
+export async function getCachedFilesTotalSize(): Promise<number> {
+  const db = await getDB();
+  const all = (await db.getAll(VIEWED_FILES_STORE)) as CachedFileEntry[];
+  return all.reduce((total, entry) => total + entry.size, 0);
+}
+
+export async function pruneCachedFiles(
+  budgetBytes: number = DEFAULT_VIEWED_FILES_BUDGET_BYTES,
+): Promise<void> {
+  if (budgetBytes < 0) return;
+
+  const db = await getDB();
+  const tx = db.transaction(VIEWED_FILES_STORE, 'readwrite');
+  const all = (await tx.store.getAll()) as CachedFileEntry[];
+  let total = all.reduce((sum, entry) => sum + entry.size, 0);
+
+  if (total <= budgetBytes) {
+    await tx.done;
+    return;
+  }
+
+  // Evict oldest first.
+  const sorted = [...all].sort((a, b) => a.accessedAt - b.accessedAt);
+  for (const entry of sorted) {
+    if (total <= budgetBytes) break;
+    await tx.store.delete(entry.key);
+    total -= entry.size;
+  }
+
+  await tx.done;
+}
+
+export async function clearAllCachedFiles(): Promise<void> {
+  const db = await getDB();
+  await db.clear(VIEWED_FILES_STORE);
 }

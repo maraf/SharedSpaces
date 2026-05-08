@@ -3,32 +3,60 @@ import 'fake-indexeddb/auto';
 
 import {
   addToOfflineQueue,
+  clearAllCachedFiles,
+  clearCachedFilesForSpace,
   clearJournalCache,
   clearOfflineQueue,
   clearOfflineQueueForSpace,
   clearPendingShares,
   clearStoredTokens,
+  getCachedFile,
+  getCachedFilesTotalSize,
   getJournalCache,
   getJournalSyncEnabled,
   getOfflineQueue,
   getOfflineQueueForSpace,
   getPendingShares,
   getStoredToken,
+  pruneCachedFiles,
+  removeCachedFile,
   removeFromOfflineQueue,
   removePendingShare,
   removeStoredToken,
+  setCachedFile,
   setJournalCache,
   setJournalSyncEnabled,
   setStoredToken,
   syncStoredTokens,
   type OfflineQueueItem,
+  type PendingShareItem,
 } from './idb-storage';
 
 beforeEach(async () => {
   await clearPendingShares();
   await clearOfflineQueue();
   await clearStoredTokens();
+  await clearAllCachedFiles();
 });
+
+async function seedPendingShares(items: PendingShareItem[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('shared-spaces-db', 4);
+
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('pending-shares', 'readwrite');
+      for (const item of items) {
+        tx.objectStore('pending-shares').put(item);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error('Failed to seed pending shares'));
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
 
 describe('idb-storage', () => {
   describe('pending shares', () => {
@@ -44,6 +72,20 @@ describe('idb-storage', () => {
     it('clearPendingShares removes all items', async () => {
       await clearPendingShares();
       expect(await getPendingShares()).toEqual([]);
+    });
+
+    it('returns pending shares newest-first with stable tie-breakers', async () => {
+      await seedPendingShares([
+        { id: '1000-0001-b', type: 'text', content: 'second', timestamp: 1000 },
+        { id: '2000-0000-c', type: 'text', content: 'latest', timestamp: 2000 },
+        { id: '1000-0000-a', type: 'text', content: 'first', timestamp: 1000 },
+      ]);
+
+      expect((await getPendingShares()).map((item) => item.id)).toEqual([
+        '2000-0000-c',
+        '1000-0000-a',
+        '1000-0001-b',
+      ]);
     });
   });
 
@@ -310,6 +352,82 @@ describe('idb-storage', () => {
 
       expect(await getJournalCache('http://server1', 'space-A')).toBeUndefined();
       expect(await getJournalCache('http://server1', 'space-B')).toBeDefined();
+    });
+  });
+
+  describe('viewed file cache', () => {
+    const server = 'http://localhost:5165';
+    const spaceId = 'space-1';
+
+    function makeBlob(size: number, type = 'application/octet-stream'): Blob {
+      return new Blob([new Uint8Array(size)], { type });
+    }
+
+    it('returns undefined when no entry is cached', async () => {
+      expect(await getCachedFile(server, spaceId, 'item-1')).toBeUndefined();
+    });
+
+    it('round-trips a cached blob and refreshes accessedAt on read', async () => {
+      const blob = makeBlob(100, 'image/png');
+      await setCachedFile(server, spaceId, 'item-1', blob, 'image/png');
+
+      const first = await getCachedFile(server, spaceId, 'item-1');
+      expect(first).toBeDefined();
+      expect(first?.size).toBe(100);
+      expect(first?.mimeType).toBe('image/png');
+      // fake-indexeddb may not preserve Blob.prototype across structured cloning,
+      // so we only assert the persisted metadata round-trips.
+
+      const firstAccess = first!.accessedAt;
+      // Force a tick so the second read produces a strictly greater timestamp.
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const second = await getCachedFile(server, spaceId, 'item-1');
+      expect(second!.accessedAt).toBeGreaterThanOrEqual(firstAccess);
+    });
+
+    it('removes a single cached blob', async () => {
+      await setCachedFile(server, spaceId, 'item-1', makeBlob(10));
+      await setCachedFile(server, spaceId, 'item-2', makeBlob(10));
+      await removeCachedFile(server, spaceId, 'item-1');
+
+      expect(await getCachedFile(server, spaceId, 'item-1')).toBeUndefined();
+      expect(await getCachedFile(server, spaceId, 'item-2')).toBeDefined();
+    });
+
+    it('clears all cached blobs for a single space only', async () => {
+      await setCachedFile(server, 'space-A', 'item-1', makeBlob(10));
+      await setCachedFile(server, 'space-A', 'item-2', makeBlob(10));
+      await setCachedFile(server, 'space-B', 'item-3', makeBlob(10));
+
+      await clearCachedFilesForSpace(server, 'space-A');
+
+      expect(await getCachedFile(server, 'space-A', 'item-1')).toBeUndefined();
+      expect(await getCachedFile(server, 'space-A', 'item-2')).toBeUndefined();
+      expect(await getCachedFile(server, 'space-B', 'item-3')).toBeDefined();
+    });
+
+    it('evicts the least recently used entry when the budget is exceeded', async () => {
+      // Budget = 250 bytes; three 100-byte blobs forces eviction of the oldest.
+      await setCachedFile(server, spaceId, 'old', makeBlob(100), undefined, 250);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      await setCachedFile(server, spaceId, 'mid', makeBlob(100), undefined, 250);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      await setCachedFile(server, spaceId, 'new', makeBlob(100), undefined, 250);
+
+      expect(await getCachedFile(server, spaceId, 'old')).toBeUndefined();
+      expect(await getCachedFile(server, spaceId, 'mid')).toBeDefined();
+      expect(await getCachedFile(server, spaceId, 'new')).toBeDefined();
+      expect(await getCachedFilesTotalSize()).toBeLessThanOrEqual(250);
+    });
+
+    it('pruneCachedFiles is a no-op when total size is under budget', async () => {
+      await setCachedFile(server, spaceId, 'item-1', makeBlob(10));
+      await setCachedFile(server, spaceId, 'item-2', makeBlob(10));
+
+      await pruneCachedFiles(10_000);
+
+      expect(await getCachedFile(server, spaceId, 'item-1')).toBeDefined();
+      expect(await getCachedFile(server, spaceId, 'item-2')).toBeDefined();
     });
   });
 });

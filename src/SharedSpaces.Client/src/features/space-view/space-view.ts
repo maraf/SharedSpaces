@@ -38,6 +38,9 @@ import {
   getJournalCache,
   setJournalCache,
   clearJournalCache,
+  getCachedFile,
+  setCachedFile,
+  removeCachedFile,
   type PendingShareItem,
   type OfflineQueueItem,
 } from '../../lib/idb-storage';
@@ -60,6 +63,58 @@ export interface JoinedSpace {
   spaceId: string;
   spaceName: string;
   token: string;
+}
+
+function hasFileExtension(fileName: string): boolean {
+  const lastDot = fileName.lastIndexOf('.');
+  return lastDot > 0 && lastDot < fileName.length - 1;
+}
+
+function getImageExtension(contentType: string): string {
+  switch (contentType.toLowerCase()) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/bmp':
+      return 'bmp';
+    case 'image/svg+xml':
+      return 'svg';
+    case 'image/avif':
+      return 'avif';
+    case 'image/heic':
+      return 'heic';
+    case 'image/heif':
+      return 'heif';
+    case 'image/tiff':
+    case 'image/tif':
+      return 'tiff';
+    case 'image/png':
+    default:
+      return 'png';
+  }
+}
+
+function normalizeClipboardImageFiles(files: File[]): File[] {
+  const timestamp = Date.now();
+
+  return files.map((file, index) => {
+    const trimmedName = file.name.trim();
+    if (trimmedName && hasFileExtension(trimmedName)) {
+      return file;
+    }
+
+    const extension = getImageExtension(file.type);
+    const baseName = trimmedName.replace(/^\.+|\.+$/g, '')
+      || `pasted-image-${timestamp}-${index + 1}`;
+
+    return new File([file], `${baseName}.${extension}`, {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+  });
 }
 
 @customElement('space-view')
@@ -497,6 +552,11 @@ export class SpaceView extends BaseElement {
     // Remove item from list (silently ignore if not found)
     this.items = this.items.filter((item) => item.id !== payload.id);
 
+    // Drop any cached file blob for the deleted item.
+    if (this.serverUrl && this.spaceId) {
+      removeCachedFile(this.serverUrl, this.spaceId, payload.id).catch(() => {});
+    }
+
     // Update journal cache if enabled
     this.updateJournalCacheAfterChange();
     this.scheduleJournalVerification();
@@ -858,6 +918,31 @@ export class SpaceView extends BaseElement {
     }
   };
 
+  private getClipboardImageFiles(event: ClipboardEvent): File[] {
+    const items = event.clipboardData?.items;
+    if (!items) return [];
+
+    return Array.from(items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+  }
+
+  private handleTextareaPaste = async (event: ClipboardEvent) => {
+    const imageFiles = this.getClipboardImageFiles(event);
+    if (
+      imageFiles.length === 0
+      || !this.serverUrl
+      || !this.spaceId
+      || !this.token
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    await this.uploadFiles(normalizeClipboardImageFiles(imageFiles));
+  };
+
   private handleFileSelect = async (e: Event) => {
     const input = e.target as HTMLInputElement;
     const files = input.files;
@@ -1014,6 +1099,11 @@ export class SpaceView extends BaseElement {
     // Optimistic removal
     this.items = this.items.filter((i) => i.id !== item.id);
 
+    // Drop any cached file blob for the deleted item.
+    if (item.contentType === 'file') {
+      removeCachedFile(this.serverUrl, this.spaceId, item.id).catch(() => {});
+    }
+
     try {
       await deleteItem(this.serverUrl, this.spaceId, item.id, this.token);
     } catch (error) {
@@ -1030,16 +1120,39 @@ export class SpaceView extends BaseElement {
     }
   };
 
+  private getOrFetchFileBlob = async (item: SpaceItemResponse): Promise<Blob> => {
+    if (!this.serverUrl || !this.spaceId || !this.token) {
+      throw new Error('Cannot fetch file without an active session.');
+    }
+
+    try {
+      const cached = await getCachedFile(this.serverUrl, this.spaceId, item.id);
+      if (cached) return cached.blob;
+    } catch {
+      // Cache lookup failures should not block the download path.
+    }
+
+    const blob = await downloadFile(
+      this.serverUrl,
+      this.spaceId,
+      item.id,
+      this.token,
+    );
+
+    try {
+      await setCachedFile(this.serverUrl, this.spaceId, item.id, blob);
+    } catch {
+      // Best-effort cache writes; surfacing storage errors would not help the user.
+    }
+
+    return blob;
+  };
+
   private handleDownload = async (item: SpaceItemResponse) => {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
 
     try {
-      const blob = await downloadFile(
-        this.serverUrl,
-        this.spaceId,
-        item.id,
-        this.token,
-      );
+      const blob = await this.getOrFetchFileBlob(item);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1098,12 +1211,7 @@ export class SpaceView extends BaseElement {
     this.filePreviewText = null;
 
     try {
-      const blob = await downloadFile(
-        this.serverUrl,
-        this.spaceId,
-        item.id,
-        this.token,
-      );
+      const blob = await this.getOrFetchFileBlob(item);
 
       // Stale response — user clicked a different file while we were loading
       if (this._previewRequestId !== requestId) return;
@@ -1678,6 +1786,7 @@ export class SpaceView extends BaseElement {
             .value=${this.textInput}
             @input=${this.handleTextInput}
             @keydown=${this.handleTextKeydown}
+            @paste=${this.handleTextareaPaste}
             ?disabled=${this.isUploading}
             class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
@@ -1965,7 +2074,7 @@ export class SpaceView extends BaseElement {
       <!-- Center: Content -->
       <div class="min-w-0 flex-1">
         <p
-          class="cursor-pointer truncate text-sm font-medium text-slate-200 hover:text-slate-100"
+          class="cursor-pointer truncate text-slate-200 hover:text-slate-100"
           @click=${() => this.handleTextClick(item)}
           title="Click to view full text"
         >
