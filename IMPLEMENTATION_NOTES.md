@@ -18,7 +18,7 @@ This first shippable slice adds **web-only** large space mode with journal-based
 6. **Existing Behavior Preserved** - Non-opted-in spaces continue to use the original full-fetch approach
 
 ### Files Modified
-- `src/SharedSpaces.Client/src/lib/idb-storage.ts` - Added journal sync settings and cache stores (DB v2)
+- `src/SharedSpaces.Client/src/lib/idb-storage.ts` - Added journal sync settings and cache stores. The IndexedDB schema has since been bumped to DB v5 to add the viewed-files blob cache (`viewed-files`) and a sibling metadata store (`viewed-files-meta`) used for LRU eviction without rewriting blobs.
 - `src/SharedSpaces.Client/src/features/space-view/space-api.ts` - Added `getJournal()` and `updateJournalCheckpoint()` API calls
 - `src/SharedSpaces.Client/src/features/space-view/space-view.ts` - Implemented journal sync logic and UI toggle
 - Test files - Added 19 new tests covering settings, cache, and API calls
@@ -36,7 +36,7 @@ This first shippable slice adds **web-only** large space mode with journal-based
 1. **Background Sync Integration** - Not integrated with service worker background sync in this slice
 2. **CLI Support** - Journal sync is web-only; CLI still uses full fetch
 3. **Automatic Opt-in** - No logic to auto-enable for spaces over a certain size threshold
-4. **Cache Eviction** - No cache size limits or eviction policy yet
+4. **Cache Eviction** - The viewed-files blob cache now has LRU eviction with a dynamic budget (`clamp(navigator.storage quota * 0.5, 100 MB ... 500 MB)`) and best-effort `navigator.storage.persist()`. The journal/snapshot cache itself still has no size limits.
 5. **Migration Path** - No automatic migration for existing users
 6. **Performance Metrics** - No telemetry to measure sync performance improvements
 

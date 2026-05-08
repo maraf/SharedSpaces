@@ -3968,3 +3968,105 @@ describe('SpaceView - Background Sync Completion', () => {
     expect((element as any).syncMessage).toBe('');
   });
 });
+
+describe('SpaceView - Journal sync fallback on failure', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440099';
+  const token = 'test-jwt-token';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockSignalRConnection.state = 'Disconnected';
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await seedStoredSpaceToken(serverUrl, spaceId, token);
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('falls back to full fetch and starts SignalR when the journal endpoint fails', async () => {
+    // Enable journal sync for this space so loadData() takes the journal path.
+    const { setJournalSyncEnabled } = await import('../../lib/idb-storage');
+    await setJournalSyncEnabled(serverUrl, spaceId, true);
+
+    const fullFetchItem: SpaceItemResponse = {
+      id: 'full-fetch-item',
+      spaceId,
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'Loaded via full fetch fallback',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+    };
+
+    mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/journal/checkpoint')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+      }
+      if (url.endsWith('/journal')) {
+        // Simulate transient server-side failure on the journal endpoint.
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: async () => ({ message: 'boom' }),
+          text: async () => 'boom',
+        });
+      }
+      if (url.endsWith('/items')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [fullFetchItem],
+        });
+      }
+      // Default for /spaces/{id} info and anything else.
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: spaceId, name: 'Test Space' }),
+      });
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    document.body.appendChild(element);
+
+    await vi.waitFor(() => {
+      const items = (element as any).items as SpaceItemResponse[];
+      expect(items).toHaveLength(1);
+    });
+
+    // Items were loaded via the full-fetch fallback path.
+    const items = (element as any).items as SpaceItemResponse[];
+    expect(items[0].id).toBe('full-fetch-item');
+
+    // The /items endpoint must have been hit (full fetch path).
+    const itemsCalls = mockFetch.mock.calls.filter((call) =>
+      String(call[0]).endsWith('/items'),
+    );
+    expect(itemsCalls.length).toBeGreaterThanOrEqual(1);
+
+    // SignalR connection was started despite the journal failure.
+    await vi.waitFor(() => {
+      expect(mockSignalRConnection.start).toHaveBeenCalled();
+    });
+
+    // A warning was logged so the failure is observable.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Journal sync failed'),
+      expect.anything(),
+    );
+  });
+});

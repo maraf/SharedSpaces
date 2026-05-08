@@ -8,13 +8,14 @@ declare const self: ServiceWorkerGlobalScope;
 // Schema shared with src/lib/idb-storage.ts (app-side typed wrapper).
 // If you change DB_NAME, DB_VERSION, or store names, update both files.
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const PENDING_SHARES_STORE = 'pending-shares';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
 const AUTH_TOKENS_STORE = 'auth-tokens';
 const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
 const JOURNAL_CACHE_STORE = 'journal-cache';
 const VIEWED_FILES_STORE = 'viewed-files';
+const VIEWED_FILES_META_STORE = 'viewed-files-meta';
 
 interface OfflineQueueItem {
   id: string;
@@ -71,8 +72,11 @@ function openDB(): Promise<IDBDatabase> {
         db.createObjectStore(JOURNAL_CACHE_STORE, { keyPath: 'key' });
       }
       if (!db.objectStoreNames.contains(VIEWED_FILES_STORE)) {
-        const store = db.createObjectStore(VIEWED_FILES_STORE, { keyPath: 'key' });
-        store.createIndex('accessedAt', 'accessedAt');
+        db.createObjectStore(VIEWED_FILES_STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(VIEWED_FILES_META_STORE)) {
+        const metaStore = db.createObjectStore(VIEWED_FILES_META_STORE, { keyPath: 'key' });
+        metaStore.createIndex('accessedAt', 'accessedAt');
       }
     };
     request.onsuccess = () => resolve(request.result);

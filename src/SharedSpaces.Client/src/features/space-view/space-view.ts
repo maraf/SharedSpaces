@@ -24,6 +24,7 @@ import {
   getJournal,
   updateJournalCheckpoint,
   SpaceApiError,
+  type JournalResponse,
   type SpaceItemResponse,
   type SharedLinkResponse,
 } from './space-api';
@@ -441,18 +442,39 @@ export class SpaceView extends BaseElement {
       this.items = cache.items;
     }
 
-    // 2. Fetch journal delta
-    const journal = await getJournal(this.serverUrl, this.spaceId, this.token);
+    // 2. Fetch journal delta and apply it. If the journal endpoint or any of the
+    // journal-application steps fail (e.g. a transient 500), fall back to a full
+    // fetch so the space remains usable instead of leaving the user stuck without
+    // SignalR. Cache load above is intentionally outside the try/catch — IDB
+    // failures there should propagate as before.
+    try {
+      const journal = await getJournal(this.serverUrl, this.spaceId, this.token);
 
-    // 3. If full sync required, fall back to full fetch
-    if (journal.fullSyncRequired) {
-      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
-      this.evictCachedBlobsForRemovedItems(this.items, itemList);
-      this.items = itemList;
-      await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, itemList);
-      await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
-      return;
+      // 3. If full sync required, fall back to full fetch
+      if (journal.fullSyncRequired) {
+        const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+        this.evictCachedBlobsForRemovedItems(this.items, itemList);
+        this.items = itemList;
+        await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, itemList);
+        await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
+        return;
+      }
+
+      await this.applyJournalDelta(journal);
+    } catch (error) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        // Auth/not-found errors should surface to the caller so the standard
+        // error UI kicks in rather than silently masking them with a full fetch
+        // that will hit the same failure.
+        throw error;
+      }
+      console.warn('Journal sync failed; falling back to full fetch:', error);
+      await this.loadDataWithFullFetch();
     }
+  }
+
+  private async applyJournalDelta(journal: JournalResponse) {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
 
     // 4. Apply delta to cached items
     const itemMap = new Map(this.items.map((item) => [item.id, item]));

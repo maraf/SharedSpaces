@@ -44,7 +44,7 @@ beforeEach(async () => {
 
 async function seedPendingShares(items: PendingShareItem[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open('shared-spaces-db', 4);
+    const request = indexedDB.open('shared-spaces-db', 5);
 
     request.onsuccess = () => {
       const db = request.result;
@@ -431,6 +431,35 @@ describe('idb-storage', () => {
 
       expect(await getCachedFile(server, spaceId, 'item-1')).toBeDefined();
       expect(await getCachedFile(server, spaceId, 'item-2')).toBeDefined();
+    });
+
+    it('getCachedFile bumps accessedAt without rewriting the blob row', async () => {
+      // Warm the DB and seed an entry, then start tracking puts so we only
+      // observe the puts that the read path performs.
+      await setCachedFile(server, spaceId, 'item-1', makeBlob(100), 'image/png');
+
+      const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put');
+      try {
+        const first = await getCachedFile(server, spaceId, 'item-1');
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        const second = await getCachedFile(server, spaceId, 'item-1');
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        const third = await getCachedFile(server, spaceId, 'item-1');
+
+        expect(first).toBeDefined();
+        expect(second).toBeDefined();
+        expect(third).toBeDefined();
+        // accessedAt must advance — proves meta is being updated.
+        expect(third!.accessedAt).toBeGreaterThanOrEqual(second!.accessedAt);
+        expect(second!.accessedAt).toBeGreaterThanOrEqual(first!.accessedAt);
+
+        const targets = putSpy.mock.contexts.map((ctx) => (ctx as IDBObjectStore).name);
+        // Three reads should produce three meta puts and zero blob puts.
+        expect(targets.filter((n) => n === 'viewed-files-meta')).toHaveLength(3);
+        expect(targets.filter((n) => n === 'viewed-files')).toHaveLength(0);
+      } finally {
+        putSpy.mockRestore();
+      }
     });
 
     it('uses the dynamic budget from navigator.storage.estimate when none is provided', async () => {
