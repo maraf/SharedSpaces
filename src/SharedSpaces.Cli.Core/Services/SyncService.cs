@@ -20,11 +20,26 @@ public sealed class SyncService : IAsyncDisposable
     private DateTime _lastDisconnect = DateTime.MinValue;
     private PeriodicTimer? _pollingTimer;
     private Task? _pollingTask;
+    private PeriodicTimer? _passiveTimer;
+    private Task? _passiveTask;
     private CancellationTokenSource? _validationDelayCts;
     private Task _validationTask = Task.CompletedTask;
     private readonly object _validationLock = new();
 
     internal TimeSpan JournalValidationDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// When true, the service skips the SignalR hub and instead pulls the journal on a
+    /// fixed interval (see <see cref="PassiveInterval"/>). The local file watcher still
+    /// uploads outbound changes immediately.
+    /// </summary>
+    public bool Passive { get; set; }
+
+    /// <summary>
+    /// Interval between journal pulls when <see cref="Passive"/> is enabled.
+    /// Defaults to 5 minutes. Must be positive.
+    /// </summary>
+    public TimeSpan PassiveInterval { get; set; } = TimeSpan.FromMinutes(5);
 
     public SyncService(
         SharedSpacesApiClient apiClient,
@@ -62,10 +77,27 @@ public sealed class SyncService : IAsyncDisposable
         Console.WriteLine($"Starting sync for space {_spaceId}...");
         Console.WriteLine($"Local folder: {_localFolder}");
 
+        if (Passive)
+        {
+            if (PassiveInterval <= TimeSpan.Zero)
+                throw new InvalidOperationException("PassiveInterval must be positive.");
+
+            Console.WriteLine($"[Passive] Mode enabled — polling journal every {PassiveInterval.TotalSeconds:0.###}s. SignalR is disabled.");
+        }
+
         ScanExistingFiles();
         await InitialSyncAsync(ct);
-        await ConnectSignalRAsync(ct);
-        StartFileWatcher(ct);
+
+        if (Passive)
+        {
+            StartFileWatcher(ct);
+            StartPassivePolling(ct);
+        }
+        else
+        {
+            await ConnectSignalRAsync(ct);
+            StartFileWatcher(ct);
+        }
 
         try
         {
@@ -283,6 +315,45 @@ public sealed class SyncService : IAsyncDisposable
         Console.WriteLine("[Polling] Stopping HTTP polling.");
         _pollingTimer?.Dispose();
         _pollingTimer = null;
+    }
+
+    private void StartPassivePolling(CancellationToken ct)
+    {
+        if (_passiveTimer != null)
+            return;
+
+        var timer = new PeriodicTimer(PassiveInterval);
+        _passiveTimer = timer;
+        _passiveTask = PassivePollLoopAsync(timer, ct);
+    }
+
+    private async Task PassivePollLoopAsync(PeriodicTimer timer, CancellationToken ct)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                Console.WriteLine("[Passive] Polling journal for changes...");
+
+                try
+                {
+                    var journal = await _apiClient.GetJournalAsync(_serverUrl, _spaceId, _jwtToken, ct);
+                    await ApplyRemoteChangesAsync(journal, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[Passive] Poll failed: {ex.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal cancellation
+        }
     }
 
     internal void ScheduleJournalValidation(CancellationToken ct)
@@ -692,6 +763,8 @@ public sealed class SyncService : IAsyncDisposable
     {
         _watcher?.Dispose();
         StopPolling();
+        _passiveTimer?.Dispose();
+        _passiveTimer = null;
         lock (_validationLock)
         {
             try { _validationDelayCts?.Cancel(); } catch (ObjectDisposedException) { }
@@ -700,6 +773,10 @@ public sealed class SyncService : IAsyncDisposable
         if (_pollingTask != null)
         {
             try { await _pollingTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
+        }
+        if (_passiveTask != null)
+        {
+            try { await _passiveTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
         if (_hubConnection != null)
         {

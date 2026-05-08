@@ -128,6 +128,7 @@ The `sync` command keeps a local folder in sync with a space:
 - **Real-time updates** — Receives new files and deletions via SignalR (WebSocket)
 - **Local file watching** — Automatically uploads new files added to the folder
 - **Fallback polling** — Falls back to HTTP polling if the WebSocket connection drops
+- **Passive mode** — Pass `--passive` (with optional `--interval <seconds>`, default `300`) to skip SignalR and pull the journal on a fixed interval instead. Local uploads still happen immediately.
 - **Resilience** — Automatic reconnection with exponential backoff, atomic file writes, deduplication to prevent upload loops
 
 Press `Ctrl+C` to stop syncing gracefully.

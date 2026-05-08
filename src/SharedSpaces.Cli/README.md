@@ -69,6 +69,24 @@ The sync engine:
 
 Press `Ctrl+C` to stop syncing.
 
+#### Passive mode
+
+For use cases that don't need real-time updates (e.g., periodic snapshots, low-bandwidth or offline-mostly scenarios), pass `--passive` to skip the SignalR hub and pull the journal on a fixed interval instead:
+
+```bash
+# Default: pull journal every 5 minutes
+sharedspaces sync --space-id <guid> --folder ~/shared --passive
+
+# Custom interval (seconds, minimum 5)
+sharedspaces sync --space-id <guid> --folder ~/shared --passive --interval 60
+```
+
+In passive mode:
+- **No SignalR connection** is opened.
+- The journal is fetched once at startup and again on every tick at `--interval` seconds (default `300`).
+- Local file uploads still happen immediately via the file watcher — only inbound changes are delayed.
+- `--interval` is only valid together with `--passive`.
+
 ## Config
 
 Tokens are stored in `~/.sharedspaces/config.json`. Each entry contains only the JWT — all metadata (space ID, server URL, display name) is extracted from the token's claims at runtime.
