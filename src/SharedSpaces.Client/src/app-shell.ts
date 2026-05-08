@@ -5,7 +5,11 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { jwtDecode } from 'jwt-decode';
 
 import databaseGearSvg from 'bootstrap-icons/icons/database-gear.svg?raw';
+import gearSvg from 'bootstrap-icons/icons/gear.svg?raw';
 import inboxFillSvg from 'bootstrap-icons/icons/inbox-fill.svg?raw';
+
+// Smaller variants used in compact buttons / list rows.
+const gearSvg14 = gearSvg.replace(/width="16"/, 'width="14"').replace(/height="16"/, 'height="14"');
 
 // Precomputed SVG variant to avoid per-render string replacements
 const inboxFillSvg14 = inboxFillSvg.replace(/width="16"/, 'width="14"').replace(/height="16"/, 'height="14"');
@@ -71,6 +75,7 @@ export class AppShell extends BaseElement {
   @state() private pendingShareCount = 0;
   @state() private pendingShares: PendingShareItem[] = [];
   @state() private sheetOpen = false;
+  @state() private spaceSettingsOpen = false;
   @state() private sharedToken?: string;
   @state() private sharedApiUrl?: string;
   @state() private sharedError?: string;
@@ -203,6 +208,8 @@ export class AppShell extends BaseElement {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [oldSpaceId]: _, ...rest } = this.spaceConnectionStates;
         this.spaceConnectionStates = rest;
+        // Reset the space settings panel when switching to a different space.
+        this.spaceSettingsOpen = false;
       }
     }
   }
@@ -337,6 +344,18 @@ export class AppShell extends BaseElement {
     setLastSelectedSpace(entry.serverUrl, entry.spaceId);
   }
 
+  private toggleSpaceSettings(entry: SpaceEntry) {
+    const isCurrent =
+      this.view === 'space' && this.currentSpaceId === entry.spaceId;
+    if (!isCurrent) {
+      // Switch to that space and open the settings panel.
+      this.selectSpace(entry);
+      this.spaceSettingsOpen = true;
+    } else {
+      this.spaceSettingsOpen = !this.spaceSettingsOpen;
+    }
+  }
+
   private handleConnectionStateChange = (event: Event) => {
     const { spaceId, state } = (event as CustomEvent<{ spaceId: string; state: ConnectionState }>).detail;
     this.spaceConnectionStates = {
@@ -450,17 +469,38 @@ export class AppShell extends BaseElement {
                   </button>
                 `
                 : nothing}
-              ${this.spaces.map(
-                (entry) => html`
-                  <button
-                    @click=${() => this.selectSpace(entry)}
-                    class="${this.pillBase} ${this.view === 'space' && this.currentSpaceId === entry.spaceId ? this.pillActive : this.pillDefault} inline-flex items-center gap-1.5"
+              ${this.spaces.map((entry) => {
+                const isActive =
+                  this.view === 'space' &&
+                  this.currentSpaceId === entry.spaceId;
+                return html`
+                  <div
+                    class="inline-flex items-stretch rounded-full border ${isActive
+                      ? 'border-sky-500 bg-sky-950/60 text-sky-300'
+                      : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-600 hover:bg-slate-900'} text-xs font-medium transition"
                   >
-                    <span class="inline-block h-2 w-2 shrink-0 rounded-full ${this.dotColor(entry.spaceId)}"></span>
-                    ${entry.spaceName}
-                  </button>
-                `,
-              )}
+                    <button
+                      @click=${() => this.selectSpace(entry)}
+                      class="inline-flex items-center gap-1.5 rounded-l-full px-3 py-1.5"
+                    >
+                      <span class="inline-block h-2 w-2 shrink-0 rounded-full ${this.dotColor(entry.spaceId)}"></span>
+                      ${entry.spaceName}
+                    </button>
+                    <button
+                      @click=${() => this.toggleSpaceSettings(entry)}
+                      class="inline-flex items-center justify-center rounded-r-full border-l ${isActive
+                        ? 'border-sky-500/60 hover:bg-sky-900/40'
+                        : 'border-slate-700/80 hover:bg-slate-800'} px-2 py-1.5"
+                      title="Large space settings"
+                      aria-label="Large space settings for ${entry.spaceName}"
+                      aria-pressed=${isActive && this.spaceSettingsOpen}
+                      data-testid="space-settings-toggle"
+                    >
+                      <span class="inline-flex w-3.5 h-3.5">${unsafeHTML(gearSvg14)}</span>
+                    </button>
+                  </div>
+                `;
+              })}
               <button
                 @click=${() => { this.view = 'join'; }}
                 class="${this.pillBase} ${this.view === 'join' ? this.pillActive : this.pillDefault}"
@@ -661,33 +701,50 @@ export class AppShell extends BaseElement {
                 this.view === 'space' &&
                 this.currentSpaceId === entry.spaceId;
               return html`
-                <button
-                  class="w-full flex items-center gap-3 px-3 py-3 rounded-lg transition text-left ${isActive
+                <div
+                  class="flex w-full items-stretch rounded-lg transition ${isActive
                     ? 'bg-sky-950/40'
                     : 'hover:bg-slate-800/60 active:bg-slate-800'}"
-                  data-testid="sheet-space-item"
-                  @click=${() => {
-                    this.selectSpace(entry);
-                    this.sheetOpen = false;
-                  }}
                 >
-                  <span class="inline-flex w-5 shrink-0 items-center justify-center">
-                    <span
-                      class="inline-block h-2.5 w-2.5 rounded-full ${this.dotColor(entry.spaceId)}"
-                    ></span>
-                  </span>
-                  <span
-                    class="text-sm ${isActive
-                      ? 'text-sky-300 font-medium'
-                      : 'text-slate-200'}"
-                    >${entry.spaceName}</span
+                  <button
+                    class="flex flex-1 items-center gap-3 px-3 py-3 text-left"
+                    data-testid="sheet-space-item"
+                    @click=${() => {
+                      this.selectSpace(entry);
+                      this.sheetOpen = false;
+                    }}
                   >
-                  ${isActive
-                    ? html`<span class="ml-auto text-xs text-sky-400/70"
-                        >Active</span
-                      >`
-                    : nothing}
-                </button>
+                    <span class="inline-flex w-5 shrink-0 items-center justify-center">
+                      <span
+                        class="inline-block h-2.5 w-2.5 rounded-full ${this.dotColor(entry.spaceId)}"
+                      ></span>
+                    </span>
+                    <span
+                      class="text-sm ${isActive
+                        ? 'text-sky-300 font-medium'
+                        : 'text-slate-200'}"
+                      >${entry.spaceName}</span
+                    >
+                    ${isActive
+                      ? html`<span class="ml-auto text-xs text-sky-400/70"
+                          >Active</span
+                        >`
+                      : nothing}
+                  </button>
+                  <button
+                    class="flex shrink-0 items-center justify-center px-4 text-slate-400 hover:text-slate-200"
+                    data-testid="sheet-space-settings"
+                    title="Large space settings"
+                    aria-label="Large space settings for ${entry.spaceName}"
+                    aria-pressed=${isActive && this.spaceSettingsOpen}
+                    @click=${() => {
+                      this.toggleSpaceSettings(entry);
+                      this.sheetOpen = false;
+                    }}
+                  >
+                    <span class="inline-flex w-4 h-4">${unsafeHTML(gearSvg)}</span>
+                  </button>
+                </div>
               `;
             })}
           </div>
@@ -710,6 +767,7 @@ export class AppShell extends BaseElement {
           .spaceId=${this.currentSpaceId}
           .serverUrl=${this.currentServerUrl}
           .spaces=${this.spaces}
+          .showSettings=${this.spaceSettingsOpen}
         ></space-view>`;
       case 'pending-shares':
         return this.renderPendingSharesView();

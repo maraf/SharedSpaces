@@ -135,6 +135,9 @@ export class SpaceView extends BaseElement {
   @property({ type: Array })
   spaces: JoinedSpace[] = [];
 
+  @property({ type: Boolean, attribute: 'show-settings' })
+  showSettings = false;
+
   @state() private items: SpaceItemResponse[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
@@ -1600,7 +1603,7 @@ export class SpaceView extends BaseElement {
         ${this.renderOfflineBanner()}
         ${this.renderServerUnreachableBanner()}
         ${this.renderSyncStatus()}
-        ${this.renderJournalSyncToggle()}
+        ${this.showSettings ? this.renderJournalSyncToggle() : nothing}
         ${this.renderUploadArea()}
         ${this.renderPendingSharesSection()}
         ${this.renderPendingUploadsSection()}
