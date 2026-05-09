@@ -5,6 +5,8 @@ import {
   shareText,
   shareFile,
   transferItem,
+  getJournal,
+  updateJournalCheckpoint,
   SpaceApiError,
 } from './space-api';
 
@@ -363,6 +365,94 @@ describe('space-api', () => {
       ).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(SpaceApiError);
       expect((err as SpaceApiError).message).toMatch(/Network error/);
+    });
+  });
+
+  // --- Journal API ---
+
+  describe('getJournal', () => {
+    it('returns journal response on success', async () => {
+      const data = {
+        fullSyncRequired: false,
+        checkpoint: '2025-01-02T12:00:00Z',
+        addedOrUpdated: [{ id: 'item-1', spaceId: SPACE, memberId: 'member-1', contentType: 'text', content: 'Hello', fileSize: 0, sharedAt: '2025-01-02T00:00:00Z' }],
+        deleted: ['item-2'],
+      };
+      mockFetch({ json: async () => data });
+
+      const result = await getJournal(SERVER, SPACE, TOKEN);
+
+      expect(result).toEqual(data);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${SERVER}/v1/spaces/${SPACE}/journal`,
+        expect.objectContaining({
+          headers: { Authorization: `Bearer ${TOKEN}` },
+        }),
+      );
+    });
+
+    it('strips trailing slash from server URL', async () => {
+      mockFetch({ json: async () => ({ fullSyncRequired: false, checkpoint: '', addedOrUpdated: [], deleted: [] }) });
+      await getJournal(`${SERVER}/`, SPACE, TOKEN);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${SERVER}/v1/spaces/${SPACE}/journal`,
+        expect.anything(),
+      );
+    });
+
+    it('throws SpaceApiError on 401', async () => {
+      mockFetch({ ok: false, status: 401 });
+      await expect(getJournal(SERVER, SPACE, TOKEN)).rejects.toThrow(/Authentication failed/);
+    });
+
+    it('wraps network errors', async () => {
+      mockFetchReject(new Error('Network failure'));
+      await expect(getJournal(SERVER, SPACE, TOKEN)).rejects.toThrow(SpaceApiError);
+    });
+  });
+
+  describe('updateJournalCheckpoint', () => {
+    it('posts checkpoint to server', async () => {
+      mockFetch({ ok: true, status: 204 });
+
+      await updateJournalCheckpoint(SERVER, SPACE, '2025-01-02T12:00:00Z', TOKEN);
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe(`${SERVER}/v1/spaces/${SPACE}/journal/checkpoint`);
+      expect(call[1].method).toBe('POST');
+      const body = JSON.parse(call[1].body);
+      expect(body).toEqual({ checkpoint: '2025-01-02T12:00:00Z' });
+    });
+
+    it('includes Content-Type and Authorization headers', async () => {
+      mockFetch({ ok: true, status: 204 });
+
+      await updateJournalCheckpoint(SERVER, SPACE, '2025-01-02T12:00:00Z', TOKEN);
+
+      const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[1].headers).toEqual({
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+      });
+    });
+
+    it('strips trailing slash from server URL', async () => {
+      mockFetch({ ok: true, status: 204 });
+      await updateJournalCheckpoint(`${SERVER}/`, SPACE, '2025-01-02T12:00:00Z', TOKEN);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${SERVER}/v1/spaces/${SPACE}/journal/checkpoint`,
+        expect.anything(),
+      );
+    });
+
+    it('throws SpaceApiError on 401', async () => {
+      mockFetch({ ok: false, status: 401 });
+      await expect(updateJournalCheckpoint(SERVER, SPACE, '2025-01-02T12:00:00Z', TOKEN)).rejects.toThrow(/Authentication failed/);
+    });
+
+    it('wraps network errors', async () => {
+      mockFetchReject(new Error('Network failure'));
+      await expect(updateJournalCheckpoint(SERVER, SPACE, '2025-01-02T12:00:00Z', TOKEN)).rejects.toThrow(SpaceApiError);
     });
   });
 });

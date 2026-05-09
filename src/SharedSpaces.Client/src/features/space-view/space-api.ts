@@ -316,3 +316,55 @@ export async function transferItem(
     wrapNetworkError(error);
   }
 }
+
+// --- Journal API ---
+
+export interface JournalResponse {
+  fullSyncRequired: boolean;
+  checkpoint: string;
+  addedOrUpdated: SpaceItemResponse[];
+  deleted: string[];
+}
+
+export async function getJournal(
+  serverUrl: string,
+  spaceId: string,
+  token: string,
+): Promise<JournalResponse> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/journal`,
+      { headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+    return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function updateJournalCheckpoint(
+  serverUrl: string,
+  spaceId: string,
+  checkpoint: string,
+  token: string,
+): Promise<void> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/journal/checkpoint`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ checkpoint }),
+      },
+    );
+    await throwForFailed(response);
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
