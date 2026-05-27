@@ -697,6 +697,21 @@ test.describe('Screenshot Capture', () => {
     });
 
     test(`space view - share link qr popup - ${vp.name}`, async ({ page }) => {
+      await page.addInitScript(() => {
+        (window as any).__qrDataUrl = '';
+        window.open = () => ({
+          location: {
+            get href() {
+              return (window as any).__qrDataUrl;
+            },
+            set href(value: string) {
+              (window as any).__qrDataUrl = value;
+            },
+          },
+          close() {},
+        } as unknown as Window);
+      });
+
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
       await page.reload();
@@ -717,14 +732,18 @@ test.describe('Screenshot Capture', () => {
       await createLinkButton.click();
       await page.waitForSelector('button[aria-label="Show link QR code"]', { timeout: 5_000 });
 
-      const popupPromise = page.waitForEvent('popup');
       await page.locator('button[aria-label="Show link QR code"]').first().click();
-      const popup = await popupPromise;
-      await popup.waitForLoadState('domcontentloaded');
-      await popup.waitForTimeout(300);
+      await page.waitForFunction(
+        () => (window as any).__qrDataUrl?.startsWith('data:image/'),
+        { timeout: 10_000 },
+      );
+      const qrDataUrl = await page.evaluate(() => (window as any).__qrDataUrl as string);
 
-      await capture(popup, 'space-share-qr', vp);
-      await popup.close();
+      await page.goto(qrDataUrl);
+      await page.waitForLoadState('load');
+      await page.waitForTimeout(500);
+
+      await capture(page, 'space-share-qr', vp);
     });
 
     test(`admin view - invitation modal - ${vp.name}`, async ({ page }) => {
