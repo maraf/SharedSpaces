@@ -3927,8 +3927,8 @@ describe('SpaceView - Shared Link QR Action', () => {
       width: 512,
       margin: 1,
     });
-    const qrImage = element.shadowRoot?.querySelector('img[alt="Shared link QR code"]') as HTMLImageElement | null;
-    expect(qrImage?.src).toBe('data:image/png;base64,qr-code');
+    expect((element as any).shareModalQrOpenLinkId).toBe('link-1');
+    expect((element as any).shareModalQrCodeDataUrls['link-1']).toBe('data:image/png;base64,qr-code');
   });
 
   it('toggles the inline QR display when clicked again', async () => {

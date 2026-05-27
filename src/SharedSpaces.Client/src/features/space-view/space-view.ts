@@ -1592,7 +1592,8 @@ export class SpaceView extends BaseElement {
       if (this.shareModalQrGeneratingLinkId === link.id) {
         this.shareModalQrGeneratingLinkId = null;
       }
-      const { [link.id]: _, ...remainingQrCodes } = this.shareModalQrCodeDataUrls;
+      const { [link.id]: removedQrCode, ...remainingQrCodes } = this.shareModalQrCodeDataUrls;
+      void removedQrCode;
       this.shareModalQrCodeDataUrls = remainingQrCodes;
     } catch (error) {
       if (error instanceof SpaceApiError) {
