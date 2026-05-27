@@ -68,12 +68,12 @@ vi.mock('@microsoft/signalr', () => {
   };
 });
 
-const qrCodeMocks = vi.hoisted(() => ({
+const mockQrCode = vi.hoisted(() => ({
   toDataURL: vi.fn(),
 }));
 
 vi.mock('qrcode', () => ({
-  toDataURL: qrCodeMocks.toDataURL,
+  toDataURL: mockQrCode.toDataURL,
 }));
 
 describe('SpaceView - Deduplication Logic', () => {
@@ -3873,7 +3873,7 @@ describe('SpaceView - Shared Link QR Action', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    qrCodeMocks.toDataURL.mockResolvedValue('data:image/png;base64,qr-code');
+    mockQrCode.toDataURL.mockResolvedValue('data:image/png;base64,qr-code');
     element = document.createElement('space-view') as SpaceView;
     (element as any).serverUrl = 'https://api.example.com';
   });
@@ -3914,12 +3914,35 @@ describe('SpaceView - Shared Link QR Action', () => {
     await (element as any).handleShowShareLinkQrCode(testLink);
 
     const expectedShareUrl = buildShareUrl(testLink.token, 'https://api.example.com');
-    expect(qrCodeMocks.toDataURL).toHaveBeenCalledWith(expectedShareUrl, {
+    expect(mockQrCode.toDataURL).toHaveBeenCalledWith(expectedShareUrl, {
       width: 512,
       margin: 1,
     });
     expect(openSpy).toHaveBeenCalledWith('', '_blank', 'noopener,noreferrer');
     expect(openedWindow.location.href).toBe('data:image/png;base64,qr-code');
+  });
+
+  it('shows popup guidance when the browser blocks opening a new tab', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+
+    await (element as any).handleShowShareLinkQrCode(testLink);
+
+    expect((element as any).shareModalError).toBe('Failed to open QR code. Please allow popups for this site.');
+    expect(mockQrCode.toDataURL).not.toHaveBeenCalled();
+  });
+
+  it('shows QR generation error and closes the opened tab when QR generation fails', async () => {
+    const openedWindow = {
+      location: { href: '' },
+      close: vi.fn(),
+    } as unknown as Window;
+    vi.spyOn(window, 'open').mockReturnValue(openedWindow);
+    mockQrCode.toDataURL.mockRejectedValueOnce(new Error('QR failed'));
+
+    await (element as any).handleShowShareLinkQrCode(testLink);
+
+    expect(openedWindow.close).toHaveBeenCalledOnce();
+    expect((element as any).shareModalError).toBe('Failed to generate QR code. Please try again.');
   });
 });
 

@@ -1508,7 +1508,7 @@ export class SpaceView extends BaseElement {
 
     const qrWindow = window.open('', '_blank', 'noopener,noreferrer');
     if (!qrWindow) {
-      this.shareModalError = 'Failed to open QR code.';
+      this.shareModalError = 'Failed to open QR code. Please allow popups for this site.';
       return;
     }
 
@@ -1520,7 +1520,7 @@ export class SpaceView extends BaseElement {
       qrWindow.location.href = qrCodeDataUrl;
     } catch {
       qrWindow.close();
-      this.shareModalError = 'Failed to generate QR code.';
+      this.shareModalError = 'Failed to generate QR code. Please try again.';
     }
   };
 
