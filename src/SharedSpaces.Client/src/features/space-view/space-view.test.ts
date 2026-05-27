@@ -3904,45 +3904,48 @@ describe('SpaceView - Shared Link QR Action', () => {
     expect(element.shadowRoot?.querySelector('[aria-label="Show link QR code"]')).not.toBeNull();
   });
 
-  it('opens the generated QR image in a new tab for the shared URL', async () => {
-    const openedWindow = {
-      location: { href: '' },
-      close: vi.fn(),
-    } as unknown as Window;
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(openedWindow);
+  it('shows the generated QR image inline for the shared URL', async () => {
+    (element as any).isLoading = false;
+    (element as any).shareModalItem = {
+      id: 'item-1',
+      spaceId: 'space-1',
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'hello',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+    };
+    (element as any).shareModalLinks = [testLink];
+    document.body.appendChild(element);
+    await element.updateComplete;
 
-    await (element as any).handleShowShareLinkQrCode(testLink);
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+    await element.updateComplete;
 
     const expectedShareUrl = buildShareUrl(testLink.token, 'https://api.example.com');
     expect(mockQrCode.toDataURL).toHaveBeenCalledWith(expectedShareUrl, {
       width: 512,
       margin: 1,
     });
-    expect(openSpy).toHaveBeenCalledWith('', '_blank', 'noopener,noreferrer');
-    expect(openedWindow.location.href).toBe('data:image/png;base64,qr-code');
+    const qrImage = element.shadowRoot?.querySelector('img[alt="Shared link QR code"]') as HTMLImageElement | null;
+    expect(qrImage?.src).toBe('data:image/png;base64,qr-code');
   });
 
-  it('shows popup guidance when the browser blocks opening a new tab', async () => {
-    vi.spyOn(window, 'open').mockReturnValue(null);
+  it('toggles the inline QR display when clicked again', async () => {
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+    expect((element as any).shareModalQrOpenLinkId).toBe('link-1');
 
-    await (element as any).handleShowShareLinkQrCode(testLink);
-
-    expect((element as any).shareModalError).toBe('Failed to open QR code. Please allow popups for this site.');
-    expect(mockQrCode.toDataURL).not.toHaveBeenCalled();
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+    expect((element as any).shareModalQrOpenLinkId).toBeNull();
   });
 
-  it('shows QR generation error and closes the opened tab when QR generation fails', async () => {
-    const openedWindow = {
-      location: { href: '' },
-      close: vi.fn(),
-    } as unknown as Window;
-    vi.spyOn(window, 'open').mockReturnValue(openedWindow);
+  it('shows QR generation error when inline QR generation fails', async () => {
     mockQrCode.toDataURL.mockRejectedValueOnce(new Error('QR failed'));
 
-    await (element as any).handleShowShareLinkQrCode(testLink);
+    await (element as any).handleToggleShareLinkQrCode(testLink);
 
-    expect(openedWindow.close).toHaveBeenCalledOnce();
     expect((element as any).shareModalError).toBe('Failed to generate QR code. Please try again.');
+    expect((element as any).shareModalQrOpenLinkId).toBeNull();
   });
 });
 
