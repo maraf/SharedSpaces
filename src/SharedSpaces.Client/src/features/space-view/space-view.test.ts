@@ -7,6 +7,7 @@ import type { ItemAddedPayload } from '../../lib/signalr-client';
 import type { SpaceItemResponse } from './space-api';
 import { clearAllCachedFiles, clearStoredAuthTokens } from '../../lib/idb-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
+import { buildShareUrl } from '../../lib/share-link';
 
 async function resetTokenStorageState(): Promise<void> {
   await waitForTokenMirrorWritesForTests();
@@ -66,6 +67,14 @@ vi.mock('@microsoft/signalr', () => {
     },
   };
 });
+
+const qrCodeMocks = vi.hoisted(() => ({
+  toDataURL: vi.fn(),
+}));
+
+vi.mock('qrcode', () => ({
+  toDataURL: qrCodeMocks.toDataURL,
+}));
 
 describe('SpaceView - Deduplication Logic', () => {
   const serverUrl = 'http://localhost:5000';
@@ -3846,6 +3855,71 @@ describe('SpaceView - File Preview Modal', () => {
       expect((element as any).filePreviewError).toBe('');
       expect((element as any).filePreviewUrl).toBe('blob:ok');
     });
+  });
+});
+
+describe('SpaceView - Shared Link QR Action', () => {
+  let element: SpaceView;
+
+  const testLink = {
+    id: 'link-1',
+    token: '550e8400-e29b-41d4-a716-446655440000',
+    spaceId: 'space-1',
+    itemId: 'item-1',
+    createdBy: 'member-1',
+    createdAt: new Date().toISOString(),
+    name: 'Test link',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    qrCodeMocks.toDataURL.mockResolvedValue('data:image/png;base64,qr-code');
+    element = document.createElement('space-view') as SpaceView;
+    (element as any).serverUrl = 'https://api.example.com';
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.remove();
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('renders a QR action button for each shared link in the share modal', async () => {
+    (element as any).isLoading = false;
+    (element as any).shareModalItem = {
+      id: 'item-1',
+      spaceId: 'space-1',
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'hello',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+    };
+    (element as any).shareModalLinks = [testLink];
+
+    document.body.appendChild(element);
+    await element.updateComplete;
+
+    expect(element.shadowRoot?.querySelector('[aria-label="Show link QR code"]')).not.toBeNull();
+  });
+
+  it('opens the generated QR image in a new tab for the shared URL', async () => {
+    const openedWindow = {
+      location: { href: '' },
+      close: vi.fn(),
+    } as unknown as Window;
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(openedWindow);
+
+    await (element as any).handleShowShareLinkQrCode(testLink);
+
+    const expectedShareUrl = buildShareUrl(testLink.token, 'https://api.example.com');
+    expect(qrCodeMocks.toDataURL).toHaveBeenCalledWith(expectedShareUrl, {
+      width: 512,
+      margin: 1,
+    });
+    expect(openSpy).toHaveBeenCalledWith('', '_blank', 'noopener,noreferrer');
+    expect(openedWindow.location.href).toBe('data:image/png;base64,qr-code');
   });
 });
 

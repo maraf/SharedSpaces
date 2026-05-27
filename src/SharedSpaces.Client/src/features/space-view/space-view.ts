@@ -62,6 +62,7 @@ import {
   processOfflineQueue,
 } from '../../lib/offline-sync';
 import { buildShareUrl } from '../../lib/share-link';
+import { toDataURL } from 'qrcode';
 
 export interface JoinedSpace {
   serverUrl: string;
@@ -1500,6 +1501,29 @@ export class SpaceView extends BaseElement {
     }, 1500);
   };
 
+  private handleShowShareLinkQrCode = async (link: SharedLinkResponse) => {
+    const shareUrl = this.serverUrl
+      ? buildShareUrl(link.token, this.serverUrl)
+      : `${window.location.origin}/shared/${link.token}`;
+
+    const qrWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (!qrWindow) {
+      this.shareModalError = 'Failed to open QR code.';
+      return;
+    }
+
+    try {
+      const qrCodeDataUrl = await toDataURL(shareUrl, {
+        width: 512,
+        margin: 1,
+      });
+      qrWindow.location.href = qrCodeDataUrl;
+    } catch {
+      qrWindow.close();
+      this.shareModalError = 'Failed to generate QR code.';
+    }
+  };
+
   private shareOrCopyLink = async (link: SharedLinkResponse) => {
     const shareUrl = this.serverUrl
       ? buildShareUrl(link.token, this.serverUrl)
@@ -2598,6 +2622,14 @@ export class SpaceView extends BaseElement {
               ${isCopied
                 ? html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
                 : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+            </button>
+            <button
+              @click=${() => this.handleShowShareLinkQrCode(link)}
+              class="cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-sky-400"
+              title="Show QR code"
+              aria-label="Show link QR code"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"></rect><rect x="16" y="3" width="5" height="5"></rect><rect x="3" y="16" width="5" height="5"></rect><path d="M21 16h-3v3h3v2h-5v-5h5v-2z"></path><path d="M11 3h2v2h-2z"></path><path d="M11 7h2v2h-2z"></path><path d="M11 11h2v2h-2z"></path><path d="M3 11h2v2H3z"></path><path d="M7 11h2v2H7z"></path></svg>
             </button>
             <button
               @click=${() => { this.shareModalDeleteConfirmId = link.id; }}
