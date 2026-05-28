@@ -503,7 +503,7 @@ export class AppShell extends BaseElement {
               })}
               <button
                 @click=${() => { this.view = 'join'; }}
-                class="${this.pillBase} ${this.view === 'join' ? this.pillActive : this.pillDefault}"
+                class="rounded-full border px-1.5 py-1.5 text-xs font-medium transition aspect-square inline-flex items-center justify-center ${this.view === 'join' ? this.pillActive : this.pillDefault}"
                 aria-label="Join a space"
               >
                 +
