@@ -7,6 +7,7 @@ import { jwtDecode } from 'jwt-decode';
 import databaseGearSvg from 'bootstrap-icons/icons/database-gear.svg?raw';
 import gearSvg from 'bootstrap-icons/icons/gear.svg?raw';
 import inboxFillSvg from 'bootstrap-icons/icons/inbox-fill.svg?raw';
+import plusSvg from 'bootstrap-icons/icons/plus.svg?raw';
 
 // Smaller variants used in compact buttons / list rows.
 const gearSvg14 = gearSvg.replace(/width="16"/, 'width="14"').replace(/height="16"/, 'height="14"');
@@ -506,7 +507,7 @@ export class AppShell extends BaseElement {
                 class="${this.pillBase} ${this.view === 'join' ? this.pillActive : this.pillDefault}"
                 aria-label="Join a space"
               >
-                +
+                ${unsafeHTML(plusSvg)}
               </button>
 
               <span class="flex-1"></span>
