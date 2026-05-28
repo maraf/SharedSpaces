@@ -696,6 +696,34 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space-share-modal', vp, { fullPage: false });
     });
 
+    test(`space view - share link qr inline - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      const manageBtn = page.locator('button[aria-label="Shared links"]').first();
+      await manageBtn.click();
+      await page.waitForFunction(
+        () => document.querySelector('h3')?.textContent?.includes('Shared links'),
+        { timeout: 5_000 },
+      );
+
+      const createLinkButton = page.locator('button:has-text("Create new link")');
+      await createLinkButton.click();
+      await page.waitForSelector('button[aria-label="Show link QR code"]', { timeout: 5_000 });
+
+      await page.locator('button[aria-label="Show link QR code"]').first().click();
+      await page.waitForSelector('img[alt="Shared link QR code"]', { timeout: 10_000 });
+      await page.waitForTimeout(300);
+
+      await capture(page, 'space-share-qr', vp);
+    });
+
     test(`admin view - invitation modal - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);

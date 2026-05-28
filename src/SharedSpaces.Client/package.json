@@ -23,7 +23,8 @@
     "bootstrap-icons": "^1.13.1",
     "idb": "^8.0.3",
     "jwt-decode": "^4.0.0",
-    "lit": "^3.3.2"
+    "lit": "^3.3.2",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

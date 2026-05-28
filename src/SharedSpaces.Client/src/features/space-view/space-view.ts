@@ -62,6 +62,7 @@ import {
   processOfflineQueue,
 } from '../../lib/offline-sync';
 import { buildShareUrl } from '../../lib/share-link';
+import { toDataURL } from 'qrcode';
 
 export interface JoinedSpace {
   serverUrl: string;
@@ -172,6 +173,9 @@ export class SpaceView extends BaseElement {
   @state() private shareModalCreating = false;
   @state() private shareModalDeleteConfirmId: string | null = null;
   @state() private shareCopiedLinkId: string | null = null;
+  @state() private shareModalQrOpenLinkId: string | null = null;
+  @state() private shareModalQrGeneratingLinkId: string | null = null;
+  @state() private shareModalQrCodeDataUrls: Record<string, string> = {};
   @state() private shareModalName = '';
   @state() private openMenuItemId: string | null = null;
   @state() private journalSyncEnabled = false;
@@ -1428,6 +1432,9 @@ export class SpaceView extends BaseElement {
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
     this.shareCopiedLinkId = null;
+    this.shareModalQrOpenLinkId = null;
+    this.shareModalQrGeneratingLinkId = null;
+    this.shareModalQrCodeDataUrls = {};
 
     try {
       this.shareModalLinks = await getSharedLinks(
@@ -1453,6 +1460,9 @@ export class SpaceView extends BaseElement {
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
     this.shareCopiedLinkId = null;
+    this.shareModalQrOpenLinkId = null;
+    this.shareModalQrGeneratingLinkId = null;
+    this.shareModalQrCodeDataUrls = {};
     this.shareModalName = '';
   };
 
@@ -1500,6 +1510,45 @@ export class SpaceView extends BaseElement {
     }, 1500);
   };
 
+  private handleToggleShareLinkQrCode = async (link: SharedLinkResponse) => {
+    if (this.shareModalQrOpenLinkId === link.id) {
+      this.shareModalQrOpenLinkId = null;
+      return;
+    }
+
+    this.shareModalQrOpenLinkId = link.id;
+    this.shareModalError = '';
+
+    if (this.shareModalQrCodeDataUrls[link.id]) {
+      return;
+    }
+
+    const shareUrl = this.serverUrl
+      ? buildShareUrl(link.token, this.serverUrl)
+      : `${window.location.origin}/shared/${link.token}`;
+
+    try {
+      this.shareModalQrGeneratingLinkId = link.id;
+      const qrCodeDataUrl = await toDataURL(shareUrl, {
+        width: 512,
+        margin: 1,
+      });
+      this.shareModalQrCodeDataUrls = {
+        ...this.shareModalQrCodeDataUrls,
+        [link.id]: qrCodeDataUrl,
+      };
+    } catch {
+      this.shareModalError = 'Failed to generate QR code. Please try again.';
+      if (this.shareModalQrOpenLinkId === link.id) {
+        this.shareModalQrOpenLinkId = null;
+      }
+    } finally {
+      if (this.shareModalQrGeneratingLinkId === link.id) {
+        this.shareModalQrGeneratingLinkId = null;
+      }
+    }
+  };
+
   private shareOrCopyLink = async (link: SharedLinkResponse) => {
     const shareUrl = this.serverUrl
       ? buildShareUrl(link.token, this.serverUrl)
@@ -1537,6 +1586,15 @@ export class SpaceView extends BaseElement {
       );
       this.shareModalLinks = this.shareModalLinks.filter((l) => l.id !== link.id);
       this.shareModalDeleteConfirmId = null;
+      if (this.shareModalQrOpenLinkId === link.id) {
+        this.shareModalQrOpenLinkId = null;
+      }
+      if (this.shareModalQrGeneratingLinkId === link.id) {
+        this.shareModalQrGeneratingLinkId = null;
+      }
+      const { [link.id]: removedQrCode, ...remainingQrCodes } = this.shareModalQrCodeDataUrls;
+      void removedQrCode;
+      this.shareModalQrCodeDataUrls = remainingQrCodes;
     } catch (error) {
       if (error instanceof SpaceApiError) {
         this.shareModalError = error.message;
@@ -2560,6 +2618,9 @@ export class SpaceView extends BaseElement {
       : `${window.location.origin}/shared/${link.token}`;
     const isCopied = this.shareCopiedLinkId === link.id;
     const isConfirming = this.shareModalDeleteConfirmId === link.id;
+    const isQrVisible = this.shareModalQrOpenLinkId === link.id;
+    const isQrGenerating = this.shareModalQrGeneratingLinkId === link.id;
+    const qrCodeDataUrl = this.shareModalQrCodeDataUrls[link.id];
 
     return html`
       <div class="relative overflow-hidden rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2.5">
@@ -2600,6 +2661,17 @@ export class SpaceView extends BaseElement {
                 : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
             </button>
             <button
+              @click=${() => this.handleToggleShareLinkQrCode(link)}
+              ?disabled=${isQrGenerating}
+              class="cursor-pointer rounded p-1.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${isQrVisible
+                ? 'text-sky-400'
+                : 'text-slate-500 hover:text-sky-400'}"
+              title=${isQrVisible ? 'Hide QR code' : 'Show QR code'}
+              aria-label=${isQrVisible ? 'Hide link QR code' : 'Show link QR code'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"></rect><rect x="16" y="3" width="5" height="5"></rect><rect x="3" y="16" width="5" height="5"></rect><path d="M21 16h-3v3h3v2h-5v-5h5v-2z"></path><path d="M11 3h2v2h-2z"></path><path d="M11 7h2v2h-2z"></path><path d="M11 11h2v2h-2z"></path><path d="M3 11h2v2H3z"></path><path d="M7 11h2v2H7z"></path></svg>
+            </button>
+            <button
               @click=${() => { this.shareModalDeleteConfirmId = link.id; }}
               class="cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-red-400"
               title="Delete link"
@@ -2609,6 +2681,25 @@ export class SpaceView extends BaseElement {
             </button>
           </div>
         </div>
+        ${isQrVisible
+          ? html`
+              <div class="mt-3 border-t border-slate-700/60 pt-3">
+                ${isQrGenerating
+                  ? html`<p class="text-center text-xs text-slate-400">Generating QR code…</p>`
+                  : qrCodeDataUrl
+                    ? html`
+                        <div class="flex justify-center">
+                          <img
+                            src=${qrCodeDataUrl}
+                            alt="Shared link QR code"
+                            class="h-40 w-40 rounded-md border border-slate-700 bg-white p-2"
+                          />
+                        </div>
+                      `
+                    : nothing}
+              </div>
+            `
+          : nothing}
         ${isConfirming
           ? html`
               <div class="absolute inset-0 z-10 flex items-center justify-center gap-3 rounded-lg bg-slate-900/95 px-3 py-2.5 backdrop-blur-sm">
