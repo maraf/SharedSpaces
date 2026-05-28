@@ -11,7 +11,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
-const CLIENT_DB_VERSION = 2;
+const CLIENT_DB_VERSION = 5;
 
 interface ViewportSpec {
   name: string;
@@ -564,7 +564,7 @@ test.describe('Screenshot Capture', () => {
             const db = request.result;
             const tx = db.transaction('offline-queue', 'readwrite');
             const store = tx.objectStore('offline-queue');
-            
+
             store.put({
               id: crypto.randomUUID(),
               itemId: crypto.randomUUID(),
@@ -724,6 +724,34 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(500);
 
       await capture(page, 'space-share-modal', vp, { fullPage: false });
+    });
+
+    test(`space view - share link qr inline - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      const manageBtn = page.locator('button[aria-label="Shared links"]').first();
+      await manageBtn.click();
+      await page.waitForFunction(
+        () => document.querySelector('h3')?.textContent?.includes('Shared links'),
+        { timeout: 5_000 },
+      );
+
+      const createLinkButton = page.locator('button:has-text("Create new link")');
+      await createLinkButton.click();
+      await page.waitForSelector('button[aria-label="Show link QR code"]', { timeout: 5_000 });
+
+      await page.locator('button[aria-label="Show link QR code"]').first().click();
+      await page.waitForSelector('img[alt="Shared link QR code"]', { timeout: 10_000 });
+      await page.waitForTimeout(300);
+
+      await capture(page, 'space-share-qr', vp);
     });
 
     test(`admin view - invitation modal - ${vp.name}`, async ({ page }) => {

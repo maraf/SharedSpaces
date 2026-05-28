@@ -21,7 +21,10 @@ import {
   createSharedLink,
   getSharedLinks,
   deleteSharedLink,
+  getJournal,
+  updateJournalCheckpoint,
   SpaceApiError,
+  type JournalResponse,
   type SpaceItemResponse,
   type SharedLinkResponse,
 } from './space-api';
@@ -31,8 +34,20 @@ import {
   clearOfflineQueueForSpace,
   getOfflineQueueForSpace,
   removeFromOfflineQueue,
+  getJournalSyncEnabled,
+  setJournalSyncEnabled,
+  getJournalCache,
+  setJournalCache,
+  clearJournalCache,
+  getCachedFile,
+  setCachedFile,
+  removeCachedFile,
+  clearCachedFilesForSpace,
+  getViewedFilesStorageStatus,
+  requestPersistentStorage,
   type PendingShareItem,
   type OfflineQueueItem,
+  type StorageBudgetSnapshot,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
 import { getFileTypeIcon, getTextItemIcon } from '../../lib/file-icons';
@@ -47,6 +62,7 @@ import {
   processOfflineQueue,
 } from '../../lib/offline-sync';
 import { buildShareUrl } from '../../lib/share-link';
+import { toDataURL } from 'qrcode';
 
 export interface JoinedSpace {
   serverUrl: string;
@@ -128,6 +144,9 @@ export class SpaceView extends BaseElement {
   @property({ type: Array })
   spaces: JoinedSpace[] = [];
 
+  @property({ type: Boolean, attribute: 'show-settings' })
+  showSettings = false;
+
   @state() private items: SpaceItemResponse[] = [];
   @state() private isLoading = true;
   @state() private errorMessage = '';
@@ -161,11 +180,18 @@ export class SpaceView extends BaseElement {
   @state() private shareModalCreating = false;
   @state() private shareModalDeleteConfirmId: string | null = null;
   @state() private shareCopiedLinkId: string | null = null;
+  @state() private shareModalQrOpenLinkId: string | null = null;
+  @state() private shareModalQrGeneratingLinkId: string | null = null;
+  @state() private shareModalQrCodeDataUrls: Record<string, string> = {};
   @state() private shareModalName = '';
   @state() private openMenuItemId: string | null = null;
   @state() private fileRenameDrafts: FileRenameDraft[] = [];
   @state() private fileRenamePendingTextShares: PendingShareItem[] = [];
   @state() private fileRenameError = '';
+  @state() private journalSyncEnabled = false;
+  @state() private journalSyncLoading = false;
+  @state() private cacheStorageStatus: StorageBudgetSnapshot | null = null;
+  @state() private storagePersisted = false;
 
   private _previewRequestId = 0;
 
@@ -174,6 +200,9 @@ export class SpaceView extends BaseElement {
   private signalRClient?: SignalRClient;
   private pendingItemIds = new Set<string>();
   private dragCounter = 0;
+  private journalVerifyTimer: number | null = null;
+  private journalVerificationInFlight: Promise<void> | null = null;
+  private journalVerificationRequested = false;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -181,13 +210,17 @@ export class SpaceView extends BaseElement {
     if (!synced) {
       this.syncOfflineQueue();
     }
+    this.scheduleJournalVerification();
   };
   private handleOffline = () => { this.isOnline = false; };
   private handleVisibilityChange = () => {
-    if (document.visibilityState === 'visible' && this.connectionState === 'disconnected') {
-      this.startSignalR().catch((error) => {
-        console.error('Failed to start SignalR after visibility change', error);
-      });
+    if (document.visibilityState === 'visible') {
+      this.scheduleJournalVerification();
+      if (this.connectionState === 'disconnected') {
+        this.startSignalR().catch((error) => {
+          console.error('Failed to start SignalR after visibility change', error);
+        });
+      }
     }
   };
   private handleSwMessage = (event: MessageEvent) => {
@@ -277,6 +310,10 @@ export class SpaceView extends BaseElement {
     document.removeEventListener('keydown', this.handleKebabKeydown);
     document.removeEventListener('scroll', this.handleKebabScroll, { capture: true });
     globalThis.removeEventListener('resize', this.handleKebabScroll);
+    if (this.journalVerifyTimer !== null) {
+      globalThis.clearTimeout(this.journalVerifyTimer);
+      this.journalVerifyTimer = null;
+    }
   }
 
   private resolveToken(): Promise<string | undefined> {
@@ -335,11 +372,15 @@ export class SpaceView extends BaseElement {
     await Promise.all([
       this.refreshOfflineQueue(),
       this.loadPendingShares(),
+      this.loadJournalSyncSetting(),
     ]);
 
     try {
-      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
-      this.items = itemList;
+      if (this.journalSyncEnabled) {
+        await this.loadDataWithJournalSync();
+      } else {
+        await this.loadDataWithFullFetch();
+      }
 
       // Start SignalR connection after successful data load
       await this.startSignalR();
@@ -366,6 +407,175 @@ export class SpaceView extends BaseElement {
     }
   }
 
+  private async loadJournalSyncSetting() {
+    if (!this.serverUrl || !this.spaceId) return;
+    try {
+      this.journalSyncEnabled = await getJournalSyncEnabled(this.serverUrl, this.spaceId);
+    } catch {
+      this.journalSyncEnabled = false;
+    }
+    if (this.journalSyncEnabled) {
+      void this.refreshCacheStorageStatus();
+    } else {
+      this.cacheStorageStatus = null;
+    }
+  }
+
+  private async refreshCacheStorageStatus(): Promise<void> {
+    try {
+      this.cacheStorageStatus = await getViewedFilesStorageStatus();
+    } catch {
+      this.cacheStorageStatus = null;
+    }
+    try {
+      if (
+        typeof navigator !== 'undefined'
+        && navigator.storage
+        && typeof navigator.storage.persisted === 'function'
+      ) {
+        this.storagePersisted = await navigator.storage.persisted();
+      }
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  private async loadDataWithFullFetch() {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+    const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+    this.evictCachedBlobsForRemovedItems(this.items, itemList);
+    this.items = itemList;
+  }
+
+  private async loadDataWithJournalSync() {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    // 1. Load cached items from IndexedDB
+    const cache = await getJournalCache(this.serverUrl, this.spaceId);
+    if (cache) {
+      this.items = cache.items;
+    }
+
+    // 2. Fetch journal delta and apply it. If the journal endpoint or any of the
+    // journal-application steps fail (e.g. a transient 500), fall back to a full
+    // fetch so the space remains usable instead of leaving the user stuck without
+    // SignalR. Cache load above is intentionally outside the try/catch — IDB
+    // failures there should propagate as before.
+    try {
+      const journal = await getJournal(this.serverUrl, this.spaceId, this.token);
+
+      // 3. If full sync required, fall back to full fetch
+      if (journal.fullSyncRequired) {
+        const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+        this.evictCachedBlobsForRemovedItems(this.items, itemList);
+        this.items = itemList;
+        await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, itemList);
+        await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
+        return;
+      }
+
+      await this.applyJournalDelta(journal);
+    } catch (error) {
+      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
+        // Auth/not-found errors should surface to the caller so the standard
+        // error UI kicks in rather than silently masking them with a full fetch
+        // that will hit the same failure.
+        throw error;
+      }
+      console.warn('Journal sync failed; falling back to full fetch:', error);
+      await this.loadDataWithFullFetch();
+    }
+  }
+
+  private async applyJournalDelta(journal: JournalResponse) {
+    if (!this.serverUrl || !this.spaceId || !this.token) return;
+
+    // 4. Apply delta to cached items
+    const itemMap = new Map(this.items.map((item) => [item.id, item]));
+
+    // Apply deletions (and evict any cached blobs for them)
+    for (const deletedId of journal.deleted) {
+      itemMap.delete(deletedId);
+      if (this.serverUrl && this.spaceId) {
+        removeCachedFile(this.serverUrl, this.spaceId, deletedId).catch(() => {});
+      }
+    }
+
+    // Apply additions/updates
+    for (const item of journal.addedOrUpdated) {
+      itemMap.set(item.id, item);
+    }
+
+    // Convert back to sorted array (newest first)
+    this.items = Array.from(itemMap.values()).sort(
+      (a, b) => new Date(b.sharedAt).getTime() - new Date(a.sharedAt).getTime(),
+    );
+
+    // 5. Update cache and checkpoint
+    await setJournalCache(this.serverUrl, this.spaceId, journal.checkpoint, this.items);
+    await updateJournalCheckpoint(this.serverUrl, this.spaceId, journal.checkpoint, this.token);
+  }
+
+  private evictCachedBlobsForRemovedItems(
+    previous: SpaceItemResponse[],
+    next: SpaceItemResponse[],
+  ): void {
+    if (!this.serverUrl || !this.spaceId || previous.length === 0) return;
+    const nextIds = new Set(next.map((item) => item.id));
+    for (const item of previous) {
+      if (item.contentType === 'file' && !nextIds.has(item.id)) {
+        removeCachedFile(this.serverUrl, this.spaceId, item.id).catch(() => {});
+      }
+    }
+  }
+
+  private async toggleJournalSync() {
+    if (!this.serverUrl || !this.spaceId) return;
+
+    this.journalSyncLoading = true;
+    try {
+      const newValue = !this.journalSyncEnabled;
+      await setJournalSyncEnabled(this.serverUrl, this.spaceId, newValue);
+      this.journalSyncEnabled = newValue;
+
+      if (newValue) {
+        // Ask the browser to keep our storage around so the cache survives
+        // eviction. Best-effort; user may decline or the API may be missing.
+        try {
+          this.storagePersisted = await requestPersistentStorage();
+        } catch {
+          this.storagePersisted = false;
+        }
+        void this.refreshCacheStorageStatus();
+      } else {
+        // When disabling, clear caches that were populated only because Large
+        // Space Mode was on (item list journal cache + viewed file blobs).
+        await clearJournalCache(this.serverUrl, this.spaceId);
+        await clearCachedFilesForSpace(this.serverUrl, this.spaceId);
+        this.cacheStorageStatus = null;
+      }
+
+      this.syncMessage = newValue
+        ? 'Large space mode enabled for this browser.'
+        : 'Large space mode disabled for this browser.';
+      globalThis.setTimeout(() => {
+        if (
+          this.syncMessage === 'Large space mode enabled for this browser.'
+          || this.syncMessage === 'Large space mode disabled for this browser.'
+        ) {
+          this.syncMessage = '';
+        }
+      }, 3000);
+
+      // Reload data to apply the new mode
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to toggle journal sync:', error);
+    } finally {
+      this.journalSyncLoading = false;
+    }
+  }
+
   private async startSignalR() {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
 
@@ -389,9 +599,10 @@ export class SpaceView extends BaseElement {
       onStateChange: (state: ConnectionState) => {
         this.connectionState = state;
 
-        // On reconnect, refresh items to catch any missed events
+        // After (re)connect, verify against the journal to catch anything
+        // that SignalR may have missed while the browser was away.
         if (state === 'connected') {
-          this.refreshItemsAfterReconnect();
+          this.scheduleJournalVerification();
         }
       },
     });
@@ -430,19 +641,111 @@ export class SpaceView extends BaseElement {
     };
 
     this.items = [newItem, ...this.items];
+
+    // Update journal cache if enabled
+    this.updateJournalCacheAfterChange();
+    this.scheduleJournalVerification();
   }
 
   private handleItemDeleted(payload: ItemDeletedPayload) {
     // Remove item from list (silently ignore if not found)
     this.items = this.items.filter((item) => item.id !== payload.id);
+
+    // Drop any cached file blob for the deleted item.
+    if (this.serverUrl && this.spaceId) {
+      removeCachedFile(this.serverUrl, this.spaceId, payload.id)
+        .then(() => {
+          if (this.journalSyncEnabled) void this.refreshCacheStorageStatus();
+        })
+        .catch(() => {});
+    }
+
+    // Update journal cache if enabled
+    this.updateJournalCacheAfterChange();
+    this.scheduleJournalVerification();
+  }
+
+  private scheduleJournalVerification() {
+    if (
+      !this.journalSyncEnabled
+      || !this.isOnline
+      || !this.serverUrl
+      || !this.spaceId
+      || !this.token
+    ) {
+      return;
+    }
+
+    this.journalVerificationRequested = true;
+
+    if (this.journalVerificationInFlight) {
+      return;
+    }
+
+    if (this.journalVerifyTimer !== null) {
+      globalThis.clearTimeout(this.journalVerifyTimer);
+    }
+
+    this.journalVerifyTimer = globalThis.setTimeout(() => {
+      this.journalVerifyTimer = null;
+      this.runJournalVerification();
+    }, 1200);
+  }
+
+  private runJournalVerification() {
+    if (!this.journalVerificationRequested || this.journalVerificationInFlight) {
+      return;
+    }
+
+    this.journalVerificationRequested = false;
+    const verification = this.verifyJournalState();
+    this.journalVerificationInFlight = verification;
+
+    verification.catch((error) => {
+      console.warn('Failed to verify journal state:', error);
+    }).finally(() => {
+      this.journalVerificationInFlight = null;
+
+      if (this.journalVerificationRequested) {
+        this.scheduleJournalVerification();
+      }
+    });
+  }
+
+  private async verifyJournalState() {
+    if (!this.journalSyncEnabled || !this.serverUrl || !this.spaceId || !this.token) {
+      return;
+    }
+
+    await this.loadDataWithJournalSync();
+  }
+
+  private async updateJournalCacheAfterChange() {
+    if (!this.journalSyncEnabled || !this.serverUrl || !this.spaceId) return;
+
+    try {
+      const cache = await getJournalCache(this.serverUrl, this.spaceId);
+      if (cache) {
+        // Update cached items while keeping existing checkpoint
+        await setJournalCache(this.serverUrl, this.spaceId, cache.checkpoint, this.items);
+      }
+    } catch (error) {
+      // Non-critical; cache will be refreshed on next startup
+      console.warn('Failed to update journal cache:', error);
+    }
   }
 
   private async refreshItemsAfterReconnect() {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
 
     try {
-      const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
-      this.items = itemList;
+      if (this.journalSyncEnabled) {
+        await this.loadDataWithJournalSync();
+      } else {
+        const itemList = await getItems(this.serverUrl, this.spaceId, this.token);
+        this.evictCachedBlobsForRemovedItems(this.items, itemList);
+        this.items = itemList;
+      }
     } catch (error) {
       // Refresh failure is non-critical; user can manually refresh
       console.warn('Failed to refresh items after reconnect:', error);
@@ -1081,6 +1384,15 @@ export class SpaceView extends BaseElement {
     // Optimistic removal
     this.items = this.items.filter((i) => i.id !== item.id);
 
+    // Drop any cached file blob for the deleted item.
+    if (item.contentType === 'file') {
+      removeCachedFile(this.serverUrl, this.spaceId, item.id)
+        .then(() => {
+          if (this.journalSyncEnabled) void this.refreshCacheStorageStatus();
+        })
+        .catch(() => {});
+    }
+
     try {
       await deleteItem(this.serverUrl, this.spaceId, item.id, this.token);
     } catch (error) {
@@ -1097,16 +1409,46 @@ export class SpaceView extends BaseElement {
     }
   };
 
+  private getOrFetchFileBlob = async (item: SpaceItemResponse): Promise<Blob> => {
+    if (!this.serverUrl || !this.spaceId || !this.token) {
+      throw new Error('Cannot fetch file without an active session.');
+    }
+
+    // Blob caching is opt-in via Large Space Mode. Outside of it we always
+    // hit the network so the user's local storage stays untouched.
+    if (this.journalSyncEnabled) {
+      try {
+        const cached = await getCachedFile(this.serverUrl, this.spaceId, item.id);
+        if (cached) return cached.blob;
+      } catch {
+        // Cache lookup failures should not block the download path.
+      }
+    }
+
+    const blob = await downloadFile(
+      this.serverUrl,
+      this.spaceId,
+      item.id,
+      this.token,
+    );
+
+    if (this.journalSyncEnabled) {
+      try {
+        await setCachedFile(this.serverUrl, this.spaceId, item.id, blob);
+        void this.refreshCacheStorageStatus();
+      } catch {
+        // Best-effort cache writes; surfacing storage errors would not help the user.
+      }
+    }
+
+    return blob;
+  };
+
   private handleDownload = async (item: SpaceItemResponse) => {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
 
     try {
-      const blob = await downloadFile(
-        this.serverUrl,
-        this.spaceId,
-        item.id,
-        this.token,
-      );
+      const blob = await this.getOrFetchFileBlob(item);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1165,12 +1507,7 @@ export class SpaceView extends BaseElement {
     this.filePreviewText = null;
 
     try {
-      const blob = await downloadFile(
-        this.serverUrl,
-        this.spaceId,
-        item.id,
-        this.token,
-      );
+      const blob = await this.getOrFetchFileBlob(item);
 
       // Stale response — user clicked a different file while we were loading
       if (this._previewRequestId !== requestId) return;
@@ -1286,6 +1623,9 @@ export class SpaceView extends BaseElement {
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
     this.shareCopiedLinkId = null;
+    this.shareModalQrOpenLinkId = null;
+    this.shareModalQrGeneratingLinkId = null;
+    this.shareModalQrCodeDataUrls = {};
 
     try {
       this.shareModalLinks = await getSharedLinks(
@@ -1311,6 +1651,9 @@ export class SpaceView extends BaseElement {
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
     this.shareCopiedLinkId = null;
+    this.shareModalQrOpenLinkId = null;
+    this.shareModalQrGeneratingLinkId = null;
+    this.shareModalQrCodeDataUrls = {};
     this.shareModalName = '';
   };
 
@@ -1358,6 +1701,45 @@ export class SpaceView extends BaseElement {
     }, 1500);
   };
 
+  private handleToggleShareLinkQrCode = async (link: SharedLinkResponse) => {
+    if (this.shareModalQrOpenLinkId === link.id) {
+      this.shareModalQrOpenLinkId = null;
+      return;
+    }
+
+    this.shareModalQrOpenLinkId = link.id;
+    this.shareModalError = '';
+
+    if (this.shareModalQrCodeDataUrls[link.id]) {
+      return;
+    }
+
+    const shareUrl = this.serverUrl
+      ? buildShareUrl(link.token, this.serverUrl)
+      : `${window.location.origin}/shared/${link.token}`;
+
+    try {
+      this.shareModalQrGeneratingLinkId = link.id;
+      const qrCodeDataUrl = await toDataURL(shareUrl, {
+        width: 512,
+        margin: 1,
+      });
+      this.shareModalQrCodeDataUrls = {
+        ...this.shareModalQrCodeDataUrls,
+        [link.id]: qrCodeDataUrl,
+      };
+    } catch {
+      this.shareModalError = 'Failed to generate QR code. Please try again.';
+      if (this.shareModalQrOpenLinkId === link.id) {
+        this.shareModalQrOpenLinkId = null;
+      }
+    } finally {
+      if (this.shareModalQrGeneratingLinkId === link.id) {
+        this.shareModalQrGeneratingLinkId = null;
+      }
+    }
+  };
+
   private shareOrCopyLink = async (link: SharedLinkResponse) => {
     const shareUrl = this.serverUrl
       ? buildShareUrl(link.token, this.serverUrl)
@@ -1395,6 +1777,15 @@ export class SpaceView extends BaseElement {
       );
       this.shareModalLinks = this.shareModalLinks.filter((l) => l.id !== link.id);
       this.shareModalDeleteConfirmId = null;
+      if (this.shareModalQrOpenLinkId === link.id) {
+        this.shareModalQrOpenLinkId = null;
+      }
+      if (this.shareModalQrGeneratingLinkId === link.id) {
+        this.shareModalQrGeneratingLinkId = null;
+      }
+      const { [link.id]: removedQrCode, ...remainingQrCodes } = this.shareModalQrCodeDataUrls;
+      void removedQrCode;
+      this.shareModalQrCodeDataUrls = remainingQrCodes;
     } catch (error) {
       if (error instanceof SpaceApiError) {
         this.shareModalError = error.message;
@@ -1483,6 +1874,7 @@ export class SpaceView extends BaseElement {
         ${this.renderOfflineBanner()}
         ${this.renderServerUnreachableBanner()}
         ${this.renderSyncStatus()}
+        ${this.showSettings ? this.renderJournalSyncToggle() : nothing}
         ${this.renderUploadArea()}
         ${this.renderPendingSharesSection()}
         ${this.renderPendingUploadsSection()}
@@ -1535,6 +1927,82 @@ export class SpaceView extends BaseElement {
             Reconnect
           </button>
         </div>
+      </div>
+    `;
+  }
+
+  private renderJournalSyncToggle() {
+    return html`
+      <div class="rounded-lg border border-slate-700 bg-slate-900 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-200">
+              Large Space Mode
+            </p>
+            <p class="text-xs text-slate-500">
+              Cache items in this browser and catch up with journal sync before live updates.
+            </p>
+          </div>
+          <button
+            @click=${this.toggleJournalSync}
+            ?disabled=${this.journalSyncLoading}
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${this
+              .journalSyncEnabled
+              ? 'bg-sky-600'
+              : 'bg-slate-700'}"
+            role="switch"
+            aria-checked=${this.journalSyncEnabled}
+            aria-label="Toggle large space mode"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${this
+                .journalSyncEnabled
+                ? 'translate-x-6'
+                : 'translate-x-1'}"
+            ></span>
+          </button>
+        </div>
+        ${this.journalSyncEnabled ? this.renderCacheUsage() : nothing}
+      </div>
+    `;
+  }
+
+  private renderCacheUsage() {
+    const status = this.cacheStorageStatus;
+    if (!status) return nothing;
+
+    const usedLabel = this.formatFileSize(status.used);
+    const budgetLabel = this.formatFileSize(status.budget);
+    const percent = status.budget > 0
+      ? Math.min(100, Math.round((status.used / status.budget) * 100))
+      : 0;
+
+    return html`
+      <div class="mt-3 border-t border-slate-800 pt-3" data-testid="cache-usage">
+        <div class="flex items-center justify-between gap-3 text-xs text-slate-400">
+          <span>Cached files</span>
+          <span class="text-slate-300">
+            ${usedLabel} / ${budgetLabel}
+          </span>
+        </div>
+        <div
+          class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow=${percent}
+          aria-label="Cached files usage"
+        >
+          <div
+            class="h-full bg-sky-500 transition-all"
+            style="width: ${percent}%"
+          ></div>
+        </div>
+        <p class="mt-2 text-[11px] text-slate-500">
+          ${this.storagePersisted
+            ? 'Storage is persistent: cached files survive browser cleanup.'
+            : 'Storage is best-effort: the browser may evict cached files when disk space runs low.'}
+        </p>
       </div>
     `;
   }
@@ -1998,7 +2466,7 @@ export class SpaceView extends BaseElement {
       <!-- Center: Content -->
       <div class="min-w-0 flex-1">
         <p
-          class="cursor-pointer truncate text-sm font-medium text-slate-200 hover:text-slate-100"
+          class="cursor-pointer truncate text-slate-200 hover:text-slate-100"
           @click=${() => this.handleTextClick(item)}
           title="Click to view full text"
         >
@@ -2444,6 +2912,9 @@ export class SpaceView extends BaseElement {
       : `${window.location.origin}/shared/${link.token}`;
     const isCopied = this.shareCopiedLinkId === link.id;
     const isConfirming = this.shareModalDeleteConfirmId === link.id;
+    const isQrVisible = this.shareModalQrOpenLinkId === link.id;
+    const isQrGenerating = this.shareModalQrGeneratingLinkId === link.id;
+    const qrCodeDataUrl = this.shareModalQrCodeDataUrls[link.id];
 
     return html`
       <div class="relative overflow-hidden rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2.5">
@@ -2484,6 +2955,17 @@ export class SpaceView extends BaseElement {
                 : html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
             </button>
             <button
+              @click=${() => this.handleToggleShareLinkQrCode(link)}
+              ?disabled=${isQrGenerating}
+              class="cursor-pointer rounded p-1.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${isQrVisible
+                ? 'text-sky-400'
+                : 'text-slate-500 hover:text-sky-400'}"
+              title=${isQrVisible ? 'Hide QR code' : 'Show QR code'}
+              aria-label=${isQrVisible ? 'Hide link QR code' : 'Show link QR code'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"></rect><rect x="16" y="3" width="5" height="5"></rect><rect x="3" y="16" width="5" height="5"></rect><path d="M21 16h-3v3h3v2h-5v-5h5v-2z"></path><path d="M11 3h2v2h-2z"></path><path d="M11 7h2v2h-2z"></path><path d="M11 11h2v2h-2z"></path><path d="M3 11h2v2H3z"></path><path d="M7 11h2v2H7z"></path></svg>
+            </button>
+            <button
               @click=${() => { this.shareModalDeleteConfirmId = link.id; }}
               class="cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-red-400"
               title="Delete link"
@@ -2493,6 +2975,25 @@ export class SpaceView extends BaseElement {
             </button>
           </div>
         </div>
+        ${isQrVisible
+          ? html`
+              <div class="mt-3 border-t border-slate-700/60 pt-3">
+                ${isQrGenerating
+                  ? html`<p class="text-center text-xs text-slate-400">Generating QR code…</p>`
+                  : qrCodeDataUrl
+                    ? html`
+                        <div class="flex justify-center">
+                          <img
+                            src=${qrCodeDataUrl}
+                            alt="Shared link QR code"
+                            class="h-40 w-40 rounded-md border border-slate-700 bg-white p-2"
+                          />
+                        </div>
+                      `
+                    : nothing}
+              </div>
+            `
+          : nothing}
         ${isConfirming
           ? html`
               <div class="absolute inset-0 z-10 flex items-center justify-center gap-3 rounded-lg bg-slate-900/95 px-3 py-2.5 backdrop-blur-sm">

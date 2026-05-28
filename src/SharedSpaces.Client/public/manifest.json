@@ -70,8 +70,9 @@
       "url": "url",
       "files": [
         {
-          "name": "file",
+          "name": "files",
           "accept": [
+            "*/*",
             "image/*",
             "video/*",
             "audio/*",

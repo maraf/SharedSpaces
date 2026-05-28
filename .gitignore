@@ -21,3 +21,6 @@ artifacts/
 *.db-shm
 *.db-wal
 build.log
+
+# MSBuild local build caches
+*.lscache

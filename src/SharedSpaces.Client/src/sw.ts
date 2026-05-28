@@ -8,10 +8,14 @@ declare const self: ServiceWorkerGlobalScope;
 // Schema shared with src/lib/idb-storage.ts (app-side typed wrapper).
 // If you change DB_NAME, DB_VERSION, or store names, update both files.
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 2;
+const DB_VERSION = 5;
 const PENDING_SHARES_STORE = 'pending-shares';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
 const AUTH_TOKENS_STORE = 'auth-tokens';
+const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
+const JOURNAL_CACHE_STORE = 'journal-cache';
+const VIEWED_FILES_STORE = 'viewed-files';
+const VIEWED_FILES_META_STORE = 'viewed-files-meta';
 
 interface OfflineQueueItem {
   id: string;
@@ -43,8 +47,12 @@ class SyncUploadError extends Error {
   }
 }
 
+let dbInstance: Promise<IDBDatabase> | null = null;
+
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbInstance) return dbInstance;
+
+  dbInstance = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -57,23 +65,54 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(AUTH_TOKENS_STORE)) {
         db.createObjectStore(AUTH_TOKENS_STORE);
       }
+      if (!db.objectStoreNames.contains(JOURNAL_SYNC_SETTINGS_STORE)) {
+        db.createObjectStore(JOURNAL_SYNC_SETTINGS_STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(JOURNAL_CACHE_STORE)) {
+        db.createObjectStore(JOURNAL_CACHE_STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(VIEWED_FILES_STORE)) {
+        db.createObjectStore(VIEWED_FILES_STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(VIEWED_FILES_META_STORE)) {
+        const metaStore = db.createObjectStore(VIEWED_FILES_META_STORE, { keyPath: 'key' });
+        metaStore.createIndex('accessedAt', 'accessedAt');
+      }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      dbInstance = null;
+      reject(request.error);
+    };
   });
+
+  return dbInstance;
+}
+
+function createPendingShareId(timestamp: number, index = 0): string {
+  return `${timestamp}-${index.toString().padStart(4, '0')}-${crypto.randomUUID()}`;
+}
+
+async function storePendingShares(items: Record<string, unknown>[]) {
+  if (items.length === 0) return;
+
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PENDING_SHARES_STORE, 'readwrite');
+    const store = tx.objectStore(PENDING_SHARES_STORE);
+    for (const item of items) {
+      store.put(item);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Failed to store pending shares'));
+  });
+
+  void notifyClients({ type: 'pending-share-added' });
 }
 
 async function storePendingShare(item: Record<string, unknown>) {
-  const db = await openDB();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(PENDING_SHARES_STORE, 'readwrite');
-    tx.objectStore(PENDING_SHARES_STORE).put(item);
-    tx.oncomplete = () => {
-      resolve();
-      void notifyClients({ type: 'pending-share-added' });
-    };
-    tx.onerror = () => reject(tx.error);
-  });
+  await storePendingShares([item]);
 }
 
 async function notifyClients(message: unknown) {
@@ -247,26 +286,34 @@ async function handleShareTarget(request: Request): Promise<Response> {
     const title = formData.get('title') || '';
     const text = formData.get('text') || '';
     const url = formData.get('url') || '';
-    const file = formData.get('file');
-    const id = crypto.randomUUID();
-    const timestamp = Date.now();
+    const files = formData
+      .getAll('files')
+      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
-    if (file && file instanceof File && file.size > 0) {
-      const arrayBuffer = await file.arrayBuffer();
-      await storePendingShare({
-        id,
-        type: 'file',
+    const legacyFile = formData.get('file');
+    if (files.length === 0 && legacyFile instanceof File && legacyFile.size > 0) {
+      files.push(legacyFile);
+    }
+
+    if (files.length > 0) {
+      const timestamp = Date.now();
+      const pendingShares = await Promise.all(files.map(async (file, index) => ({
+        id: createPendingShareId(timestamp, index),
+        type: 'file' as const,
         fileName: file.name,
         fileType: file.type,
-        fileData: arrayBuffer,
+        fileData: await file.arrayBuffer(),
         fileSize: file.size,
         timestamp,
-      });
+      })));
+
+      await storePendingShares(pendingShares);
     } else {
       const content = [title, text, url].filter(Boolean).join('\n');
       if (content) {
+        const timestamp = Date.now();
         await storePendingShare({
-          id,
+          id: createPendingShareId(timestamp),
           type: 'text',
           content,
           timestamp,

@@ -6,12 +6,14 @@ import { SpaceView } from './space-view';
 import type { ItemAddedPayload } from '../../lib/signalr-client';
 import type { SpaceItemResponse } from './space-api';
 import {
+  clearAllCachedFiles,
   clearOfflineQueue,
   clearPendingShares,
   clearStoredAuthTokens,
   getOfflineQueueForSpace,
 } from '../../lib/idb-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
+import { buildShareUrl } from '../../lib/share-link';
 
 async function resetTokenStorageState(): Promise<void> {
   await waitForTokenMirrorWritesForTests();
@@ -27,6 +29,10 @@ async function seedStoredSpaceToken(serverUrl: string, spaceId: string, token: s
 }
 
 beforeEach(resetTokenStorageState);
+beforeEach(async () => {
+  // Reset the cached file blob store between tests; default makeItem id is shared.
+  await clearAllCachedFiles();
+});
 afterEach(resetTokenStorageState);
 
 // Mock SignalR client
@@ -69,6 +75,14 @@ vi.mock('@microsoft/signalr', () => {
     },
   };
 });
+
+const mockQrCode = vi.hoisted(() => ({
+  toDataURL: vi.fn(),
+}));
+
+vi.mock('qrcode', () => ({
+  toDataURL: mockQrCode.toDataURL,
+}));
 
 describe('SpaceView - Deduplication Logic', () => {
   const serverUrl = 'http://localhost:5000';
@@ -1247,6 +1261,59 @@ describe('SpaceView - Deduplication Logic', () => {
   });
 });
 
+describe('SpaceView - Journal Sync Verification', () => {
+  let element: SpaceView;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    element = document.createElement('space-view') as SpaceView;
+    element.serverUrl = 'http://localhost:5000';
+    element.spaceId = 'journal-space';
+    (element as any).token = 'test-jwt-token';
+    (element as any).isOnline = true;
+    (element as any).journalSyncEnabled = true;
+  });
+
+  afterEach(() => {
+    element.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('coalesces overlapping verification requests while a sync is already running', async () => {
+    const pendingSyncs: Array<() => void> = [];
+    const loadDataWithJournalSync = vi
+      .spyOn(element as any, 'loadDataWithJournalSync')
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            pendingSyncs.push(resolve);
+          }),
+      );
+
+    (element as any).scheduleJournalVerification();
+    (element as any).scheduleJournalVerification();
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(loadDataWithJournalSync).toHaveBeenCalledTimes(1);
+
+    (element as any).scheduleJournalVerification();
+    (element as any).scheduleJournalVerification();
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(loadDataWithJournalSync).toHaveBeenCalledTimes(1);
+
+    pendingSyncs.shift()?.();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1200);
+
+    expect(loadDataWithJournalSync).toHaveBeenCalledTimes(2);
+
+    pendingSyncs.shift()?.();
+    await Promise.resolve();
+  });
+});
+
 describe('SpaceView - Delete Confirmation', () => {
   const serverUrl = 'http://localhost:5000';
   const spaceId = '550e8400-e29b-41d4-a716-446655440000';
@@ -1732,24 +1799,24 @@ describe('SpaceView - Delete Confirmation', () => {
         bubbles: true,
         cancelable: true,
       });
-      
+
       // Mock dataTransfer with types property
       const mockDataTransfer = {
         types: includeFiles ? ['Files'] : ['text/plain'],
         files: includeFiles ? ({} as FileList) : ({} as FileList),
       };
-      
+
       Object.defineProperty(event, 'dataTransfer', {
         value: mockDataTransfer,
         writable: false,
       });
-      
+
       return event;
     };
 
     it('registers document-level drag listeners on connect', () => {
       document.body.appendChild(element);
-      
+
       expect(addEventListenerSpy).toHaveBeenCalledWith('dragenter', expect.any(Function));
       expect(addEventListenerSpy).toHaveBeenCalledWith('dragleave', expect.any(Function));
       expect(addEventListenerSpy).toHaveBeenCalledWith('drop', expect.any(Function));
@@ -1758,7 +1825,7 @@ describe('SpaceView - Delete Confirmation', () => {
 
     it('removes document-level drag listeners on disconnect', () => {
       document.body.appendChild(element);
-      
+
       const dragEnterHandler = addEventListenerSpy.mock.calls.find(
         (call) => call[0] === 'dragenter'
       )?.[1];
@@ -2085,47 +2152,47 @@ describe('SpaceView - Clipboard paste', () => {
 describe('SpaceView - WebSocket Disconnect on Space Switching (Issue #86)', () => {
   // Regression tests for Issue #86: WebSocket is not disconnected when switching between spaces
   // The bug manifests as stale connection state in the dot indicator when rapidly switching spaces
-  
+
   const serverUrl = 'http://localhost:5000';
   const spaceId = '550e8400-e29b-41d4-a716-446655440000';
   const token = 'test-jwt-token';
-  
+
   let element: SpaceView;
   let mockFetch: ReturnType<typeof vi.fn>;
-  
+
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     // Re-mock SignalR connection after clearAllMocks
     mockSignalRConnection.start = vi.fn().mockResolvedValue(undefined);
     mockSignalRConnection.stop = vi.fn().mockResolvedValue(undefined);
     mockSignalRConnection.on = vi.fn();
     mockSignalRConnection.state = 'Disconnected';
-    
+
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
       if (key === `${serverUrl}:${spaceId}`) return token;
       return null;
     });
-    
+
     mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => [],
     });
     globalThis.fetch = mockFetch;
-    
+
     element = document.createElement('space-view') as SpaceView;
     element.setAttribute('server-url', serverUrl);
     element.setAttribute('space-id', spaceId);
   });
-  
+
   afterEach(() => {
     if (element?.parentNode) {
       element.parentNode.removeChild(element);
     }
     vi.restoreAllMocks();
   });
-  
+
   it('calls stopSignalR when element is removed from DOM', async () => {
     // Set up a mock SignalR client to verify cleanup
     const mockClient = {
@@ -2134,183 +2201,183 @@ describe('SpaceView - WebSocket Disconnect on Space Switching (Issue #86)', () =
     };
     (element as any).signalRClient = mockClient;
     (element as any).connectionState = 'connected';
-    
+
     document.body.appendChild(element);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Remove from DOM - should trigger disconnectedCallback
     document.body.removeChild(element);
-    
+
     // Wait for async stopSignalR to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
-    
+
     // Verify stop was called
     expect(mockClient.stop).toHaveBeenCalled();
-    
+
     // Verify signalRClient is cleared
     expect((element as any).signalRClient).toBeUndefined();
-    
+
     // Verify state is set to disconnected
     expect((element as any).connectionState).toBe('disconnected');
   });
-  
+
   it('emits connection-state-change event with correct spaceId when state changes', async () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
-    
+
     let capturedEvent: CustomEvent | null = null;
     element1.addEventListener('connection-state-change', (e) => {
       capturedEvent = e as CustomEvent;
     });
-    
+
     document.body.appendChild(element1);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Change connection state
     (element1 as any).connectionState = 'connected';
     await (element1 as any).updateComplete;
-    
+
     // Verify event was emitted with correct spaceId
     expect(capturedEvent).not.toBeNull();
     if (capturedEvent) {
       expect(capturedEvent.detail.spaceId).toBe(spaceId1);
       expect(capturedEvent.detail.state).toBe('connected');
     }
-    
+
     // Clean up
     document.body.removeChild(element1);
   });
-  
+
   it('each space-view instance tracks its own connection state independently', () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const spaceId2 = '550e8400-e29b-41d4-a716-446655440002';
-    
+
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
     (element1 as any).connectionState = 'connected';
-    
+
     const element2 = document.createElement('space-view') as SpaceView;
     element2.setAttribute('server-url', serverUrl);
     element2.setAttribute('space-id', spaceId2);
     (element2 as any).connectionState = 'disconnected';
-    
+
     // Each element should have its own state
     expect((element1 as any).spaceId).toBe(spaceId1);
     expect((element1 as any).connectionState).toBe('connected');
-    
+
     expect((element2 as any).spaceId).toBe(spaceId2);
     expect((element2 as any).connectionState).toBe('disconnected');
-    
+
     // States should be independent
     (element1 as any).connectionState = 'disconnected';
     expect((element1 as any).connectionState).toBe('disconnected');
     expect((element2 as any).connectionState).toBe('disconnected'); // Still disconnected, not affected
   });
-  
+
   it('startSignalR stops existing connection before starting new one', async () => {
     const mockClient1 = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
     };
-    
+
     (element as any).serverUrl = serverUrl;
     (element as any).spaceId = spaceId;
     (element as any).token = token;
     (element as any).signalRClient = mockClient1;
-    
+
     // Call startSignalR - should stop existing client first
     await (element as any).startSignalR();
-    
+
     // Verify old client was stopped
     expect(mockClient1.stop).toHaveBeenCalled();
   });
-  
+
   it('stopSignalR clears signalRClient and sets state to disconnected', async () => {
     const mockClient = {
       stop: vi.fn().mockResolvedValue(undefined),
     };
-    
+
     (element as any).signalRClient = mockClient;
     (element as any).connectionState = 'connected';
-    
+
     await (element as any).stopSignalR();
-    
+
     expect(mockClient.stop).toHaveBeenCalled();
     expect((element as any).signalRClient).toBeUndefined();
     expect((element as any).connectionState).toBe('disconnected');
   });
-  
+
   it('connection state remains independent when multiple space-view elements exist', async () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const spaceId2 = '550e8400-e29b-41d4-a716-446655440002';
-    
+
     // Create two space-view elements
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
-    
+
     const element2 = document.createElement('space-view') as SpaceView;
     element2.setAttribute('server-url', serverUrl);
     element2.setAttribute('space-id', spaceId2);
-    
+
     // Set up mock clients
     const mockClient1 = { stop: vi.fn().mockResolvedValue(undefined) };
     const mockClient2 = { stop: vi.fn().mockResolvedValue(undefined) };
     (element1 as any).signalRClient = mockClient1;
     (element2 as any).signalRClient = mockClient2;
-    
+
     document.body.appendChild(element1);
     document.body.appendChild(element2);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Remove first element
     document.body.removeChild(element1);
-    
+
     // Wait for async cleanup
     await new Promise((resolve) => setTimeout(resolve, 50));
-    
+
     // Only element1's client should be stopped
     expect(mockClient1.stop).toHaveBeenCalled();
     expect(mockClient2.stop).not.toHaveBeenCalled();
-    
+
     // Clean up
     document.body.removeChild(element2);
   });
-  
+
   it('re-adding a space-view after removal creates fresh connection state', async () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
-    
+
     // Set up mock client
     const mockClient1 = { stop: vi.fn().mockResolvedValue(undefined) };
     (element1 as any).signalRClient = mockClient1;
     (element1 as any).connectionState = 'connected';
-    
+
     document.body.appendChild(element1);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Remove element
     document.body.removeChild(element1);
-    
+
     // Wait for async cleanup
     await new Promise((resolve) => setTimeout(resolve, 50));
-    
+
     expect(mockClient1.stop).toHaveBeenCalled();
     expect((element1 as any).signalRClient).toBeUndefined();
-    
+
     // Re-add the same element
     document.body.appendChild(element1);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Connection state should still be disconnected (until startSignalR is called)
     // This tests that we don't have stale state from before removal
     expect((element1 as any).signalRClient).toBeUndefined();
-    
+
     // Clean up
     document.body.removeChild(element1);
   });
@@ -2376,9 +2443,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
       // Query the rendered card - use individual class checks
       const cards = element.querySelectorAll('li');
-      const card = Array.from(cards).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800')
       );
       expect(card).toBeTruthy();
@@ -2395,9 +2462,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const cards = element.querySelectorAll('li');
-      const card = Array.from(cards).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800') &&
         c.textContent?.includes('My test note')
       );
@@ -2407,8 +2474,8 @@ describe('SpaceView - Unified Item Card Layout', () => {
     });
 
     it('renders file items with unified card layout', async () => {
-      const item = makeItem({ 
-        contentType: 'file', 
+      const item = makeItem({
+        contentType: 'file',
         content: 'test.pdf',
         fileSize: 12345,
         fileName: 'test.pdf'
@@ -2419,9 +2486,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const cards = element.querySelectorAll('li');
-      const card = Array.from(cards).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800') &&
         c.textContent?.includes('test.pdf')
       );
@@ -2457,16 +2524,16 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
       // Verify the pending shares section exists
       const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
+      const section = Array.from(sections).find(s =>
         s.textContent?.includes('Shared text from another app')
       );
       expect(section).toBeTruthy();
 
       // Verify the unified card layout is used
       const cards = section?.querySelectorAll('li');
-      const card = Array.from(cards || []).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards || []).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-amber-500/40')
       );
       expect(card).toBeTruthy();
@@ -2492,16 +2559,16 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
+      const section = Array.from(sections).find(s =>
         s.textContent?.includes('shared-doc.pdf')
       );
       expect(section).toBeTruthy();
 
       // Verify the unified card layout is used with amber variant
       const cards = section?.querySelectorAll('li');
-      const card = Array.from(cards || []).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards || []).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-amber-500/40')
       );
       expect(card).toBeTruthy();
@@ -2526,22 +2593,22 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
+      const section = Array.from(sections).find(s =>
         s.textContent?.includes('Test share')
       );
       const buttons = section?.querySelectorAll('button');
-      
+
       // Should have Upload All, Upload (per item), and Dismiss (per item)
       expect(buttons?.length).toBeGreaterThanOrEqual(3);
 
       // Find the Upload button (per item)
-      const uploadButton = Array.from(buttons || []).find(b => 
+      const uploadButton = Array.from(buttons || []).find(b =>
         b.textContent?.trim() === 'Upload' && b.title === 'Upload this item'
       );
       expect(uploadButton).toBeTruthy();
 
       // Find the Dismiss button
-      const dismissButton = Array.from(buttons || []).find(b => 
+      const dismissButton = Array.from(buttons || []).find(b =>
         b.getAttribute('aria-label') === 'Dismiss shared item'
       );
       expect(dismissButton).toBeTruthy();
@@ -2566,17 +2633,17 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
+      const section = Array.from(sections).find(s =>
         s.textContent?.includes('First share')
       );
-      
+
       const allLis = section?.querySelectorAll('li');
-      const cards = Array.from(allLis || []).filter(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const cards = Array.from(allLis || []).filter(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-amber-500/40')
       );
-      
+
       // Should have 2 cards
       expect(cards.length).toBe(2);
 
@@ -2605,17 +2672,17 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
       // Get regular item cards (border-slate-800)
       const allLis = element.querySelectorAll('li');
-      const regularCards = Array.from(allLis).filter(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const regularCards = Array.from(allLis).filter(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800')
       );
       expect(regularCards.length).toBeGreaterThanOrEqual(1);
 
       // Get pending share cards (border-amber-500/40)
-      const pendingCards = Array.from(allLis).filter(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const pendingCards = Array.from(allLis).filter(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-amber-500/40')
       );
       expect(pendingCards.length).toBeGreaterThanOrEqual(1);
@@ -3877,6 +3944,97 @@ describe('SpaceView - File Preview Modal', () => {
   });
 });
 
+describe('SpaceView - Shared Link QR Action', () => {
+  let element: SpaceView;
+
+  const testLink = {
+    id: 'link-1',
+    token: '550e8400-e29b-41d4-a716-446655440000',
+    spaceId: 'space-1',
+    itemId: 'item-1',
+    createdBy: 'member-1',
+    createdAt: new Date().toISOString(),
+    name: 'Test link',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQrCode.toDataURL.mockResolvedValue('data:image/png;base64,qr-code');
+    element = document.createElement('space-view') as SpaceView;
+    (element as any).serverUrl = 'https://api.example.com';
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.remove();
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('renders a QR action button for each shared link in the share modal', async () => {
+    (element as any).isLoading = false;
+    (element as any).shareModalItem = {
+      id: 'item-1',
+      spaceId: 'space-1',
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'hello',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+    };
+    (element as any).shareModalLinks = [testLink];
+
+    document.body.appendChild(element);
+    await element.updateComplete;
+
+    expect(element.shadowRoot?.querySelector('[aria-label="Show link QR code"]')).not.toBeNull();
+  });
+
+  it('shows the generated QR image inline for the shared URL', async () => {
+    (element as any).isLoading = false;
+    (element as any).shareModalItem = {
+      id: 'item-1',
+      spaceId: 'space-1',
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'hello',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+    };
+    (element as any).shareModalLinks = [testLink];
+    document.body.appendChild(element);
+    await element.updateComplete;
+
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+    await element.updateComplete;
+
+    const expectedShareUrl = buildShareUrl(testLink.token, 'https://api.example.com');
+    expect(mockQrCode.toDataURL).toHaveBeenCalledWith(expectedShareUrl, {
+      width: 512,
+      margin: 1,
+    });
+    expect((element as any).shareModalQrOpenLinkId).toBe('link-1');
+    expect((element as any).shareModalQrCodeDataUrls['link-1']).toBe('data:image/png;base64,qr-code');
+  });
+
+  it('toggles the inline QR display when clicked again', async () => {
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+    expect((element as any).shareModalQrOpenLinkId).toBe('link-1');
+
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+    expect((element as any).shareModalQrOpenLinkId).toBeNull();
+  });
+
+  it('shows QR generation error when inline QR generation fails', async () => {
+    mockQrCode.toDataURL.mockRejectedValueOnce(new Error('QR failed'));
+
+    await (element as any).handleToggleShareLinkQrCode(testLink);
+
+    expect((element as any).shareModalError).toBe('Failed to generate QR code. Please try again.');
+    expect((element as any).shareModalQrOpenLinkId).toBeNull();
+  });
+});
+
 describe('SpaceView - Token Resolution and Reconnect', () => {
   const serverUrl = 'http://localhost:5000';
   const spaceId = '550e8400-e29b-41d4-a716-446655440111';
@@ -3994,5 +4152,107 @@ describe('SpaceView - Background Sync Completion', () => {
     expect(refreshOfflineQueue).not.toHaveBeenCalled();
     expect(refreshItemsAfterReconnect).not.toHaveBeenCalled();
     expect((element as any).syncMessage).toBe('');
+  });
+});
+
+describe('SpaceView - Journal sync fallback on failure', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440099';
+  const token = 'test-jwt-token';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockSignalRConnection.state = 'Disconnected';
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await seedStoredSpaceToken(serverUrl, spaceId, token);
+
+    element = document.createElement('space-view') as SpaceView;
+    element.setAttribute('server-url', serverUrl);
+    element.setAttribute('space-id', spaceId);
+  });
+
+  afterEach(() => {
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('falls back to full fetch and starts SignalR when the journal endpoint fails', async () => {
+    // Enable journal sync for this space so loadData() takes the journal path.
+    const { setJournalSyncEnabled } = await import('../../lib/idb-storage');
+    await setJournalSyncEnabled(serverUrl, spaceId, true);
+
+    const fullFetchItem: SpaceItemResponse = {
+      id: 'full-fetch-item',
+      spaceId,
+      memberId: 'member-1',
+      contentType: 'text',
+      content: 'Loaded via full fetch fallback',
+      fileSize: 0,
+      sharedAt: new Date().toISOString(),
+    };
+
+    mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/journal/checkpoint')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+      }
+      if (url.endsWith('/journal')) {
+        // Simulate transient server-side failure on the journal endpoint.
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: async () => ({ message: 'boom' }),
+          text: async () => 'boom',
+        });
+      }
+      if (url.endsWith('/items')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [fullFetchItem],
+        });
+      }
+      // Default for /spaces/{id} info and anything else.
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: spaceId, name: 'Test Space' }),
+      });
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    document.body.appendChild(element);
+
+    await vi.waitFor(() => {
+      const items = (element as any).items as SpaceItemResponse[];
+      expect(items).toHaveLength(1);
+    });
+
+    // Items were loaded via the full-fetch fallback path.
+    const items = (element as any).items as SpaceItemResponse[];
+    expect(items[0].id).toBe('full-fetch-item');
+
+    // The /items endpoint must have been hit (full fetch path).
+    const itemsCalls = mockFetch.mock.calls.filter((call) =>
+      String(call[0]).endsWith('/items'),
+    );
+    expect(itemsCalls.length).toBeGreaterThanOrEqual(1);
+
+    // SignalR connection was started despite the journal failure.
+    await vi.waitFor(() => {
+      expect(mockSignalRConnection.start).toHaveBeenCalled();
+    });
+
+    // A warning was logged so the failure is observable.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Journal sync failed'),
+      expect.anything(),
+    );
   });
 });

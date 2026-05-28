@@ -118,7 +118,7 @@ sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/sha
 | `join <url>` | Exchange an invitation PIN for an access token and store it locally |
 | `spaces` | List all joined spaces (supports `--json` for machine-readable output) |
 | `upload <file>` | Upload a file to a space (`--space-id` required) |
-| `sync` | Two-way real-time file sync between a space and a local folder (`--space-id`, `--folder` required) |
+| `sync` | Two-way file sync between a space and a local folder (`--space-id`, `--folder` required; `--passive` for periodic polling instead of real-time SignalR) |
 
 ### How sync works
 
@@ -128,6 +128,7 @@ The `sync` command keeps a local folder in sync with a space:
 - **Real-time updates** — Receives new files and deletions via SignalR (WebSocket)
 - **Local file watching** — Automatically uploads new files added to the folder
 - **Fallback polling** — Falls back to HTTP polling if the WebSocket connection drops
+- **Passive mode** — Pass `--passive` (with optional `--interval <seconds>`, default `300`) to skip SignalR and pull the journal on a fixed interval instead. Local uploads still happen immediately.
 - **Resilience** — Automatic reconnection with exponential backoff, atomic file writes, deduplication to prevent upload loops
 
 Press `Ctrl+C` to stop syncing gracefully.

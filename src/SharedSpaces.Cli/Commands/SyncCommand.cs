@@ -11,23 +11,44 @@ public static class SyncCommand
     {
         var spaceIdOption = new Option<string>("--space-id") { Description = "ID of the space to sync from", Required = true };
         var folderOption = new Option<string>("--folder") { Description = "Path to local folder for synced files", Required = true };
+        var passiveOption = new Option<bool>("--passive") { Description = "Use periodic journal polling instead of real-time SignalR updates" };
+        var intervalOption = new Option<int>("--interval") { Description = "Passive poll interval in seconds (requires --passive). Default: 300, minimum: 5", DefaultValueFactory = _ => 300 };
 
         var command = new Command("sync", "Sync files from a space to a local folder");
         command.Add(spaceIdOption);
         command.Add(folderOption);
+        command.Add(passiveOption);
+        command.Add(intervalOption);
 
         command.SetAction(async (parseResult, ct) =>
         {
             var spaceId = parseResult.GetRequiredValue(spaceIdOption);
             var folder = parseResult.GetRequiredValue(folderOption);
-            await HandleAsync(spaceId, folder, ct);
+            var passive = parseResult.GetValue(passiveOption);
+            var interval = parseResult.GetValue(intervalOption);
+            var intervalExplicit = parseResult.GetResult(intervalOption) is { Implicit: false };
+            await HandleAsync(spaceId, folder, passive, interval, intervalExplicit, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(string spaceId, string folder, CancellationToken ct)
+    private static async Task HandleAsync(string spaceId, string folder, bool passive, int intervalSeconds, bool intervalExplicit, CancellationToken ct)
     {
+        if (intervalExplicit && !passive)
+        {
+            Console.Error.WriteLine("Error: --interval can only be used together with --passive.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (passive && intervalSeconds < 5)
+        {
+            Console.Error.WriteLine("Error: --interval must be at least 5 seconds.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
         var configService = new ConfigService();
         SpaceEntry? space;
 
@@ -73,7 +94,11 @@ public static class SyncCommand
             space.ServerUrl,
             space.SpaceId,
             space.JwtToken,
-            folder);
+            folder)
+        {
+            Passive = passive,
+            PassiveInterval = TimeSpan.FromSeconds(intervalSeconds),
+        };
 
         try
         {
