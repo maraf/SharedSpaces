@@ -38,7 +38,7 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
-      injectRegister: 'auto',
+      injectRegister: false,
       manifest: false,
       devOptions: {
         enabled: true,

@@ -71,3 +71,19 @@ select {
 .bottom-sheet-open {
   transform: translateY(0);
 }
+
+/* Rainbow text animation for SW update available */
+@keyframes rainbow {
+  0%   { color: #f87171; }
+  15%  { color: #fb923c; }
+  30%  { color: #facc15; }
+  45%  { color: #4ade80; }
+  60%  { color: #38bdf8; }
+  75%  { color: #a78bfa; }
+  90%  { color: #f472b6; }
+  100% { color: #f87171; }
+}
+
+.version-rainbow {
+  animation: rainbow 3s linear infinite;
+}

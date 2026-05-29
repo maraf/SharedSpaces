@@ -379,9 +379,16 @@ self.addEventListener('sync' as keyof ServiceWorkerGlobalScopeEventMap, ((event:
 // --- Lifecycle ---
 
 self.addEventListener('install', () => {
-  self.skipWaiting();
+  // Don't call skipWaiting() automatically — let the client decide
+  // when to activate the new worker via a SKIP_WAITING message.
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('message', (event: ExtendableMessageEvent) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
