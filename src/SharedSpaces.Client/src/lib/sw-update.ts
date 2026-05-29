@@ -13,12 +13,25 @@ export interface SwUpdateCallbacks {
 let registration: ServiceWorkerRegistration | undefined;
 let callbacks: SwUpdateCallbacks | undefined;
 let refreshing = false;
+// Only reload on controllerchange when the user explicitly activated an update.
+// The initial clients.claim() on first control must not trigger a reload.
+let userTriggeredUpdate = false;
+
+function notifyUpdateAvailable() {
+  callbacks?.onUpdateAvailable();
+  // In dev, auto-apply updates so branch switches / SW changes take effect
+  // without a manual click. activateUpdate() sets the user-triggered flag, so
+  // the subsequent controllerchange reload still fires.
+  if (import.meta.env.DEV) {
+    activateUpdate();
+  }
+}
 
 function trackInstalling(worker: ServiceWorker) {
   worker.addEventListener('statechange', () => {
     if (worker.state === 'installed' && navigator.serviceWorker.controller) {
       // New SW installed while an existing one controls the page → update available
-      callbacks?.onUpdateAvailable();
+      notifyUpdateAvailable();
     }
   });
 }
@@ -43,7 +56,7 @@ export async function initSwUpdate(cb: SwUpdateCallbacks): Promise<void> {
 
   // A worker may already be waiting (e.g. page was left open during a deploy)
   if (registration.waiting) {
-    callbacks.onUpdateAvailable();
+    notifyUpdateAvailable();
   }
 
   registration.addEventListener('updatefound', () => {
@@ -53,8 +66,11 @@ export async function initSwUpdate(cb: SwUpdateCallbacks): Promise<void> {
     }
   });
 
-  // Reload when the new SW takes over (one-shot guard to prevent loops)
+  // Reload when the new SW takes over, but only after a user-initiated update.
+  // Ignoring the first-load clients.claim() avoids reloading first-time visitors
+  // (and prevents colliding with test/page-driven reloads).
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!userTriggeredUpdate) return;
     if (refreshing) return;
     refreshing = true;
     window.location.reload();
@@ -74,5 +90,6 @@ export async function checkForUpdates(): Promise<void> {
  * Tell the waiting SW to activate, which triggers `controllerchange` → reload.
  */
 export function activateUpdate(): void {
+  userTriggeredUpdate = true;
   registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
 }

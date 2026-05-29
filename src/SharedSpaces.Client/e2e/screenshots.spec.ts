@@ -374,7 +374,7 @@ test.describe('Screenshot Capture', () => {
       await injectTokens(page, tokenMap);
       await page.reload();
       await page.waitForSelector('app-shell');
-      await page.click('button:has-text("+")');
+      await page.click('button[aria-label="Join a space"]');
       await page.waitForSelector('join-view');
       await page.waitForTimeout(500);
       await capture(page, 'join', vp);
@@ -869,8 +869,8 @@ test.describe('Screenshot Capture', () => {
       await injectTokens(page, tokenMap);
       await page.reload();
       await page.waitForSelector('app-shell');
-      // Navigate to join view via the "+" button
-      await page.click('button:has-text("+")');
+      // Navigate to join view via the "Join a space" button
+      await page.click('button[aria-label="Join a space"]');
       await page.waitForSelector('join-view');
       await page.waitForTimeout(500);
       // Switch to manual entry mode
