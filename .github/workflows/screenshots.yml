@@ -50,7 +50,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run screenshot tests
-        run: npx playwright test
+        run: npx playwright test --project=screenshots
 
       - name: Verify no uncommitted screenshot changes
         working-directory: .
@@ -100,7 +100,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run screenshot tests
-        run: npx playwright test
+        run: npx playwright test --project=screenshots
 
       - name: Commit and push updated screenshots
         working-directory: .
