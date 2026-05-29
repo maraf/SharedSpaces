@@ -615,6 +615,23 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space-delete-confirm', vp);
     });
 
+    test(`space view - config panel - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Navigate into the first space
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+      // Open the settings panel via the gear button
+      const settingsToggle = page.locator('[data-testid="space-settings-toggle"]').first();
+      await settingsToggle.waitFor({ state: 'visible', timeout: 10_000 });
+      await settingsToggle.click();
+      await page.waitForTimeout(500);
+      await capture(page, 'space-config', vp);
+    });
+
     test(`space view - transfer button - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
