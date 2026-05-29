@@ -128,7 +128,7 @@ function normalizeClipboardImageFiles(files: File[]): File[] {
   });
 }
 
-interface FileRenameDraft {
+interface ComposeFileDraft {
   id: string;
   file: File;
   name: string;
@@ -191,9 +191,9 @@ export class SpaceView extends BaseElement {
   @state() private shareModalQrCodeDataUrls: Record<string, string> = {};
   @state() private shareModalName = '';
   @state() private openMenuItemId: string | null = null;
-  @state() private fileRenameDrafts: FileRenameDraft[] = [];
-  @state() private fileRenamePendingTextShares: PendingShareItem[] = [];
-  @state() private fileRenameError = '';
+  @state() private composeFileDrafts: ComposeFileDraft[] = [];
+  @state() private composePendingTextShares: PendingShareItem[] = [];
+  @state() private composeQueueError = '';
   @state() private leaveConfirm = false;
   @state() private journalSyncEnabled = false;
   @state() private journalSyncLoading = false;
@@ -836,17 +836,17 @@ export class SpaceView extends BaseElement {
       .map((share) => {
         const file = this.pendingShareToFile(share);
         return file
-          ? this.createFileRenameDraft(file, share.id, share.id)
+          ? this.createComposeFileDraft(file, share.id, share.id)
           : null;
       })
-      .filter((draft): draft is FileRenameDraft => draft !== null);
+      .filter((draft): draft is ComposeFileDraft => draft !== null);
 
     if (fileDrafts.length > 0) {
       const textShares = this.pendingShares.filter(
         (share): share is PendingShareItem =>
           share.type === 'text' && typeof share.content === 'string',
       );
-      this.openFileRenameModal(fileDrafts, textShares);
+      this.populateComposeQueue(fileDrafts, textShares);
       return;
     }
 
@@ -872,11 +872,11 @@ export class SpaceView extends BaseElement {
     );
   }
 
-  private createFileRenameDraft(
+  private createComposeFileDraft(
     file: File,
     id: string,
     pendingShareId?: string,
-  ): FileRenameDraft {
+  ): ComposeFileDraft {
     return {
       id,
       file,
@@ -896,13 +896,13 @@ export class SpaceView extends BaseElement {
     });
   }
 
-  private openFileRenameModal(
-    drafts: FileRenameDraft[],
+  private populateComposeQueue(
+    drafts: ComposeFileDraft[],
     pendingTextShares: PendingShareItem[] = [],
   ) {
-    this.fileRenameDrafts = drafts;
-    this.fileRenamePendingTextShares = pendingTextShares;
-    this.fileRenameError = '';
+    this.composeFileDrafts = drafts;
+    this.composePendingTextShares = pendingTextShares;
+    this.composeQueueError = '';
     this.uploadError = '';
   }
 
@@ -912,12 +912,12 @@ export class SpaceView extends BaseElement {
     const now = Date.now();
     const newDrafts = files.map((file, index) => {
       const id = `${file.name}-${file.lastModified}-${index}-${now}`;
-      return { ...this.createFileRenameDraft(file, id), composeDraftId: id };
+      return { ...this.createComposeFileDraft(file, id), composeDraftId: id };
     });
     // Append to the inline compose queue instead of replacing it so users can
     // keep adding files before sharing.
-    this.fileRenameDrafts = [...this.fileRenameDrafts, ...newDrafts];
-    this.fileRenameError = '';
+    this.composeFileDrafts = [...this.composeFileDrafts, ...newDrafts];
+    this.composeQueueError = '';
     this.uploadError = '';
     // Persist so the queue survives a page refresh (best-effort).
     void this.persistComposeDrafts(newDrafts);
@@ -934,7 +934,7 @@ export class SpaceView extends BaseElement {
     }
 
     const existingIds = new Set(
-      this.fileRenameDrafts
+      this.composeFileDrafts
         .map((draft) => draft.composeDraftId)
         .filter((id): id is string => Boolean(id)),
     );
@@ -952,26 +952,26 @@ export class SpaceView extends BaseElement {
           type: blob.type,
           lastModified: draft.timestamp,
         });
-        return { ...this.createFileRenameDraft(file, draft.id), composeDraftId: draft.id };
+        return { ...this.createComposeFileDraft(file, draft.id), composeDraftId: draft.id };
       });
 
     if (hydrated.length > 0) {
-      this.fileRenameDrafts = [...this.fileRenameDrafts, ...hydrated];
+      this.composeFileDrafts = [...this.composeFileDrafts, ...hydrated];
     }
   }
 
-  private async persistComposeDrafts(drafts: FileRenameDraft[]) {
+  private async persistComposeDrafts(drafts: ComposeFileDraft[]) {
     for (const draft of drafts) {
       const id = draft.composeDraftId;
       if (!id || this.discardedComposeDraftIds.has(id)) continue;
       // Skip if the draft was removed before we got here.
-      if (!this.fileRenameDrafts.some((d) => d.composeDraftId === id)) continue;
+      if (!this.composeFileDrafts.some((d) => d.composeDraftId === id)) continue;
 
       try {
         const fileData = await draft.file.arrayBuffer();
         // Re-check after the async read in case it was removed meanwhile.
         if (this.discardedComposeDraftIds.has(id)) continue;
-        const current = this.fileRenameDrafts.find((d) => d.composeDraftId === id);
+        const current = this.composeFileDrafts.find((d) => d.composeDraftId === id);
         if (!current) continue;
 
         await saveComposeDraft({
@@ -1000,34 +1000,34 @@ export class SpaceView extends BaseElement {
       return;
     }
 
-    this.openFileRenameModal([
-      this.createFileRenameDraft(file, share.id, share.id),
+    this.populateComposeQueue([
+      this.createComposeFileDraft(file, share.id, share.id),
     ]);
   }
 
-  private closeFileRenameModal = () => {
+  private clearComposeQueue = () => {
     if (this.isUploading) return;
 
-    this.fileRenameDrafts = [];
-    this.fileRenamePendingTextShares = [];
-    this.fileRenameError = '';
+    this.composeFileDrafts = [];
+    this.composePendingTextShares = [];
+    this.composeQueueError = '';
   };
 
-  private handleFileRenameInput = (draftId: string, value: string) => {
-    this.fileRenameDrafts = this.fileRenameDrafts.map((draft) =>
+  private handleComposeFileNameInput = (draftId: string, value: string) => {
+    this.composeFileDrafts = this.composeFileDrafts.map((draft) =>
       draft.id === draftId
         ? { ...draft, name: value }
         : draft,
     );
-    this.fileRenameError = '';
+    this.composeQueueError = '';
   };
 
-  private removeFileRenameDraft = (draftId: string) => {
-    const draft = this.fileRenameDrafts.find((d) => d.id === draftId);
-    this.fileRenameDrafts = this.fileRenameDrafts.filter(
+  private removeComposeFileDraft = (draftId: string) => {
+    const draft = this.composeFileDrafts.find((d) => d.id === draftId);
+    this.composeFileDrafts = this.composeFileDrafts.filter(
       (d) => d.id !== draftId,
     );
-    this.fileRenameError = '';
+    this.composeQueueError = '';
 
     if (draft?.composeDraftId) {
       this.discardedComposeDraftIds.add(draft.composeDraftId);
@@ -1037,24 +1037,24 @@ export class SpaceView extends BaseElement {
     }
   };
 
-  // Persists a rename (on blur) so the new filename survives a refresh.
-  private persistComposeDraftRename = (draftId: string) => {
-    const draft = this.fileRenameDrafts.find((d) => d.id === draftId);
+  // Persists an edited filename (on blur) so it survives a refresh.
+  private persistComposeFileDraftName = (draftId: string) => {
+    const draft = this.composeFileDrafts.find((d) => d.id === draftId);
     if (draft?.composeDraftId) {
       void this.persistComposeDrafts([draft]);
     }
   };
 
-  private removeFileRenamePendingTextShare = (id: string) => {
-    this.fileRenamePendingTextShares = this.fileRenamePendingTextShares.filter(
+  private removeComposePendingTextShare = (id: string) => {
+    this.composePendingTextShares = this.composePendingTextShares.filter(
       (share) => share.id !== id,
     );
   };
 
   private get hasComposeQueue(): boolean {
     return (
-      this.fileRenameDrafts.length > 0 ||
-      this.fileRenamePendingTextShares.length > 0
+      this.composeFileDrafts.length > 0 ||
+      this.composePendingTextShares.length > 0
     );
   }
 
@@ -1064,10 +1064,10 @@ export class SpaceView extends BaseElement {
   // filter the already-promoted ones out to avoid rendering duplicate rows.
   private get visiblePendingShares(): PendingShareItem[] {
     const promotedIds = new Set<string>([
-      ...this.fileRenameDrafts
+      ...this.composeFileDrafts
         .map((draft) => draft.pendingShareId)
         .filter((id): id is string => Boolean(id)),
-      ...this.fileRenamePendingTextShares.map((share) => share.id),
+      ...this.composePendingTextShares.map((share) => share.id),
     ]);
     return this.pendingShares.filter((share) => !promotedIds.has(share.id));
   }
@@ -1087,7 +1087,7 @@ export class SpaceView extends BaseElement {
         await this.handleTextSubmit();
         if (this.textInput.trim()) return;
       }
-      await this.confirmFileRenameUpload();
+      await this.uploadComposeQueue();
       return;
     }
     await this.handleTextSubmit();
@@ -1117,19 +1117,19 @@ export class SpaceView extends BaseElement {
     }
   }
 
-  private confirmFileRenameUpload = async () => {
-    const currentDrafts = this.fileRenameDrafts.map((draft) => ({
+  private uploadComposeQueue = async () => {
+    const currentDrafts = this.composeFileDrafts.map((draft) => ({
       ...draft,
       name: draft.name.trim(),
     }));
     const invalidDraft = currentDrafts.find((draft) => draft.name.length === 0);
     if (invalidDraft) {
-      this.fileRenameError = 'File names cannot be empty.';
+      this.composeQueueError = 'File names cannot be empty.';
       return;
     }
 
-    this.fileRenameDrafts = currentDrafts;
-    this.fileRenameError = '';
+    this.composeFileDrafts = currentDrafts;
+    this.composeQueueError = '';
     this.uploadError = '';
 
     const renamedFiles = currentDrafts.map((draft) =>
@@ -1137,7 +1137,7 @@ export class SpaceView extends BaseElement {
         type: draft.file.type,
         lastModified: draft.file.lastModified,
       }));
-    const pendingTextShares = [...this.fileRenamePendingTextShares];
+    const pendingTextShares = [...this.composePendingTextShares];
     const processedCount = await this.uploadFiles(renamedFiles);
     const processedDrafts = currentDrafts.slice(0, processedCount);
     const remainingDrafts = currentDrafts.slice(processedCount);
@@ -1161,28 +1161,28 @@ export class SpaceView extends BaseElement {
       try {
         await this.removePendingSharesById(processedPendingShareIds);
       } catch {
-        this.fileRenameDrafts = remainingDrafts;
-        this.fileRenamePendingTextShares = pendingTextShares;
-        this.fileRenameError = 'Files uploaded, but clearing the pending share failed.';
+        this.composeFileDrafts = remainingDrafts;
+        this.composePendingTextShares = pendingTextShares;
+        this.composeQueueError = 'Files uploaded, but clearing the pending share failed.';
         return;
       }
     }
 
     if (remainingDrafts.length > 0) {
       if (this.connectionErrorType === 'auth') {
-        this.closeFileRenameModal();
+        this.clearComposeQueue();
         return;
       }
 
-      this.fileRenameDrafts = remainingDrafts;
-      this.fileRenamePendingTextShares = pendingTextShares;
-      this.fileRenameError = this.uploadError || 'Failed to upload file.';
+      this.composeFileDrafts = remainingDrafts;
+      this.composePendingTextShares = pendingTextShares;
+      this.composeQueueError = this.uploadError || 'Failed to upload file.';
       return;
     }
 
-    this.fileRenameDrafts = [];
-    this.fileRenamePendingTextShares = [];
-    this.fileRenameError = '';
+    this.composeFileDrafts = [];
+    this.composePendingTextShares = [];
+    this.composeQueueError = '';
 
     if (pendingTextShares.length > 0) {
       await this.uploadPendingTextShares(pendingTextShares);
@@ -2300,9 +2300,9 @@ export class SpaceView extends BaseElement {
 
     return html`
       <div class="border-t border-slate-800">
-        ${this.fileRenameDrafts.map((draft, index) =>
+        ${this.composeFileDrafts.map((draft, index) =>
           this.renderComposeFileRow(draft, index))}
-        ${this.fileRenamePendingTextShares.map((share) =>
+        ${this.composePendingTextShares.map((share) =>
           this.renderComposeTextRow(share))}
         ${pendingShares.length > 0
           ? html`
@@ -2324,8 +2324,8 @@ export class SpaceView extends BaseElement {
               this.renderComposePendingShareRow(share))}
           `
           : nothing}
-        ${this.fileRenameError
-          ? html`<p class="px-4 py-2 text-xs text-red-400">${this.fileRenameError}</p>`
+        ${this.composeQueueError
+          ? html`<p class="px-4 py-2 text-xs text-red-400">${this.composeQueueError}</p>`
           : nothing}
       </div>
     `;
@@ -2371,7 +2371,7 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderComposeFileRow(draft: FileRenameDraft, index: number) {
+  private renderComposeFileRow(draft: ComposeFileDraft, index: number) {
     const icon = getFileTypeIcon(draft.name || draft.file.name);
     const inputId = `compose-draft-input-${index}`;
 
@@ -2386,11 +2386,11 @@ export class SpaceView extends BaseElement {
             type="text"
             .value=${draft.name}
             @input=${(e: Event) =>
-              this.handleFileRenameInput(
+              this.handleComposeFileNameInput(
                 draft.id,
                 (e.target as HTMLInputElement).value,
               )}
-            @change=${() => this.persistComposeDraftRename(draft.id)}
+            @change=${() => this.persistComposeFileDraftName(draft.id)}
             @keydown=${(e: KeyboardEvent) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -2416,7 +2416,7 @@ export class SpaceView extends BaseElement {
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
           </button>
           <button
-            @click=${() => this.removeFileRenameDraft(draft.id)}
+            @click=${() => this.removeComposeFileDraft(draft.id)}
             ?disabled=${this.isUploading}
             class="rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
             title="Remove"
@@ -2444,7 +2444,7 @@ export class SpaceView extends BaseElement {
           <p class="text-xs text-slate-500">Queued for upload</p>
         </div>
         <button
-          @click=${() => this.removeFileRenamePendingTextShare(share.id)}
+          @click=${() => this.removeComposePendingTextShare(share.id)}
           ?disabled=${this.isUploading}
           class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
           title="Remove"

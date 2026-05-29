@@ -2005,7 +2005,7 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragOver).toBe(false);
     });
 
-    it('handleDrop on compose box resets state and opens the rename modal for files', async () => {
+    it('handleDrop on compose box resets state and populates the compose queue for files', async () => {
       // Set up drag state
       (element as any).dragCounter = 2;
       (element as any).dragOver = true;
@@ -2024,13 +2024,13 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragCounter).toBe(0);
       expect((element as any).dragOver).toBe(false);
 
-      // The rename modal should be populated instead of uploading immediately
-      expect((element as any).fileRenameDrafts).toHaveLength(1);
-      expect((element as any).fileRenameDrafts[0].file).toBe(mockFile);
-      expect((element as any).fileRenameDrafts[0].name).toBe('test.txt');
+      // The compose queue should be populated instead of uploading immediately
+      expect((element as any).composeFileDrafts).toHaveLength(1);
+      expect((element as any).composeFileDrafts[0].file).toBe(mockFile);
+      expect((element as any).composeFileDrafts[0].name).toBe('test.txt');
     });
 
-    it('handleDrop does not open the rename modal if no files are present', async () => {
+    it('handleDrop does not populate the compose queue if no files are present', async () => {
       (element as any).dragCounter = 1;
       (element as any).dragOver = true;
 
@@ -2047,8 +2047,8 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragCounter).toBe(0);
       expect((element as any).dragOver).toBe(false);
 
-      // No rename modal should open
-      expect((element as any).fileRenameDrafts).toHaveLength(0);
+      // No compose queue should be populated
+      expect((element as any).composeFileDrafts).toHaveLength(0);
     });
 
     it('multiple nested dragenter/dragleave pairs work correctly', () => {
@@ -2714,8 +2714,8 @@ describe('SpaceView - Unified Item Card Layout', () => {
       expect((shareButton as HTMLButtonElement).disabled).toBe(true);
     });
 
-    describe('rename before upload', () => {
-      it('uploadAllPendingShares opens the rename modal for file shares and keeps text shares queued for later upload', async () => {
+    describe('compose queue upload', () => {
+      it('uploadAllPendingShares populates the compose queue for file shares and keeps text shares queued for later upload', async () => {
         (element as any).pendingShares = [
           {
             id: 'pending-text',
@@ -2735,28 +2735,28 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
         await (element as any).uploadAllPendingShares();
 
-        expect((element as any).fileRenameDrafts).toHaveLength(1);
-        expect((element as any).fileRenameDrafts[0].name).toBe('shared-image.jpg');
-        expect((element as any).fileRenamePendingTextShares).toHaveLength(1);
-        expect((element as any).fileRenamePendingTextShares[0].content).toBe('Shared note');
+        expect((element as any).composeFileDrafts).toHaveLength(1);
+        expect((element as any).composeFileDrafts[0].name).toBe('shared-image.jpg');
+        expect((element as any).composePendingTextShares).toHaveLength(1);
+        expect((element as any).composePendingTextShares[0].content).toBe('Shared note');
       });
 
-      it('confirmFileRenameUpload passes the edited filename to uploadFiles', async () => {
+      it('uploadComposeQueue passes the edited filename to uploadFiles', async () => {
         const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(1);
         const originalFile = new File(['hello'], 'original.txt', { type: 'text/plain' });
 
-        (element as any).fileRenameDrafts = [
+        (element as any).composeFileDrafts = [
           { id: 'draft-1', file: originalFile, name: originalFile.name },
         ];
 
-        (element as any).handleFileRenameInput('draft-1', 'renamed.txt');
-        await (element as any).confirmFileRenameUpload();
+        (element as any).handleComposeFileNameInput('draft-1', 'renamed.txt');
+        await (element as any).uploadComposeQueue();
 
         expect(uploadFilesSpy).toHaveBeenCalledTimes(1);
         const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
         expect(uploadedFiles).toHaveLength(1);
         expect(uploadedFiles[0].name).toBe('renamed.txt');
-        expect((element as any).fileRenameDrafts).toHaveLength(0);
+        expect((element as any).composeFileDrafts).toHaveLength(0);
       });
 
       it('queues renamed pending share files for offline upload and clears them from pending shares', async () => {
@@ -2780,15 +2780,15 @@ describe('SpaceView - Unified Item Card Layout', () => {
           (element as any).pendingShares = [pendingShare];
           (element as any).requestPendingShareUpload(pendingShare);
 
-          const draftId = (element as any).fileRenameDrafts[0].id;
-          (element as any).handleFileRenameInput(draftId, 'renamed-image.jpg');
-          await (element as any).confirmFileRenameUpload();
+          const draftId = (element as any).composeFileDrafts[0].id;
+          (element as any).handleComposeFileNameInput(draftId, 'renamed-image.jpg');
+          await (element as any).uploadComposeQueue();
 
           const queue = await getOfflineQueueForSpace(serverUrl, spaceId);
           expect(queue).toHaveLength(1);
           expect(queue[0].fileName).toBe('renamed-image.jpg');
           expect((element as any).pendingShares).toEqual([]);
-          expect((element as any).fileRenameDrafts).toEqual([]);
+          expect((element as any).composeFileDrafts).toEqual([]);
         } finally {
           Object.defineProperty(navigator, 'onLine', {
             value: originalOnline,
@@ -2803,7 +2803,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
           // Let any connectedCallback hydration settle, then start from a clean
           // in-memory queue so cross-test global-DB leakage can't pollute state.
           await new Promise((resolve) => setTimeout(resolve, 0));
-          (element as any).fileRenameDrafts = [];
+          (element as any).composeFileDrafts = [];
           (element as any).discardedComposeDraftIds.clear();
         });
         afterEach(async () => {
@@ -2814,7 +2814,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
           const file = new File(['hello'], 'note.txt', { type: 'text/plain' });
           (element as any).promptFilesForUpload([file]);
 
-          const draft = (element as any).fileRenameDrafts[0];
+          const draft = (element as any).composeFileDrafts[0];
           await (element as any).persistComposeDrafts([draft]);
 
           const stored = (await getComposeDrafts()).filter(
@@ -2828,11 +2828,11 @@ describe('SpaceView - Unified Item Card Layout', () => {
         it('persists the edited filename, not the original', async () => {
           const file = new File(['hello'], 'original.txt', { type: 'text/plain' });
           (element as any).promptFilesForUpload([file]);
-          const draft = (element as any).fileRenameDrafts[0];
+          const draft = (element as any).composeFileDrafts[0];
 
-          (element as any).handleFileRenameInput(draft.id, 'renamed.txt');
+          (element as any).handleComposeFileNameInput(draft.id, 'renamed.txt');
           await (element as any).persistComposeDrafts([
-            (element as any).fileRenameDrafts[0],
+            (element as any).composeFileDrafts[0],
           ]);
 
           const stored = (await getComposeDrafts()).filter(
@@ -2854,7 +2854,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
           await (element as any).loadComposeDrafts();
 
-          const drafts = (element as any).fileRenameDrafts;
+          const drafts = (element as any).composeFileDrafts;
           expect(drafts).toHaveLength(1);
           expect(drafts[0].composeDraftId).toBe('persisted-1');
           expect(drafts[0].name).toBe('restored.txt');
@@ -2874,29 +2874,29 @@ describe('SpaceView - Unified Item Card Layout', () => {
           await (element as any).loadComposeDrafts();
           await (element as any).loadComposeDrafts();
 
-          expect((element as any).fileRenameDrafts).toHaveLength(1);
+          expect((element as any).composeFileDrafts).toHaveLength(1);
         });
 
         it('removing a draft clears it from storage and prevents resurrection on reload', async () => {
           const file = new File(['hello'], 'gone.txt', { type: 'text/plain' });
           (element as any).promptFilesForUpload([file]);
-          const draft = (element as any).fileRenameDrafts[0];
+          const draft = (element as any).composeFileDrafts[0];
           await (element as any).persistComposeDrafts([draft]);
           expect(
             (await getComposeDrafts()).filter((s) => s.id === draft.composeDraftId),
           ).toHaveLength(1);
 
-          (element as any).removeFileRenameDraft(draft.id);
+          (element as any).removeComposeFileDraft(draft.id);
           await Promise.resolve();
 
-          expect((element as any).fileRenameDrafts).toHaveLength(0);
+          expect((element as any).composeFileDrafts).toHaveLength(0);
           expect(
             (await getComposeDrafts()).filter((s) => s.id === draft.composeDraftId),
           ).toHaveLength(0);
 
           // A reload must not resurrect the removed draft.
           await (element as any).loadComposeDrafts();
-          expect((element as any).fileRenameDrafts).toHaveLength(0);
+          expect((element as any).composeFileDrafts).toHaveLength(0);
         });
       });
     });
