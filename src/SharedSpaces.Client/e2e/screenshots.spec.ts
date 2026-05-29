@@ -949,6 +949,8 @@ test.describe('Screenshot Capture', () => {
             const db = request.result;
             if (!db.objectStoreNames.contains('pending-shares'))
               db.createObjectStore('pending-shares', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('compose-drafts'))
+              db.createObjectStore('compose-drafts', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('offline-queue'))
               db.createObjectStore('offline-queue', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('auth-tokens'))
