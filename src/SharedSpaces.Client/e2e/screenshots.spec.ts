@@ -628,7 +628,7 @@ test.describe('Screenshot Capture', () => {
       const settingsToggle = page.locator('[data-testid="space-settings-toggle"]').first();
       await settingsToggle.waitFor({ state: 'visible', timeout: 10_000 });
       await settingsToggle.click();
-      await page.waitForTimeout(500);
+      await page.locator('text=Server Address').first().waitFor({ state: 'visible', timeout: 10_000 });
       await capture(page, 'space-config', vp);
     });
 
