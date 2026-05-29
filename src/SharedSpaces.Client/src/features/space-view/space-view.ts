@@ -31,6 +31,9 @@ import {
 import {
   getPendingShares,
   removePendingShare,
+  getComposeDrafts,
+  saveComposeDraft,
+  removeComposeDraft,
   clearOfflineQueueForSpace,
   getOfflineQueueForSpace,
   removeFromOfflineQueue,
@@ -46,6 +49,7 @@ import {
   getViewedFilesStorageStatus,
   requestPersistentStorage,
   type PendingShareItem,
+  type ComposeDraftItem,
   type OfflineQueueItem,
   type StorageBudgetSnapshot,
 } from '../../lib/idb-storage';
@@ -128,6 +132,7 @@ interface FileRenameDraft {
   file: File;
   name: string;
   pendingShareId?: string;
+  composeDraftId?: string;
 }
 
 @customElement('space-view')
@@ -194,6 +199,10 @@ export class SpaceView extends BaseElement {
   @state() private storagePersisted = false;
 
   private _previewRequestId = 0;
+
+  // Compose-draft ids the user removed/uploaded this session. Guards against an
+  // in-flight persist or a re-hydration resurrecting an already-discarded draft.
+  private discardedComposeDraftIds = new Set<string>();
 
   private token?: string;
   private lastLoadedKey = '';
@@ -292,6 +301,7 @@ export class SpaceView extends BaseElement {
     document.addEventListener('scroll', this.handleKebabScroll, { passive: true, capture: true });
     globalThis.addEventListener('resize', this.handleKebabScroll);
     this.loadPendingShares();
+    this.loadComposeDrafts();
     this.refreshOfflineQueue();
   }
 
@@ -897,13 +907,83 @@ export class SpaceView extends BaseElement {
   private promptFilesForUpload(files: File[]) {
     if (files.length === 0) return;
 
-    this.openFileRenameModal(
-      files.map((file, index) =>
-        this.createFileRenameDraft(
-          file,
-          `${file.name}-${file.lastModified}-${index}`,
-        )),
+    const now = Date.now();
+    const newDrafts = files.map((file, index) => {
+      const id = `${file.name}-${file.lastModified}-${index}-${now}`;
+      return { ...this.createFileRenameDraft(file, id), composeDraftId: id };
+    });
+    // Append to the inline compose queue instead of replacing it so users can
+    // keep adding files before sharing.
+    this.fileRenameDrafts = [...this.fileRenameDrafts, ...newDrafts];
+    this.fileRenameError = '';
+    this.uploadError = '';
+    // Persist so the queue survives a page refresh (best-effort).
+    void this.persistComposeDrafts(newDrafts);
+  }
+
+  // Loads compose-box file drafts persisted in a previous session/visit so the
+  // inline queue is restored after a page refresh.
+  private async loadComposeDrafts() {
+    let drafts: ComposeDraftItem[];
+    try {
+      drafts = await getComposeDrafts();
+    } catch {
+      return; // IndexedDB may not be available
+    }
+
+    const existingIds = new Set(
+      this.fileRenameDrafts
+        .map((draft) => draft.composeDraftId)
+        .filter((id): id is string => Boolean(id)),
     );
+    const hydrated = drafts
+      .filter(
+        (draft) =>
+          !existingIds.has(draft.id) &&
+          !this.discardedComposeDraftIds.has(draft.id),
+      )
+      .map((draft) => {
+        const blob = new Blob([draft.fileData], {
+          type: draft.fileType || 'application/octet-stream',
+        });
+        const file = new File([blob], draft.fileName, {
+          type: blob.type,
+          lastModified: draft.timestamp,
+        });
+        return { ...this.createFileRenameDraft(file, draft.id), composeDraftId: draft.id };
+      });
+
+    if (hydrated.length > 0) {
+      this.fileRenameDrafts = [...this.fileRenameDrafts, ...hydrated];
+    }
+  }
+
+  private async persistComposeDrafts(drafts: FileRenameDraft[]) {
+    for (const draft of drafts) {
+      const id = draft.composeDraftId;
+      if (!id || this.discardedComposeDraftIds.has(id)) continue;
+      // Skip if the draft was removed before we got here.
+      if (!this.fileRenameDrafts.some((d) => d.composeDraftId === id)) continue;
+
+      try {
+        const fileData = await draft.file.arrayBuffer();
+        // Re-check after the async read in case it was removed meanwhile.
+        if (this.discardedComposeDraftIds.has(id)) continue;
+        const current = this.fileRenameDrafts.find((d) => d.composeDraftId === id);
+        if (!current) continue;
+
+        await saveComposeDraft({
+          id,
+          fileName: current.name,
+          fileType: draft.file.type,
+          fileData,
+          fileSize: draft.file.size,
+          timestamp: Date.now(),
+        });
+      } catch {
+        // IndexedDB may not be available; keep the in-memory draft.
+      }
+    }
   }
 
   private requestPendingShareUpload(share: PendingShareItem) {
@@ -938,6 +1018,65 @@ export class SpaceView extends BaseElement {
         : draft,
     );
     this.fileRenameError = '';
+  };
+
+  private removeFileRenameDraft = (draftId: string) => {
+    const draft = this.fileRenameDrafts.find((d) => d.id === draftId);
+    this.fileRenameDrafts = this.fileRenameDrafts.filter(
+      (d) => d.id !== draftId,
+    );
+    this.fileRenameError = '';
+
+    if (draft?.composeDraftId) {
+      this.discardedComposeDraftIds.add(draft.composeDraftId);
+      void removeComposeDraft(draft.composeDraftId).catch(() => {
+        // IndexedDB may not be available
+      });
+    }
+  };
+
+  // Persists a rename (on blur) so the new filename survives a refresh.
+  private persistComposeDraftRename = (draftId: string) => {
+    const draft = this.fileRenameDrafts.find((d) => d.id === draftId);
+    if (draft?.composeDraftId) {
+      void this.persistComposeDrafts([draft]);
+    }
+  };
+
+  private removeFileRenamePendingTextShare = (id: string) => {
+    this.fileRenamePendingTextShares = this.fileRenamePendingTextShares.filter(
+      (share) => share.id !== id,
+    );
+  };
+
+  private get hasComposeQueue(): boolean {
+    return (
+      this.fileRenameDrafts.length > 0 ||
+      this.fileRenamePendingTextShares.length > 0
+    );
+  }
+
+  private handleComposeShare = async () => {
+    if (this.hasComposeQueue) {
+      // When text is also typed in the box, send it first, then the queued
+      // files/pending shares. If the text fails (e.g. auth/network error),
+      // stop before uploading files so the user can retry the whole batch.
+      if (this.textInput.trim()) {
+        await this.handleTextSubmit();
+        if (this.textInput.trim()) return;
+      }
+      await this.confirmFileRenameUpload();
+      return;
+    }
+    await this.handleTextSubmit();
+  };
+
+  private focusComposeDraftInput = (index: number) => {
+    const input = this.querySelector<HTMLInputElement>(
+      `#compose-draft-input-${index}`,
+    );
+    input?.focus();
+    input?.select();
   };
 
   private async removePendingSharesById(ids: string[]) {
@@ -983,6 +1122,18 @@ export class SpaceView extends BaseElement {
     const processedPendingShareIds = processedDrafts
       .map((draft) => draft.pendingShareId)
       .filter((id): id is string => Boolean(id));
+
+    // Discard the persisted copies of any drafts that uploaded successfully so
+    // they don't reappear after a refresh.
+    const processedComposeDraftIds = processedDrafts
+      .map((draft) => draft.composeDraftId)
+      .filter((id): id is string => Boolean(id));
+    for (const id of processedComposeDraftIds) {
+      this.discardedComposeDraftIds.add(id);
+      void removeComposeDraft(id).catch(() => {
+        // IndexedDB may not be available
+      });
+    }
 
     if (processedPendingShareIds.length > 0) {
       try {
@@ -1193,7 +1344,7 @@ export class SpaceView extends BaseElement {
   private handleTextKeydown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      this.handleTextSubmit();
+      this.handleComposeShare();
     }
   };
 
@@ -1881,7 +2032,6 @@ export class SpaceView extends BaseElement {
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
         ${this.filePreviewItem ? this.renderFilePreviewModal() : nothing}
-        ${this.fileRenameDrafts.length > 0 ? this.renderFileRenameModal() : nothing}
         ${this.transferModalItem ? this.renderTransferModal() : nothing}
         ${this.shareModalItem ? this.renderShareModal() : nothing}
       </div>
@@ -2148,6 +2298,105 @@ export class SpaceView extends BaseElement {
     `;
   }
 
+  private renderComposeQueue() {
+    return html`
+      <div class="border-t border-slate-800">
+        ${this.fileRenameDrafts.map((draft, index) =>
+          this.renderComposeFileRow(draft, index))}
+        ${this.fileRenamePendingTextShares.map((share) =>
+          this.renderComposeTextRow(share))}
+        ${this.fileRenameError
+          ? html`<p class="px-4 py-2 text-xs text-red-400">${this.fileRenameError}</p>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  private renderComposeFileRow(draft: FileRenameDraft, index: number) {
+    const icon = getFileTypeIcon(draft.name || draft.file.name);
+    const inputId = `compose-draft-input-${index}`;
+
+    return html`
+      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
+        <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+          ${icon.svg}
+        </div>
+        <div class="min-w-0 flex-1">
+          <input
+            id=${inputId}
+            type="text"
+            .value=${draft.name}
+            @input=${(e: Event) =>
+              this.handleFileRenameInput(
+                draft.id,
+                (e.target as HTMLInputElement).value,
+              )}
+            @change=${() => this.persistComposeDraftRename(draft.id)}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            ?disabled=${this.isUploading}
+            aria-label=${`Filename for ${draft.file.name}`}
+            class="w-full truncate rounded border-0 bg-transparent px-1 py-0.5 text-sm font-medium text-slate-200 transition focus:outline-none disabled:opacity-50"
+          />
+          <p class="truncate px-1 text-xs text-slate-500" title=${draft.file.name}>
+            Queued for upload · ${this.formatFileSize(draft.file.size)}
+          </p>
+        </div>
+        <div class="flex shrink-0 items-center gap-1">
+          <button
+            @click=${() => this.focusComposeDraftInput(index)}
+            ?disabled=${this.isUploading}
+            class="rounded p-1.5 text-slate-500 transition hover:text-sky-400 disabled:opacity-50"
+            title="Rename"
+            aria-label=${`Rename ${draft.file.name}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+          </button>
+          <button
+            @click=${() => this.removeFileRenameDraft(draft.id)}
+            ?disabled=${this.isUploading}
+            class="rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+            title="Remove"
+            aria-label=${`Remove ${draft.file.name}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderComposeTextRow(share: PendingShareItem) {
+    const icon = getTextItemIcon();
+
+    return html`
+      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
+        <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+          ${icon.svg}
+        </div>
+        <div class="min-w-0 flex-1 px-1">
+          <p class="truncate text-sm font-medium text-slate-200">
+            ${(share.content ?? '').substring(0, 100)}
+          </p>
+          <p class="text-xs text-slate-500">Queued for upload</p>
+        </div>
+        <button
+          @click=${() => this.removeFileRenamePendingTextShare(share.id)}
+          ?disabled=${this.isUploading}
+          class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+          title="Remove"
+          aria-label="Remove pending text item"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    `;
+  }
+
   private renderUploadArea() {
     return html`
       <section class="space-y-3">
@@ -2182,6 +2431,9 @@ export class SpaceView extends BaseElement {
             ?disabled=${this.isUploading}
             class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
+
+          <!-- Inline compose queue (files to rename + pending text shares) -->
+          ${this.hasComposeQueue ? this.renderComposeQueue() : nothing}
 
           <!-- Action bar -->
           <div
@@ -2225,8 +2477,9 @@ export class SpaceView extends BaseElement {
             <div class="flex items-center gap-2">
               <span class="hidden text-xs text-slate-500 sm:inline">Ctrl/⌘+Enter</span>
               <button
-                @click=${this.handleTextSubmit}
-                ?disabled=${this.isUploading || !this.textInput.trim()}
+                @click=${this.handleComposeShare}
+                ?disabled=${this.isUploading ||
+                (!this.textInput.trim() && !this.hasComposeQueue)}
                 class="rounded-full bg-sky-400 px-4 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 ${this.isUploading ? 'Sending…' : 'Share'}
@@ -2721,108 +2974,6 @@ export class SpaceView extends BaseElement {
           </div>
           <div class="overflow-y-auto flex-1 min-h-0 px-6 pb-6">
             ${this.renderFilePreviewContent()}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  private renderFileRenameModal() {
-    const pendingTextShareCount = this.fileRenamePendingTextShares.length;
-
-    return html`
-      <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-        @click=${() => {
-          if (!this.isUploading) this.closeFileRenameModal();
-        }}
-      >
-        <div
-          class="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6"
-          @click=${(e: Event) => e.stopPropagation()}
-        >
-          <div class="mb-4 flex items-start justify-between gap-4">
-            <div class="min-w-0 flex-1">
-              <h3 class="mb-1 text-lg font-semibold text-white">Rename before upload</h3>
-              <p class="text-sm text-slate-400">
-                Choose the filenames that will appear in this space.
-              </p>
-            </div>
-            <button
-              @click=${this.closeFileRenameModal}
-              ?disabled=${this.isUploading}
-              class="shrink-0 rounded p-1 text-slate-400 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="Close rename modal"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-
-          ${this.fileRenameError
-            ? html`
-                <div class="mb-4 rounded-lg border border-red-500/50 bg-red-950/40 p-3">
-                  <p class="text-sm text-red-300">${this.fileRenameError}</p>
-                </div>
-              `
-            : nothing}
-
-          <div class="space-y-3">
-            ${this.fileRenameDrafts.map((draft, index) => html`
-              <label class="block space-y-1.5">
-                <span class="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-                  ${this.fileRenameDrafts.length === 1 ? 'Filename' : `File ${index + 1}`}
-                </span>
-                <input
-                  type="text"
-                  .value=${draft.name}
-                  @input=${(e: Event) =>
-                    this.handleFileRenameInput(
-                      draft.id,
-                      (e.target as HTMLInputElement).value,
-                    )}
-                  ?disabled=${this.isUploading}
-                  aria-label=${`Filename for ${draft.file.name}`}
-                  class="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 transition focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-                />
-                <div class="flex items-center justify-between gap-3 text-xs text-slate-500">
-                  <span class="min-w-0 truncate" title=${draft.file.name}>
-                    Original: ${draft.file.name}
-                  </span>
-                  <span class="shrink-0">${this.formatFileSize(draft.file.size)}</span>
-                </div>
-              </label>
-            `)}
-          </div>
-
-          ${pendingTextShareCount > 0
-            ? html`
-                <p class="mt-4 text-xs text-slate-500">
-                  ${pendingTextShareCount}
-                  pending text item${pendingTextShareCount !== 1 ? 's' : ''}
-                  will upload unchanged after the files.
-                </p>
-              `
-            : nothing}
-
-          <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              @click=${this.closeFileRenameModal}
-              ?disabled=${this.isUploading}
-              class="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              @click=${this.confirmFileRenameUpload}
-              ?disabled=${this.isUploading}
-              class="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ${this.isUploading
-                ? 'Uploading…'
-                : pendingTextShareCount > 0
-                  ? 'Upload all'
-                  : 'Upload'}
-            </button>
           </div>
         </div>
       </div>

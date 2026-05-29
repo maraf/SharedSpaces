@@ -11,6 +11,9 @@ import {
   clearPendingShares,
   clearStoredAuthTokens,
   getOfflineQueueForSpace,
+  getComposeDrafts,
+  saveComposeDraft,
+  clearComposeDrafts,
 } from '../../lib/idb-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
 import { buildShareUrl } from '../../lib/share-link';
@@ -2777,6 +2780,109 @@ describe('SpaceView - Unified Item Card Layout', () => {
             configurable: true,
           });
         }
+      });
+
+      describe('compose draft persistence', () => {
+        beforeEach(async () => {
+          await clearComposeDrafts();
+          // Let any connectedCallback hydration settle, then start from a clean
+          // in-memory queue so cross-test global-DB leakage can't pollute state.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          (element as any).fileRenameDrafts = [];
+          (element as any).discardedComposeDraftIds.clear();
+        });
+        afterEach(async () => {
+          await clearComposeDrafts();
+        });
+
+        it('persists selected files to the compose-drafts store', async () => {
+          const file = new File(['hello'], 'note.txt', { type: 'text/plain' });
+          (element as any).promptFilesForUpload([file]);
+
+          const draft = (element as any).fileRenameDrafts[0];
+          await (element as any).persistComposeDrafts([draft]);
+
+          const stored = (await getComposeDrafts()).filter(
+            (s) => s.id === draft.composeDraftId,
+          );
+          expect(stored).toHaveLength(1);
+          expect(stored[0].id).toBe(draft.composeDraftId);
+          expect(stored[0].fileName).toBe('note.txt');
+        });
+
+        it('persists the edited filename, not the original', async () => {
+          const file = new File(['hello'], 'original.txt', { type: 'text/plain' });
+          (element as any).promptFilesForUpload([file]);
+          const draft = (element as any).fileRenameDrafts[0];
+
+          (element as any).handleFileRenameInput(draft.id, 'renamed.txt');
+          await (element as any).persistComposeDrafts([
+            (element as any).fileRenameDrafts[0],
+          ]);
+
+          const stored = (await getComposeDrafts()).filter(
+            (s) => s.id === draft.composeDraftId,
+          );
+          expect(stored).toHaveLength(1);
+          expect(stored[0].fileName).toBe('renamed.txt');
+        });
+
+        it('re-hydrates persisted drafts on load (survives refresh)', async () => {
+          await saveComposeDraft({
+            id: 'persisted-1',
+            fileName: 'restored.txt',
+            fileType: 'text/plain',
+            fileData: new Uint8Array([1, 2, 3]).buffer,
+            fileSize: 3,
+            timestamp: 1000,
+          });
+
+          await (element as any).loadComposeDrafts();
+
+          const drafts = (element as any).fileRenameDrafts;
+          expect(drafts).toHaveLength(1);
+          expect(drafts[0].composeDraftId).toBe('persisted-1');
+          expect(drafts[0].name).toBe('restored.txt');
+          expect(drafts[0].file).toBeInstanceOf(File);
+        });
+
+        it('does not re-hydrate a draft that is already in the queue', async () => {
+          await saveComposeDraft({
+            id: 'dup-1',
+            fileName: 'dup.txt',
+            fileType: 'text/plain',
+            fileData: new Uint8Array([1]).buffer,
+            fileSize: 1,
+            timestamp: 1000,
+          });
+
+          await (element as any).loadComposeDrafts();
+          await (element as any).loadComposeDrafts();
+
+          expect((element as any).fileRenameDrafts).toHaveLength(1);
+        });
+
+        it('removing a draft clears it from storage and prevents resurrection on reload', async () => {
+          const file = new File(['hello'], 'gone.txt', { type: 'text/plain' });
+          (element as any).promptFilesForUpload([file]);
+          const draft = (element as any).fileRenameDrafts[0];
+          await (element as any).persistComposeDrafts([draft]);
+          expect(
+            (await getComposeDrafts()).filter((s) => s.id === draft.composeDraftId),
+          ).toHaveLength(1);
+
+          (element as any).removeFileRenameDraft(draft.id);
+          await Promise.resolve();
+
+          expect((element as any).fileRenameDrafts).toHaveLength(0);
+          expect(
+            (await getComposeDrafts()).filter((s) => s.id === draft.composeDraftId),
+          ).toHaveLength(0);
+
+          // A reload must not resurrect the removed draft.
+          await (element as any).loadComposeDrafts();
+          expect((element as any).fileRenameDrafts).toHaveLength(0);
+        });
       });
     });
   });

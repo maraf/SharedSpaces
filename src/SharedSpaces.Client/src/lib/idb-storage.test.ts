@@ -44,7 +44,7 @@ beforeEach(async () => {
 
 async function seedPendingShares(items: PendingShareItem[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open('shared-spaces-db', 5);
+    const request = indexedDB.open('shared-spaces-db', 6);
 
     request.onsuccess = () => {
       const db = request.result;

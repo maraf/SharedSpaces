@@ -11,7 +11,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
-const CLIENT_DB_VERSION = 5;
+const CLIENT_DB_VERSION = 6;
 
 interface ViewportSpec {
   name: string;
@@ -408,7 +408,7 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space', vp);
     });
 
-    test(`space view - rename modal - ${vp.name}`, async ({ page }) => {
+    test(`space view - compose queue - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
       await page.reload();
@@ -417,20 +417,23 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
 
+      // Type a message alongside the file to show the combined compose queue.
+      await page.locator('textarea[aria-label="Text to share"]').fill(
+        'Here are the final release notes',
+      );
+
       await page.locator('#file-input-hidden').setInputFiles([{
         name: 'draft-release-notes.md',
         mimeType: 'text/markdown',
         buffer: Buffer.from('# Draft release notes'),
       }]);
-      await page.waitForFunction(
-        () => document.body.textContent?.includes('Rename before upload'),
-        { timeout: 5_000 },
-      );
 
+      // The selected file appears inline in the compose box as an editable row.
       const renameInput = page.locator('input[aria-label="Filename for draft-release-notes.md"]');
+      await renameInput.waitFor({ state: 'visible', timeout: 5_000 });
       await renameInput.fill('release-notes-final.md');
       await page.waitForTimeout(300);
-      await capture(page, 'space-rename-modal', vp, { fullPage: false });
+      await capture(page, 'space-compose-queue', vp, { fullPage: false });
     });
 
     test(`space view - file preview image - ${vp.name}`, async ({ page }) => {

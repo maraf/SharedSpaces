@@ -3,8 +3,9 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const PENDING_SHARES_STORE = 'pending-shares';
+const COMPOSE_DRAFTS_STORE = 'compose-drafts';
 const OFFLINE_QUEUE_STORE = 'offline-queue';
 const AUTH_TOKENS_STORE = 'auth-tokens';
 const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
@@ -32,6 +33,19 @@ export interface PendingShareItem {
   fileType?: string;
   fileData?: ArrayBuffer;
   fileSize?: number;
+  timestamp: number;
+}
+
+// Files selected in the compose box but not yet uploaded. Persisted so the
+// inline compose queue survives a page refresh. Kept in a dedicated store so
+// they never mix with Web Share Target pending shares (which have their own
+// "shared from other apps" UI, count, and clear-all action).
+export interface ComposeDraftItem {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileData: ArrayBuffer;
+  fileSize: number;
   timestamp: number;
 }
 
@@ -78,6 +92,9 @@ function getDB(): Promise<IDBPDatabase> {
     upgrade(db, oldVersion, _newVersion, tx) {
       if (!db.objectStoreNames.contains(PENDING_SHARES_STORE)) {
         db.createObjectStore(PENDING_SHARES_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(COMPOSE_DRAFTS_STORE)) {
+        db.createObjectStore(COMPOSE_DRAFTS_STORE, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         db.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: 'id' });
@@ -195,6 +212,31 @@ export async function removePendingShare(id: string): Promise<void> {
 export async function clearPendingShares(): Promise<void> {
   const db = await getDB();
   await db.clear(PENDING_SHARES_STORE);
+}
+
+// --- Compose Drafts (files selected in the compose box, not yet uploaded) ---
+
+export async function getComposeDrafts(): Promise<ComposeDraftItem[]> {
+  const db = await getDB();
+  return (await db.getAll(COMPOSE_DRAFTS_STORE)).sort((a, b) =>
+    (a.timestamp - b.timestamp)
+    || a.id.localeCompare(b.id),
+  );
+}
+
+export async function saveComposeDraft(item: ComposeDraftItem): Promise<void> {
+  const db = await getDB();
+  await db.put(COMPOSE_DRAFTS_STORE, item);
+}
+
+export async function removeComposeDraft(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(COMPOSE_DRAFTS_STORE, id);
+}
+
+export async function clearComposeDrafts(): Promise<void> {
+  const db = await getDB();
+  await db.clear(COMPOSE_DRAFTS_STORE);
 }
 
 // --- Auth Tokens (canonical store shared by the app and service worker) ---
