@@ -17,11 +17,21 @@ let refreshing = false;
 // The initial clients.claim() on first control must not trigger a reload.
 let userTriggeredUpdate = false;
 
+function notifyUpdateAvailable() {
+  callbacks?.onUpdateAvailable();
+  // In dev, auto-apply updates so branch switches / SW changes take effect
+  // without a manual click. activateUpdate() sets the user-triggered flag, so
+  // the subsequent controllerchange reload still fires.
+  if (import.meta.env.DEV) {
+    activateUpdate();
+  }
+}
+
 function trackInstalling(worker: ServiceWorker) {
   worker.addEventListener('statechange', () => {
     if (worker.state === 'installed' && navigator.serviceWorker.controller) {
       // New SW installed while an existing one controls the page → update available
-      callbacks?.onUpdateAvailable();
+      notifyUpdateAvailable();
     }
   });
 }
@@ -46,7 +56,7 @@ export async function initSwUpdate(cb: SwUpdateCallbacks): Promise<void> {
 
   // A worker may already be waiting (e.g. page was left open during a deploy)
   if (registration.waiting) {
-    callbacks.onUpdateAvailable();
+    notifyUpdateAvailable();
   }
 
   registration.addEventListener('updatefound', () => {
