@@ -166,7 +166,6 @@ export class SpaceView extends BaseElement {
   @state() private connectionState: ConnectionState = 'disconnected';
   @state() private isOnline = navigator.onLine;
   @state() private pendingShares: PendingShareItem[] = [];
-  @state() private offlineQueueCount = 0;
   @state() private offlineQueueItems: OfflineQueueItem[] = [];
   @state() private syncMessage = '';
   @state() private deleteConfirmItemId: string | null = null;
@@ -1073,9 +1072,16 @@ export class SpaceView extends BaseElement {
   }
 
   // Whether the compose box should render its queue area: the user's own
-  // drafts/text shares, or pending shares folded in from other apps.
+  // drafts/text shares, pending shares folded in from other apps, or the
+  // offline upload queue folded in as display-only rows. The global Share
+  // button keys off `hasComposeQueue` (not this), so folding pending shares
+  // and offline-queue items in here never makes Share act on them.
   private get hasComposeContent(): boolean {
-    return this.hasComposeQueue || this.visiblePendingShares.length > 0;
+    return (
+      this.hasComposeQueue ||
+      this.visiblePendingShares.length > 0 ||
+      this.offlineQueueItems.length > 0
+    );
   }
 
   private handleComposeShare = async () => {
@@ -1193,7 +1199,6 @@ export class SpaceView extends BaseElement {
     try {
       await removeFromOfflineQueue(item.id);
       this.offlineQueueItems = this.offlineQueueItems.filter((i) => i.id !== item.id);
-      this.offlineQueueCount = this.offlineQueueItems.length;
     } catch {
       // IndexedDB may not be available
     }
@@ -1208,7 +1213,6 @@ export class SpaceView extends BaseElement {
       // Strip fileData to avoid keeping large ArrayBuffers in reactive state
       const lightweight = items.map(({ fileData: _fileData, ...rest }) => rest);
       this.offlineQueueItems = lightweight;
-      this.offlineQueueCount = lightweight.length;
     } catch {
       // IndexedDB may not be available
     }
@@ -2049,7 +2053,6 @@ export class SpaceView extends BaseElement {
         ${this.renderSyncStatus()}
         ${this.showSettings ? this.renderSettingsPanel() : nothing}
         ${this.renderUploadArea()}
-        ${this.renderPendingUploadsSection()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
         ${this.filePreviewItem ? this.renderFilePreviewModal() : nothing}
@@ -2228,75 +2231,9 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderPendingUploadsSection() {
-    if (this.offlineQueueItems.length === 0) return nothing;
-
-    const canSync = this.isOnline && this.connectionErrorType !== 'network';
-
-    return html`
-      <section class="space-y-3">
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-sm font-medium text-slate-400">
-            📤 ${this.offlineQueueItems.length}
-            item${this.offlineQueueItems.length !== 1 ? 's' : ''} pending upload
-          </p>
-          ${canSync
-            ? html`
-              <button
-                @click=${() => this.syncOfflineQueue()}
-                ?disabled=${this.isUploading}
-                class="rounded-full bg-sky-500 px-4 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
-              >
-                Sync Now
-              </button>
-            `
-            : nothing}
-        </div>
-
-        <ul class="space-y-2">
-          ${this.offlineQueueItems.map((item) => {
-            const icon = item.type === 'file'
-              ? getFileTypeIcon(item.fileName ?? 'file')
-              : getTextItemIcon();
-
-            const content = html`
-              <!-- Left: Icon -->
-              <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
-                ${icon.svg}
-              </div>
-              <!-- Center: Content -->
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-slate-200">
-                  ${item.type === 'file'
-                    ? item.fileName ?? 'File'
-                    : (item.content ?? '').substring(0, 100)}
-                </p>
-                <p class="text-xs text-slate-500">
-                  Queued for upload
-                </p>
-              </div>
-              <!-- Right: Dismiss Button -->
-              <div class="-mr-2 shrink-0">
-                <button
-                  @click=${() => this.dismissOfflineQueueItem(item)}
-                  class="rounded p-2 text-slate-500 transition hover:text-red-400"
-                  title="Dismiss"
-                  aria-label="Dismiss pending upload"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-              </div>
-            `;
-
-            return this.renderUnifiedItemCard(content, undefined, 'border-sky-500/40', 'bg-sky-950/20');
-          })}
-        </ul>
-      </section>
-    `;
-  }
-
   private renderComposeQueue() {
     const pendingShares = this.visiblePendingShares;
+    const canSyncOffline = this.isOnline && this.connectionErrorType !== 'network';
 
     return html`
       <div class="border-t border-slate-800">
@@ -2324,9 +2261,70 @@ export class SpaceView extends BaseElement {
               this.renderComposePendingShareRow(share))}
           `
           : nothing}
+        ${this.offlineQueueItems.length > 0
+          ? html`
+            <div
+              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5 first:border-t-0"
+            >
+              <span class="text-xs font-medium text-sky-300/80">
+                📤 ${this.offlineQueueItems.length}
+                item${this.offlineQueueItems.length !== 1 ? 's' : ''} pending upload
+              </span>
+              ${canSyncOffline
+                ? html`
+                  <button
+                    @click=${() => this.syncOfflineQueue()}
+                    ?disabled=${this.isUploading}
+                    class="rounded px-2 py-1 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
+                  >
+                    Sync Now
+                  </button>
+                `
+                : html`
+                  <span class="text-xs text-slate-500">
+                    ${this.isOnline
+                      ? 'Will retry when reachable'
+                      : 'Will upload when back online'}
+                  </span>
+                `}
+            </div>
+            ${this.offlineQueueItems.map((item) =>
+              this.renderComposeOfflineRow(item))}
+          `
+          : nothing}
         ${this.composeQueueError
           ? html`<p class="px-4 py-2 text-xs text-red-400">${this.composeQueueError}</p>`
           : nothing}
+      </div>
+    `;
+  }
+
+  private renderComposeOfflineRow(item: OfflineQueueItem) {
+    const icon = item.type === 'file'
+      ? getFileTypeIcon(item.fileName ?? 'file')
+      : getTextItemIcon();
+    const label = item.type === 'file'
+      ? item.fileName ?? 'File'
+      : (item.content ?? '').substring(0, 100);
+
+    return html`
+      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2">
+        <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+          ${icon.svg}
+        </div>
+        <div class="min-w-0 flex-1 px-1">
+          <p class="truncate text-sm font-medium text-slate-200">${label}</p>
+          <p class="text-xs text-slate-500">Queued for upload</p>
+        </div>
+        <button
+          @click=${() => this.dismissOfflineQueueItem(item)}
+          ?disabled=${this.isUploading}
+          class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+          title="Dismiss"
+          aria-label="Dismiss pending upload"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>
     `;
   }
@@ -2492,7 +2490,8 @@ export class SpaceView extends BaseElement {
           ></textarea>
 
           <!-- Inline compose queue (files to rename, pending text shares,
-               and shares folded in from other apps) -->
+               shares folded in from other apps, and the offline upload
+               queue folded in as display-only rows) -->
           ${this.hasComposeContent ? this.renderComposeQueue() : nothing}
 
           <!-- Action bar -->
@@ -2551,12 +2550,6 @@ export class SpaceView extends BaseElement {
         <!-- Upload error -->
         ${this.uploadError
           ? html`<p class="text-sm text-red-400">${this.uploadError}</p>`
-          : nothing}
-
-        ${this.offlineQueueCount > 0 && !this.isOnline
-          ? html`<p class="text-xs text-amber-400">
-              📤 ${this.offlineQueueCount} item${this.offlineQueueCount !== 1 ? 's' : ''} queued — will upload when back online
-            </p>`
           : nothing}
       </section>
     `;

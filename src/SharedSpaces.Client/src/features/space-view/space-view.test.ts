@@ -2901,6 +2901,90 @@ describe('SpaceView - Unified Item Card Layout', () => {
       });
     });
   });
+
+  describe('offline upload queue folded into compose box', () => {
+    it('does not render the offline queue when it is empty', async () => {
+      (element as any).offlineQueueItems = [];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      expect(element.textContent).not.toContain('pending upload');
+    });
+
+    it('folds offline queue items into the compose box', async () => {
+      (element as any).offlineQueueItems = [
+        {
+          id: 'offline-1',
+          type: 'file',
+          fileName: 'queued-photo.jpg',
+          fileType: 'image/jpeg',
+        },
+      ];
+      (element as any).isOnline = true;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // The offline row lives inside the compose box (the section that also
+      // contains the share textarea), not in a separate section below it.
+      const textarea = element.querySelector('textarea');
+      const composeSection = textarea?.closest('section');
+      expect(composeSection).toBeTruthy();
+      expect(composeSection?.textContent).toContain('queued-photo.jpg');
+      expect(composeSection?.textContent).toContain('Queued for upload');
+      expect(composeSection?.textContent).toContain('pending upload');
+    });
+
+    it('shows a Sync Now action when online', async () => {
+      (element as any).offlineQueueItems = [
+        { id: 'offline-1', type: 'text', content: 'queued note' },
+      ];
+      (element as any).isOnline = true;
+      (element as any).connectionErrorType = null;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const syncButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Sync Now',
+      );
+      expect(syncButton).toBeTruthy();
+    });
+
+    it('hides Sync Now and shows offline copy when offline', async () => {
+      (element as any).offlineQueueItems = [
+        { id: 'offline-1', type: 'text', content: 'queued note' },
+      ];
+      (element as any).isOnline = false;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const syncButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Sync Now',
+      );
+      expect(syncButton).toBeFalsy();
+      expect(element.textContent).toContain('Will upload when back online');
+    });
+
+    it('keeps the Share button disabled when only offline queue items exist', async () => {
+      (element as any).offlineQueueItems = [
+        { id: 'offline-1', type: 'text', content: 'queued note' },
+      ];
+      (element as any).textInput = '';
+      (element as any).isOnline = true;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const shareButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Share',
+      );
+      expect(shareButton).toBeTruthy();
+      expect((shareButton as HTMLButtonElement).disabled).toBe(true);
+    });
+  });
 });
 
 describe('SpaceView - Transfer Feature', () => {

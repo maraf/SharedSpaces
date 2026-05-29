@@ -547,7 +547,6 @@ test.describe('Screenshot Capture', () => {
             { id: '1', itemId: 'a1', spaceId: 'x', serverUrl: 'y', type: 'text', content: 'This message is waiting to be uploaded', timestamp: Date.now() },
             { id: '2', itemId: 'a2', spaceId: 'x', serverUrl: 'y', type: 'file', fileName: 'presentation.pdf', fileType: 'application/pdf', timestamp: Date.now() - 30000 },
           ];
-          sv.offlineQueueCount = 2;
         }
       });
       await page.waitForTimeout(500);
