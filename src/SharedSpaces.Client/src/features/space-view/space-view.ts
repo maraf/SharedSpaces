@@ -5,6 +5,7 @@ import { BaseElement } from '../../lib/base-element';
 import type { AppViewChangeDetail } from '../../lib/navigation';
 import { getToken, removeToken } from '../../lib/token-storage';
 import { formatRelativeTime } from '../../lib/format-time';
+import { modifierKey } from '../../lib/platform';
 import {
   SignalRClient,
   type ConnectionState,
@@ -2031,7 +2032,7 @@ export class SpaceView extends BaseElement {
             </div>
 
             <div class="flex items-center gap-2">
-              <span class="hidden text-xs text-slate-500 sm:inline">Ctrl/⌘+Enter</span>
+              <span class="hidden text-xs text-slate-500 sm:inline">${modifierKey}+Enter</span>
               <button
                 @click=${this.handleTextSubmit}
                 ?disabled=${this.isUploading || !this.textInput.trim()}
