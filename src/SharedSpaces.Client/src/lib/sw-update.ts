@@ -1,7 +1,7 @@
 /**
  * Lightweight service worker update manager.
  *
- * - Registers the SW (production only — dev mode is handled by vite-plugin-pwa)
+ * - Registers the SW (in both dev and production modes)
  * - Detects when a new SW is waiting to activate
  * - Exposes `checkForUpdates()` and `activateUpdate()`
  */
@@ -12,6 +12,7 @@ export interface SwUpdateCallbacks {
 
 let registration: ServiceWorkerRegistration | undefined;
 let callbacks: SwUpdateCallbacks | undefined;
+let refreshing = false;
 
 function trackInstalling(worker: ServiceWorker) {
   worker.addEventListener('statechange', () => {
@@ -52,8 +53,10 @@ export async function initSwUpdate(cb: SwUpdateCallbacks): Promise<void> {
     }
   });
 
-  // Reload when the new SW takes over
+  // Reload when the new SW takes over (one-shot guard to prevent loops)
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
     window.location.reload();
   });
 }

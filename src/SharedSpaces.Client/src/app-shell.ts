@@ -138,7 +138,7 @@ export class AppShell extends BaseElement {
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
 
     // Initialise SW update detection
-    initSwUpdate({
+    void initSwUpdate({
       onUpdateAvailable: () => { this.swUpdateAvailable = true; },
     });
 
@@ -232,7 +232,7 @@ export class AppShell extends BaseElement {
     if (this.swUpdateAvailable) {
       activateUpdate();
     } else {
-      checkForUpdates();
+      void checkForUpdates();
     }
   };
 
