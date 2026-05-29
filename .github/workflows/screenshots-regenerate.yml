@@ -1,28 +1,32 @@
-name: Screenshots
+name: Regenerate Screenshots
 
 on:
-  pull_request:
-    branches:
-      - main
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'src/SharedSpaces.Client/**'
-      - 'docs/screenshots/**'
-      - '.github/workflows/screenshots.yml'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to regenerate screenshots for'
+        required: true
+        type: number
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: read
 
 jobs:
-  verify:
-    name: Verify screenshots are up to date
-    if: github.event.pull_request.draft == false
+  regenerate:
+    name: Regenerate screenshots for PR
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: src/SharedSpaces.Client
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout PR branch
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr checkout ${{ inputs.pr_number }}
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
@@ -45,15 +49,15 @@ jobs:
       - name: Run screenshot tests
         run: npx playwright test --project=screenshots
 
-      - name: Verify no uncommitted screenshot changes
+      - name: Commit and push updated screenshots
         working-directory: .
         run: |
           if [ -n "$(git status --porcelain docs/screenshots/)" ]; then
-            echo "::error::Screenshots are out of date. Please run 'npx playwright test' locally and commit the updated screenshots."
-            echo ""
-            echo "Changed files:"
-            git status --porcelain docs/screenshots/
-            echo ""
-            git diff --stat docs/screenshots/
-            exit 1
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/screenshots/
+            git commit -m "chore(client): regenerate screenshots"
+            git push
+          else
+            echo "Screenshots are already up to date."
           fi
