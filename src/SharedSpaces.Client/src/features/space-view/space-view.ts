@@ -1056,6 +1056,26 @@ export class SpaceView extends BaseElement {
     );
   }
 
+  // Pending shares from other apps that have not yet been promoted into the
+  // compose queue (drafts / pending text shares). Promoting a file pending
+  // share keeps it in `pendingShares` until the upload is confirmed, so we
+  // filter the already-promoted ones out to avoid rendering duplicate rows.
+  private get visiblePendingShares(): PendingShareItem[] {
+    const promotedIds = new Set<string>([
+      ...this.fileRenameDrafts
+        .map((draft) => draft.pendingShareId)
+        .filter((id): id is string => Boolean(id)),
+      ...this.fileRenamePendingTextShares.map((share) => share.id),
+    ]);
+    return this.pendingShares.filter((share) => !promotedIds.has(share.id));
+  }
+
+  // Whether the compose box should render its queue area: the user's own
+  // drafts/text shares, or pending shares folded in from other apps.
+  private get hasComposeContent(): boolean {
+    return this.hasComposeQueue || this.visiblePendingShares.length > 0;
+  }
+
   private handleComposeShare = async () => {
     if (this.hasComposeQueue) {
       // When text is also typed in the box, send it first, then the queued
@@ -2027,7 +2047,6 @@ export class SpaceView extends BaseElement {
         ${this.renderSyncStatus()}
         ${this.showSettings ? this.renderJournalSyncToggle() : nothing}
         ${this.renderUploadArea()}
-        ${this.renderPendingSharesSection()}
         ${this.renderPendingUploadsSection()}
         ${this.renderItemsList()}
         ${this.modalItem ? this.renderModal() : nothing}
@@ -2157,80 +2176,6 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderPendingSharesSection() {
-    if (this.pendingShares.length === 0) return nothing;
-
-    return html`
-      <section
-        class="space-y-3"
-      >
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-sm font-medium text-amber-300">
-            📥 ${this.pendingShares.length}
-            item${this.pendingShares.length !== 1 ? 's' : ''} shared from other
-            apps
-          </p>
-          <div class="flex gap-2">
-            <button
-              @click=${() => this.uploadAllPendingShares()}
-              ?disabled=${this.isUploading}
-              class="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
-            >
-              Upload All
-            </button>
-          </div>
-        </div>
-
-        <ul class="space-y-2">
-          ${this.pendingShares.map((share) => {
-            const icon = share.type === 'file'
-              ? getFileTypeIcon(share.fileName ?? 'file')
-              : getTextItemIcon();
-
-            const content = html`
-              <!-- Left: Icon -->
-              <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
-                ${icon.svg}
-              </div>
-              <!-- Center: Content -->
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-slate-200">
-                  ${share.type === 'file'
-                    ? share.fileName ?? 'File'
-                    : (share.content ?? '').substring(0, 100)}
-                </p>
-                <p class="text-xs text-slate-500">
-                  Pending upload
-                </p>
-              </div>
-              <!-- Right: Actions -->
-              <div class="-mr-2 flex shrink-0 items-center gap-1">
-                <button
-                  @click=${() => this.requestPendingShareUpload(share)}
-                  ?disabled=${this.isUploading}
-                  class="rounded px-3 py-1.5 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
-                  title="Upload this item"
-                >
-                  Upload
-                </button>
-                <button
-                  @click=${() => this.dismissPendingShare(share)}
-                  class="rounded p-2 text-slate-500 transition hover:text-red-400"
-                  title="Dismiss"
-                  aria-label="Dismiss shared item"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-              </div>
-            `;
-
-            return this.renderUnifiedItemCard(content, undefined, 'border-amber-500/40', 'bg-amber-950/20');
-          })}
-        </ul>
-      </section>
-    `;
-  }
-
   private renderPendingUploadsSection() {
     if (this.offlineQueueItems.length === 0) return nothing;
 
@@ -2299,15 +2244,77 @@ export class SpaceView extends BaseElement {
   }
 
   private renderComposeQueue() {
+    const pendingShares = this.visiblePendingShares;
+
     return html`
       <div class="border-t border-slate-800">
         ${this.fileRenameDrafts.map((draft, index) =>
           this.renderComposeFileRow(draft, index))}
         ${this.fileRenamePendingTextShares.map((share) =>
           this.renderComposeTextRow(share))}
+        ${pendingShares.length > 0
+          ? html`
+            <div
+              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5 first:border-t-0"
+            >
+              <span class="text-xs font-medium text-amber-300/80">
+                Shared from other apps
+              </span>
+              <button
+                @click=${() => this.uploadAllPendingShares()}
+                ?disabled=${this.isUploading}
+                class="rounded px-2 py-1 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
+              >
+                Upload all
+              </button>
+            </div>
+            ${pendingShares.map((share) =>
+              this.renderComposePendingShareRow(share))}
+          `
+          : nothing}
         ${this.fileRenameError
           ? html`<p class="px-4 py-2 text-xs text-red-400">${this.fileRenameError}</p>`
           : nothing}
+      </div>
+    `;
+  }
+
+  private renderComposePendingShareRow(share: PendingShareItem) {
+    const icon = share.type === 'file'
+      ? getFileTypeIcon(share.fileName ?? 'file')
+      : getTextItemIcon();
+    const label = share.type === 'file'
+      ? share.fileName ?? 'File'
+      : (share.content ?? '').substring(0, 100);
+
+    return html`
+      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2">
+        <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+          ${icon.svg}
+        </div>
+        <div class="min-w-0 flex-1 px-1">
+          <p class="truncate text-sm font-medium text-slate-200">${label}</p>
+          <p class="text-xs text-slate-500">Shared from another app</p>
+        </div>
+        <div class="flex shrink-0 items-center gap-1">
+          <button
+            @click=${() => this.requestPendingShareUpload(share)}
+            ?disabled=${this.isUploading}
+            class="rounded px-3 py-1.5 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
+            title="Upload this item"
+          >
+            Upload
+          </button>
+          <button
+            @click=${() => this.dismissPendingShare(share)}
+            ?disabled=${this.isUploading}
+            class="rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+            title="Dismiss"
+            aria-label="Dismiss shared item"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
       </div>
     `;
   }
@@ -2432,8 +2439,9 @@ export class SpaceView extends BaseElement {
             class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
 
-          <!-- Inline compose queue (files to rename + pending text shares) -->
-          ${this.hasComposeQueue ? this.renderComposeQueue() : nothing}
+          <!-- Inline compose queue (files to rename, pending text shares,
+               and shares folded in from other apps) -->
+          ${this.hasComposeContent ? this.renderComposeQueue() : nothing}
 
           <!-- Action bar -->
           <div

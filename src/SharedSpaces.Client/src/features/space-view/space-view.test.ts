@@ -2501,19 +2501,21 @@ describe('SpaceView - Unified Item Card Layout', () => {
     });
   });
 
-  describe('renderPendingSharesSection', () => {
-    it('does not render when there are no pending shares', async () => {
+  describe('pending shares folded into compose box', () => {
+    it('does not render pending shares when there are none', async () => {
       (element as any).pendingShares = [];
       (element as any).isLoading = false;
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => s.classList.contains('border-amber-500/30'));
-      expect(section).toBeFalsy();
+      expect(element.textContent).not.toContain('Shared from another app');
+      const uploadAll = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Upload all',
+      );
+      expect(uploadAll).toBeFalsy();
     });
 
-    it('renders pending text share with unified card layout', async () => {
+    it('folds a pending text share into the compose box', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
@@ -2525,30 +2527,16 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      // Verify the pending shares section exists
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s =>
-        s.textContent?.includes('Shared text from another app')
-      );
-      expect(section).toBeTruthy();
-
-      // Verify the unified card layout is used
-      const cards = section?.querySelectorAll('li');
-      const card = Array.from(cards || []).find(c =>
-        c.classList.contains('rounded-lg') &&
-        c.classList.contains('border') &&
-        c.classList.contains('border-amber-500/40')
-      );
-      expect(card).toBeTruthy();
-      expect(card?.classList.contains('px-4')).toBe(true);
-      expect(card?.classList.contains('py-3')).toBe(true);
-      expect(card?.classList.contains('bg-amber-950/20')).toBe(true);
-
-      // Verify content is rendered
-      expect(section?.textContent).toContain('Shared text from another app');
+      // The pending row lives inside the compose box (the section that also
+      // contains the share textarea), not in a separate section below it.
+      const textarea = element.querySelector('textarea');
+      const composeSection = textarea?.closest('section');
+      expect(composeSection).toBeTruthy();
+      expect(composeSection?.textContent).toContain('Shared text from another app');
+      expect(composeSection?.textContent).toContain('Shared from another app');
     });
 
-    it('renders pending file share with unified card layout', async () => {
+    it('folds a pending file share into the compose box', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-2',
@@ -2561,29 +2549,13 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s =>
-        s.textContent?.includes('shared-doc.pdf')
-      );
-      expect(section).toBeTruthy();
-
-      // Verify the unified card layout is used with amber variant
-      const cards = section?.querySelectorAll('li');
-      const card = Array.from(cards || []).find(c =>
-        c.classList.contains('rounded-lg') &&
-        c.classList.contains('border') &&
-        c.classList.contains('border-amber-500/40')
-      );
-      expect(card).toBeTruthy();
-      expect(card?.classList.contains('px-4')).toBe(true);
-      expect(card?.classList.contains('py-3')).toBe(true);
-      expect(card?.classList.contains('bg-amber-950/20')).toBe(true);
-
-      // Verify file name is rendered
-      expect(section?.textContent).toContain('shared-doc.pdf');
+      const textarea = element.querySelector('textarea');
+      const composeSection = textarea?.closest('section');
+      expect(composeSection?.textContent).toContain('shared-doc.pdf');
+      expect(composeSection?.textContent).toContain('Shared from another app');
     });
 
-    it('renders Upload and Dismiss buttons for each pending share', async () => {
+    it('renders Upload, Dismiss, and Upload all actions for pending shares', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
@@ -2595,108 +2567,66 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s =>
-        s.textContent?.includes('Test share')
-      );
-      const buttons = section?.querySelectorAll('button');
+      const buttons = Array.from(element.querySelectorAll('button'));
 
-      // Should have Upload All, Upload (per item), and Dismiss (per item)
-      expect(buttons?.length).toBeGreaterThanOrEqual(3);
-
-      // Find the Upload button (per item)
-      const uploadButton = Array.from(buttons || []).find(b =>
-        b.textContent?.trim() === 'Upload' && b.title === 'Upload this item'
+      const uploadButton = buttons.find(
+        (b) => b.textContent?.trim() === 'Upload' && b.title === 'Upload this item',
       );
       expect(uploadButton).toBeTruthy();
 
-      // Find the Dismiss button
-      const dismissButton = Array.from(buttons || []).find(b =>
-        b.getAttribute('aria-label') === 'Dismiss shared item'
+      const dismissButton = buttons.find(
+        (b) => b.getAttribute('aria-label') === 'Dismiss shared item',
       );
       expect(dismissButton).toBeTruthy();
+
+      const uploadAllButton = buttons.find(
+        (b) => b.textContent?.trim() === 'Upload all',
+      );
+      expect(uploadAllButton).toBeTruthy();
     });
 
-    it('renders multiple pending shares each with unified card layout', async () => {
+    it('does not duplicate a file pending share once it is promoted into a draft', async () => {
+      const share = {
+        id: 'pending-file',
+        type: 'file' as const,
+        fileName: 'photo.jpg',
+        fileType: 'image/jpeg',
+        fileData: new Uint8Array([1, 2, 3]).buffer,
+        timestamp: Date.now(),
+      };
+      (element as any).pendingShares = [share];
+      // Promote it into the compose queue (keeps it in pendingShares until upload).
+      (element as any).requestPendingShareUpload(share);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // The promoted share should now be an editable draft row, not also a
+      // folded-in pending row.
+      expect((element as any).visiblePendingShares).toHaveLength(0);
+      const subtitles = Array.from(element.querySelectorAll('p')).filter(
+        (p) => p.textContent?.trim() === 'Shared from another app',
+      );
+      expect(subtitles).toHaveLength(0);
+    });
+
+    it('keeps the Share button disabled when only pending shares exist', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
           type: 'text',
-          content: 'First share',
-        },
-        {
-          id: 'pending-2',
-          type: 'file',
-          fileName: 'document.pdf',
-          blob: new Blob(['test']),
+          content: 'Only pending',
         },
       ];
+      (element as any).textInput = '';
       (element as any).isLoading = false;
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s =>
-        s.textContent?.includes('First share')
+      const shareButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Share',
       );
-
-      const allLis = section?.querySelectorAll('li');
-      const cards = Array.from(allLis || []).filter(c =>
-        c.classList.contains('rounded-lg') &&
-        c.classList.contains('border') &&
-        c.classList.contains('border-amber-500/40')
-      );
-
-      // Should have 2 cards
-      expect(cards.length).toBe(2);
-
-      // Each card should have the unified layout classes
-      cards.forEach(card => {
-        expect(card.classList.contains('px-4')).toBe(true);
-        expect(card.classList.contains('py-3')).toBe(true);
-        expect(card.classList.contains('relative')).toBe(true);
-      });
-    });
-
-    it('pending share cards and regular item cards share the same base layout classes', async () => {
-      // Set up both regular items and pending shares
-      const item = makeItem({ content: 'Regular item' });
-      (element as any).items = [item];
-      (element as any).pendingShares = [
-        {
-          id: 'pending-1',
-          type: 'text',
-          content: 'Pending share',
-        },
-      ];
-      (element as any).isLoading = false;
-      (element as any).requestUpdate();
-      await element.updateComplete;
-
-      // Get regular item cards (border-slate-800)
-      const allLis = element.querySelectorAll('li');
-      const regularCards = Array.from(allLis).filter(c =>
-        c.classList.contains('rounded-lg') &&
-        c.classList.contains('border') &&
-        c.classList.contains('border-slate-800')
-      );
-      expect(regularCards.length).toBeGreaterThanOrEqual(1);
-
-      // Get pending share cards (border-amber-500/40)
-      const pendingCards = Array.from(allLis).filter(c =>
-        c.classList.contains('rounded-lg') &&
-        c.classList.contains('border') &&
-        c.classList.contains('border-amber-500/40')
-      );
-      expect(pendingCards.length).toBeGreaterThanOrEqual(1);
-
-      // Verify all cards share the same base layout classes
-      const expectedClasses = ['relative', 'rounded-lg', 'border', 'px-4', 'py-3'];
-      [...regularCards, ...pendingCards].forEach(card => {
-        expectedClasses.forEach(cls => {
-          expect(card.classList.contains(cls)).toBe(true);
-        });
-      });
+      expect(shareButton).toBeTruthy();
+      expect((shareButton as HTMLButtonElement).disabled).toBe(true);
     });
 
     describe('rename before upload', () => {
