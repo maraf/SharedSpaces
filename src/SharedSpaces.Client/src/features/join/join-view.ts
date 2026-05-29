@@ -99,6 +99,7 @@ export class JoinView extends BaseElement {
 
   private handleSubmit = (e: Event) => {
     e.preventDefault();
+    if (this.isLoading) return;
     this.handleJoin();
   };
 

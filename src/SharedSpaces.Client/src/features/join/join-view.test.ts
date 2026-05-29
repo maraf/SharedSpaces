@@ -393,15 +393,13 @@ describe('join-view', () => {
       const form = element.querySelector('form')!;
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 
-      // Wait for async handleJoin to complete
-      await element.updateComplete;
-      await new Promise((r) => setTimeout(r, 0));
-
-      expect(mockExchangeToken).toHaveBeenCalledWith(
-        'http://example.com',
-        '123456',
-        'Alice'
-      );
+      await vi.waitFor(() => {
+        expect(mockExchangeToken).toHaveBeenCalledWith(
+          'http://example.com',
+          '123456',
+          'Alice'
+        );
+      });
     });
 
     it('prevents default form submission (no page reload)', async () => {
