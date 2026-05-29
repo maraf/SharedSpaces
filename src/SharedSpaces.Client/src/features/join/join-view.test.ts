@@ -379,6 +379,49 @@ describe('join-view', () => {
     });
   });
 
+  describe('form submission', () => {
+    it('submits when Enter is pressed in an input', async () => {
+      await element.updateComplete;
+
+      mockExchangeToken.mockResolvedValue({ token: 'jwt-token' });
+
+      (element as any).serverUrl = 'http://example.com';
+      (element as any).pin = '123456';
+      (element as any).displayName = 'Alice';
+      await element.updateComplete;
+
+      const form = element.querySelector('form')!;
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+      await vi.waitFor(() => {
+        expect(mockExchangeToken).toHaveBeenCalledWith(
+          'http://example.com',
+          '123456',
+          'Alice'
+        );
+      });
+    });
+
+    it('prevents default form submission (no page reload)', async () => {
+      await element.updateComplete;
+
+      const form = element.querySelector('form')!;
+      const event = new Event('submit', { bubbles: true, cancelable: true });
+      form.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('renders a form element wrapping the inputs', async () => {
+      await element.updateComplete;
+
+      const form = element.querySelector('form');
+      expect(form).toBeTruthy();
+      expect(form!.querySelector('#invitation')).toBeTruthy();
+      expect(form!.querySelector('#displayName')).toBeTruthy();
+    });
+  });
+
   describe('render', () => {
     it('renders invitation input in paste mode', async () => {
       await element.updateComplete;
