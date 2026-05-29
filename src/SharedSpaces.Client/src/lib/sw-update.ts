@@ -13,6 +13,9 @@ export interface SwUpdateCallbacks {
 let registration: ServiceWorkerRegistration | undefined;
 let callbacks: SwUpdateCallbacks | undefined;
 let refreshing = false;
+// Only reload on controllerchange when the user explicitly activated an update.
+// The initial clients.claim() on first control must not trigger a reload.
+let userTriggeredUpdate = false;
 
 function trackInstalling(worker: ServiceWorker) {
   worker.addEventListener('statechange', () => {
@@ -53,8 +56,11 @@ export async function initSwUpdate(cb: SwUpdateCallbacks): Promise<void> {
     }
   });
 
-  // Reload when the new SW takes over (one-shot guard to prevent loops)
+  // Reload when the new SW takes over, but only after a user-initiated update.
+  // Ignoring the first-load clients.claim() avoids reloading first-time visitors
+  // (and prevents colliding with test/page-driven reloads).
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!userTriggeredUpdate) return;
     if (refreshing) return;
     refreshing = true;
     window.location.reload();
@@ -74,5 +80,6 @@ export async function checkForUpdates(): Promise<void> {
  * Tell the waiting SW to activate, which triggers `controllerchange` → reload.
  */
 export function activateUpdate(): void {
+  userTriggeredUpdate = true;
   registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
 }
