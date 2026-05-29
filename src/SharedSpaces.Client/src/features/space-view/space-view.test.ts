@@ -5,7 +5,9 @@ import './space-view';
 import { SpaceView } from './space-view';
 import type { ItemAddedPayload } from '../../lib/signalr-client';
 import type { SpaceItemResponse } from './space-api';
+import * as idbStorage from '../../lib/idb-storage';
 import { clearAllCachedFiles, clearStoredAuthTokens } from '../../lib/idb-storage';
+import * as tokenStorage from '../../lib/token-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
 import { buildShareUrl } from '../../lib/share-link';
 
@@ -1249,6 +1251,89 @@ describe('SpaceView - Deduplication Logic', () => {
         expect(itemsAfterSignalR).toHaveLength(1);
         expect(itemsAfterSignalR[0].id).toBe(failedShareId);
       }
+    });
+  });
+});
+
+describe('SpaceView - Leave Space', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = 'leave-space-id';
+
+  let element: SpaceView;
+
+  const findButton = (label: string): HTMLButtonElement | undefined => Array
+    .from(element.querySelectorAll('button'))
+    .find((button) => button.textContent?.trim() === label) as HTMLButtonElement | undefined;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    element = document.createElement('space-view') as SpaceView;
+
+    vi.spyOn(element as any, 'loadData').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'loadPendingShares').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'refreshOfflineQueue').mockResolvedValue(undefined);
+
+    document.body.appendChild(element);
+    element.serverUrl = serverUrl;
+    element.spaceId = spaceId;
+    element.showSettings = true;
+    (element as any).isLoading = false;
+    await element.updateComplete;
+  });
+
+  afterEach(() => {
+    element.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('shows the "Leave" button when settings are open', () => {
+    expect(findButton('Leave')).toBeTruthy();
+    expect(findButton('Confirm')).toBeUndefined();
+    expect(findButton('Cancel')).toBeUndefined();
+  });
+
+  it('clicking "Leave" shows "Confirm" and "Cancel" buttons', async () => {
+    findButton('Leave')!.click();
+    await element.updateComplete;
+
+    expect(findButton('Leave')).toBeUndefined();
+    expect(findButton('Confirm')).toBeTruthy();
+    expect(findButton('Cancel')).toBeTruthy();
+  });
+
+  it('clicking "Cancel" returns to the initial "Leave" button state', async () => {
+    findButton('Leave')!.click();
+    await element.updateComplete;
+
+    findButton('Cancel')!.click();
+    await element.updateComplete;
+
+    expect((element as any).leaveConfirm).toBe(false);
+    expect(findButton('Leave')).toBeTruthy();
+    expect(findButton('Confirm')).toBeUndefined();
+    expect(findButton('Cancel')).toBeUndefined();
+  });
+
+  it('clicking "Confirm" removes the token, clears offline queue, and dispatches view-change for join with reloadSpaces', async () => {
+    const removeTokenSpy = vi.spyOn(tokenStorage, 'removeToken').mockResolvedValue();
+    const clearOfflineQueueSpy = vi.spyOn(idbStorage, 'clearOfflineQueueForSpace').mockResolvedValue();
+    const stopSignalRSpy = vi.spyOn(element as any, 'stopSignalR').mockResolvedValue(undefined);
+    const viewChangeHandler = vi.fn();
+    element.addEventListener('view-change', viewChangeHandler as EventListener);
+
+    findButton('Leave')!.click();
+    await element.updateComplete;
+
+    findButton('Confirm')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stopSignalRSpy).toHaveBeenCalledOnce();
+    expect(removeTokenSpy).toHaveBeenCalledWith(serverUrl, spaceId);
+    expect(clearOfflineQueueSpy).toHaveBeenCalledWith(serverUrl, spaceId);
+    expect(viewChangeHandler).toHaveBeenCalledTimes(1);
+    expect((viewChangeHandler.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      view: 'join',
+      reloadSpaces: true,
     });
   });
 });
