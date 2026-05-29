@@ -5,6 +5,7 @@ import { BaseElement } from '../../lib/base-element';
 import type { AppViewChangeDetail } from '../../lib/navigation';
 import { getToken, removeToken } from '../../lib/token-storage';
 import { formatRelativeTime } from '../../lib/format-time';
+import { modifierKey } from '../../lib/platform';
 import {
   SignalRClient,
   type ConnectionState,
@@ -193,6 +194,7 @@ export class SpaceView extends BaseElement {
   @state() private fileRenameDrafts: FileRenameDraft[] = [];
   @state() private fileRenamePendingTextShares: PendingShareItem[] = [];
   @state() private fileRenameError = '';
+  @state() private leaveConfirm = false;
   @state() private journalSyncEnabled = false;
   @state() private journalSyncLoading = false;
   @state() private cacheStorageStatus: StorageBudgetSnapshot | null = null;
@@ -2045,7 +2047,7 @@ export class SpaceView extends BaseElement {
         ${this.renderOfflineBanner()}
         ${this.renderServerUnreachableBanner()}
         ${this.renderSyncStatus()}
-        ${this.showSettings ? this.renderJournalSyncToggle() : nothing}
+        ${this.showSettings ? this.renderSettingsPanel() : nothing}
         ${this.renderUploadArea()}
         ${this.renderPendingUploadsSection()}
         ${this.renderItemsList()}
@@ -2100,9 +2102,19 @@ export class SpaceView extends BaseElement {
     `;
   }
 
+  private renderSettingsPanel() {
+    return html`
+      <div class="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-4">
+        ${this.renderJournalSyncToggle()}
+        <hr class="border-slate-700" />
+        ${this.renderLeaveSpace()}
+      </div>
+    `;
+  }
+
   private renderJournalSyncToggle() {
     return html`
-      <div class="rounded-lg border border-slate-700 bg-slate-900 p-4">
+      <div>
         <div class="flex items-center justify-between gap-4">
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-slate-200">
@@ -2172,6 +2184,46 @@ export class SpaceView extends BaseElement {
             ? 'Storage is persistent: cached files survive browser cleanup.'
             : 'Storage is best-effort: the browser may evict cached files when disk space runs low.'}
         </p>
+      </div>
+    `;
+  }
+
+  private renderLeaveSpace() {
+    return html`
+      <div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-200">Leave Space</p>
+            <p class="text-xs text-slate-500">
+              Remove this space from your device. Your shared items will remain on the server.
+            </p>
+          </div>
+          ${this.leaveConfirm
+            ? html`
+              <div class="flex shrink-0 gap-2">
+                <button
+                  @click=${() => this.removeSpace()}
+                  class="rounded-full border border-red-700 bg-red-900/30 px-3 py-1.5 text-xs font-semibold text-red-300 transition hover:border-red-600 hover:bg-red-900/50"
+                >
+                  Confirm
+                </button>
+                <button
+                  @click=${() => { this.leaveConfirm = false; }}
+                  class="rounded-full border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:bg-slate-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            `
+            : html`
+              <button
+                @click=${() => { this.leaveConfirm = true; }}
+                class="shrink-0 rounded-full border border-red-700 bg-red-900/30 px-4 py-1.5 text-xs font-semibold text-red-300 transition hover:border-red-600 hover:bg-red-900/50"
+              >
+                Leave
+              </button>
+            `}
+        </div>
       </div>
     `;
   }
@@ -2483,7 +2535,7 @@ export class SpaceView extends BaseElement {
             </div>
 
             <div class="flex items-center gap-2">
-              <span class="hidden text-xs text-slate-500 sm:inline">Ctrl/⌘+Enter</span>
+              <span class="hidden text-xs text-slate-500 sm:inline">${modifierKey}+Enter</span>
               <button
                 @click=${this.handleComposeShare}
                 ?disabled=${this.isUploading ||

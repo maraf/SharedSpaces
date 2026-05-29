@@ -43,6 +43,7 @@ import {
   type PendingShareItem,
 } from './lib/idb-storage';
 import { decodeShareLinkSegment } from './lib/share-link';
+import { initSwUpdate, checkForUpdates, activateUpdate } from './lib/sw-update';
 
 interface SpaceEntry {
   serverUrl: string;
@@ -75,6 +76,7 @@ export class AppShell extends BaseElement {
   @state() private spaceConnectionStates: Record<string, ConnectionState> = {};
   @state() private pendingShareCount = 0;
   @state() private pendingShares: PendingShareItem[] = [];
+  @state() private swUpdateAvailable = false;
   @state() private sheetOpen = false;
   @state() private spaceSettingsOpen = false;
   @state() private sharedToken?: string;
@@ -132,8 +134,13 @@ export class AppShell extends BaseElement {
       }
     });
 
-    // Listen for SW messages (registration handled by vite-plugin-pwa)
+    // Listen for SW messages (registration handled by sw-update service)
     navigator.serviceWorker?.addEventListener('message', this.handleSwMessage);
+
+    // Initialise SW update detection
+    void initSwUpdate({
+      onUpdateAvailable: () => { this.swUpdateAvailable = true; },
+    });
 
 
     // Check pending shares from IndexedDB
@@ -218,6 +225,14 @@ export class AppShell extends BaseElement {
   private handleSwMessage = (event: MessageEvent) => {
     if (event.data?.type === 'pending-share-added') {
       this.refreshPendingShareCount();
+    }
+  };
+
+  private handleVersionClick = () => {
+    if (this.swUpdateAvailable) {
+      activateUpdate();
+    } else {
+      void checkForUpdates();
     }
   };
 
@@ -442,7 +457,12 @@ export class AppShell extends BaseElement {
                 SharedSpaces
               </button>
               <div class="flex items-center gap-3">
-                <span class="text-xs text-slate-500">v${__APP_VERSION__}</span>
+                <button
+                  type="button"
+                  class="text-xs bg-transparent border-none p-0 cursor-pointer ${this.swUpdateAvailable ? 'version-rainbow font-semibold' : 'text-slate-500'}"
+                  title="${this.swUpdateAvailable ? 'Update available — click to activate' : 'Check for updates'}"
+                  @click=${this.handleVersionClick}
+                >v${__APP_VERSION__}</button>
                 <button
                   @click=${() => { this.view = 'admin'; }}
                   class="sm:hidden ${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"

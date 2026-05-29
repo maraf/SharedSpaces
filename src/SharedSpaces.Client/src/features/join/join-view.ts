@@ -97,6 +97,12 @@ export class JoinView extends BaseElement {
     this.errorMessage = '';
   };
 
+  private handleSubmit = (e: Event) => {
+    e.preventDefault();
+    if (this.isLoading) return;
+    this.handleJoin();
+  };
+
   private handleJoin = async () => {
     this.errorMessage = '';
 
@@ -158,7 +164,7 @@ export class JoinView extends BaseElement {
 
   override render() {
     return html`
-      <div class="max-w-lg space-y-8">
+      <form class="max-w-lg space-y-8" @submit=${this.handleSubmit}>
         <div>
           <h2 class="text-2xl font-semibold tracking-tight text-white">
             Join a Space
@@ -175,6 +181,7 @@ export class JoinView extends BaseElement {
               Invitation
             </p>
             <button
+              type="button"
               @click=${this.toggleEntryMode}
               class="text-xs text-sky-400 hover:text-sky-300 transition"
               ?disabled=${this.isLoading}
@@ -258,13 +265,13 @@ export class JoinView extends BaseElement {
 
         <!-- Join Button -->
         <button
-          @click=${this.handleJoin}
+          type="submit"
           ?disabled=${this.isLoading}
           class="w-full rounded-full bg-sky-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           ${this.isLoading ? 'Joining...' : 'Join Space'}
         </button>
-      </div>
+      </form>
     `;
   }
 }
