@@ -1,4 +1,5 @@
 import { test, type Page } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,21 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
 const CLIENT_DB_VERSION = 6;
+
+let deterministicCounter = 0;
+function deterministicUUID(): string {
+  const seq = deterministicCounter++;
+  const hash = createHash('sha256').update(`screenshot-item:${seq}`).digest();
+  const hex = hash.subarray(0, 16).toString('hex');
+  // Format as UUID v4-like: xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    '4' + hex.slice(13, 16),
+    ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
 
 interface ViewportSpec {
   name: string;
@@ -155,7 +171,7 @@ async function seedSpace(name: string) {
     'Updated the color tokens in the design system. Check Figma for the latest.',
     'Quick thought: we should add rate limiting before launch.',
   ]) {
-    const itemId = crypto.randomUUID();
+    const itemId = deterministicUUID();
     if (!firstTextItemId) firstTextItemId = itemId;
     const form = new FormData();
     form.append('id', itemId);
@@ -173,7 +189,7 @@ async function seedSpace(name: string) {
     { name: 'meeting-notes.txt', content: '# Meeting Notes — Sprint 12\n\n- Reviewed Q2 roadmap\n- Assigned onboarding tasks\n- Next sync: Thursday 3 PM' },
     { name: 'architecture.md', content: '# System Architecture\n\nClient → API Gateway → Services → Database' },
   ]) {
-    const fileItemId = crypto.randomUUID();
+    const fileItemId = deterministicUUID();
     const fileForm = new FormData();
     fileForm.append('id', fileItemId);
     fileForm.append('contentType', 'file');
@@ -187,7 +203,7 @@ async function seedSpace(name: string) {
 
   // Add a JSON file item (for text preview screenshot)
   const jsonContent = JSON.stringify({ greeting: 'Hello', items: [1, 2, 3], nested: { key: 'value' } }, null, 2);
-  const jsonItemId = crypto.randomUUID();
+  const jsonItemId = deterministicUUID();
   const jsonForm = new FormData();
   jsonForm.append('id', jsonItemId);
   jsonForm.append('contentType', 'file');
@@ -200,7 +216,7 @@ async function seedSpace(name: string) {
 
   // Add a PNG image file item (for image preview screenshot)
   const pngBytes = generateTestPng(200, 150);
-  const pngItemId = crypto.randomUUID();
+  const pngItemId = deterministicUUID();
   const pngForm = new FormData();
   pngForm.append('id', pngItemId);
   pngForm.append('contentType', 'file');
@@ -375,15 +391,7 @@ test.describe('Screenshot Capture', () => {
       await injectTokens(page, tokenMap);
       await page.reload();
       await page.waitForSelector('app-shell');
-      await page.evaluate(() => {
-        document.querySelector('main')?.dispatchEvent(
-          new CustomEvent('view-change', {
-            bubbles: true,
-            composed: true,
-            detail: { view: 'join' },
-          }),
-        );
-      });
+      await page.click('button[aria-label="Join a space"]');
       await page.waitForSelector('join-view');
       await page.waitForTimeout(500);
       await capture(page, 'join', vp);
@@ -568,7 +576,11 @@ test.describe('Screenshot Capture', () => {
 
       // Pre-populate the unified compose store with pending items for this dead
       // server. Pending uploads are compose-items with status 'pending'.
-      await page.evaluate(({ serverUrl, spaceId, dbVersion }) => {
+      const pendingId1 = deterministicUUID();
+      const pendingItemId1 = deterministicUUID();
+      const pendingId2 = deterministicUUID();
+      const pendingItemId2 = deterministicUUID();
+      await page.evaluate(({ serverUrl, spaceId, dbVersion, pendingId1, pendingItemId1, pendingId2, pendingItemId2 }) => {
         return new Promise<void>((resolve, reject) => {
           const request = indexedDB.open('shared-spaces-db', dbVersion);
           request.onerror = () => reject(request.error);
@@ -578,9 +590,9 @@ test.describe('Screenshot Capture', () => {
             const store = tx.objectStore('compose-items');
 
             store.put({
-              id: crypto.randomUUID(),
+              id: pendingId1,
               status: 'pending',
-              itemId: crypto.randomUUID(),
+              itemId: pendingItemId1,
               spaceId,
               serverUrl,
               type: 'text',
@@ -588,9 +600,9 @@ test.describe('Screenshot Capture', () => {
               timestamp: Date.now() - 60000,
             });
             store.put({
-              id: crypto.randomUUID(),
+              id: pendingId2,
               status: 'pending',
-              itemId: crypto.randomUUID(),
+              itemId: pendingItemId2,
               spaceId,
               serverUrl,
               type: 'file',
@@ -603,11 +615,7 @@ test.describe('Screenshot Capture', () => {
             tx.onerror = () => reject(tx.error);
           };
         });
-      }, {
-        serverUrl: deadServer,
-        spaceId: deadSpaceId,
-        dbVersion: CLIENT_DB_VERSION,
-      });
+      }, { serverUrl: deadServer, spaceId: deadSpaceId, dbVersion: CLIENT_DB_VERSION, pendingId1, pendingItemId1, pendingId2, pendingItemId2 });
 
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
@@ -657,6 +665,23 @@ test.describe('Screenshot Capture', () => {
       await deleteBtn.click();
       await page.waitForTimeout(500);
       await capture(page, 'space-delete-confirm', vp);
+    });
+
+    test(`space view - config panel - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      // Navigate into the first space
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+      // Open the settings panel via the gear button
+      const settingsToggle = page.locator('[data-testid="space-settings-toggle"]').first();
+      await settingsToggle.waitFor({ state: 'visible', timeout: 10_000 });
+      await settingsToggle.click();
+      await page.locator('text=Server Address').first().waitFor({ state: 'visible', timeout: 10_000 });
+      await capture(page, 'space-config', vp);
     });
 
     test(`space view - transfer button - ${vp.name}`, async ({ page }) => {
@@ -913,16 +938,8 @@ test.describe('Screenshot Capture', () => {
       await injectTokens(page, tokenMap);
       await page.reload();
       await page.waitForSelector('app-shell');
-      // Navigate to join view directly to avoid viewport-specific join controls
-      await page.evaluate(() => {
-        document.querySelector('main')?.dispatchEvent(
-          new CustomEvent('view-change', {
-            bubbles: true,
-            composed: true,
-            detail: { view: 'join' },
-          }),
-        );
-      });
+      // Navigate to join view via the "Join a space" button
+      await page.click('button[aria-label="Join a space"]');
       await page.waitForSelector('join-view');
       await page.waitForTimeout(500);
       // Switch to manual entry mode

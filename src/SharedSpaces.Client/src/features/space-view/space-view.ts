@@ -2290,9 +2290,20 @@ export class SpaceView extends BaseElement {
   private renderSettingsPanel() {
     return html`
       <div class="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-4">
+        ${this.renderServerAddress()}
+        <hr class="border-slate-700" />
         ${this.renderJournalSyncToggle()}
         <hr class="border-slate-700" />
         ${this.renderLeaveSpace()}
+      </div>
+    `;
+  }
+
+  private renderServerAddress() {
+    return html`
+      <div>
+        <p class="text-sm font-medium text-slate-200">Server Address</p>
+        <p class="text-xs text-slate-400 mt-1 break-words">${this.serverUrl ?? this.apiBaseUrl}</p>
       </div>
     `;
   }
