@@ -475,12 +475,12 @@ export class AppShell extends BaseElement {
             </div>
 
             <!-- Desktop pill nav — hidden on mobile -->
-            <nav class="hidden sm:flex items-center gap-2 flex-wrap" data-testid="desktop-pills">
+            <nav class="hidden sm:flex items-center gap-2 flex-wrap text-xs" data-testid="desktop-pills">
               ${this.pendingShareCount > 0
                 ? html`
                   <button
                     @click=${() => { this.view = 'pending-shares'; }}
-                    class="rounded-full border px-3 py-1 text-xs font-medium transition inline-flex items-center gap-1.5 ${this.view === 'pending-shares'
+                    class="rounded-full border px-3 py-1.5 text-xs font-medium transition inline-flex items-center gap-1.5 ${this.view === 'pending-shares'
                       ? 'border-amber-500 bg-amber-950/60 text-amber-300'
                       : 'border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60'}"
                     title="Items shared from other apps"
