@@ -94,7 +94,7 @@ export default defineConfig({
         ConnectionStrings__DefaultConnection: `Data Source=${screenshotsDbPath}`,
         Storage__BasePath: screenshotsStoragePath,
         Cors__Origins: clientBaseUrl,
-        Screenshots__UseDeterministicTime: 'true',
+        DeterministicTime__SeededUtcNow: '2025-03-19T16:00:00Z',
         ASPNETCORE_ENVIRONMENT: 'Development',
         ASPNETCORE_URLS: serverBaseUrl,
       },
