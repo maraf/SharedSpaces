@@ -10,7 +10,11 @@ declare const self: ServiceWorkerGlobalScope;
 const DB_NAME = 'shared-spaces-db';
 const DB_VERSION = 6;
 const PENDING_SHARES_STORE = 'pending-shares';
-const COMPOSE_DRAFTS_STORE = 'compose-drafts';
+// Unified compose queue (see idb-storage.ts for the full contract). The SW only
+// ever uploads rows whose `status === 'pending'`; `draft` rows are never touched
+// here so a not-yet-shared file can never be background-uploaded.
+const COMPOSE_ITEMS_STORE = 'compose-items';
+// Legacy store shipped at v5; still drained here for the deploy-skew window.
 const OFFLINE_QUEUE_STORE = 'offline-queue';
 const AUTH_TOKENS_STORE = 'auth-tokens';
 const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
@@ -29,6 +33,19 @@ interface OfflineQueueItem {
   fileType?: string;
   fileData?: ArrayBuffer;
   timestamp: number;
+}
+
+// Unified compose-queue row. Structurally a superset of OfflineQueueItem plus a
+// `status`. The SW only background-uploads rows whose status is 'pending'.
+interface ComposeItem extends OfflineQueueItem {
+  status: 'draft' | 'pending';
+}
+
+// A syncable upload paired with the store it came from, so we delete it from the
+// right place on success / permanent failure.
+interface SyncEntry {
+  item: OfflineQueueItem;
+  origin: 'compose' | 'offline';
 }
 
 interface SyncSummary {
@@ -60,8 +77,8 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(PENDING_SHARES_STORE)) {
         db.createObjectStore(PENDING_SHARES_STORE, { keyPath: 'id' });
       }
-      if (!db.objectStoreNames.contains(COMPOSE_DRAFTS_STORE)) {
-        db.createObjectStore(COMPOSE_DRAFTS_STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(COMPOSE_ITEMS_STORE)) {
+        db.createObjectStore(COMPOSE_ITEMS_STORE, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         db.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: 'id' });
@@ -83,7 +100,11 @@ function openDB(): Promise<IDBDatabase> {
         metaStore.createIndex('accessedAt', 'accessedAt');
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () => {
       dbInstance = null;
       reject(request.error);
@@ -156,6 +177,41 @@ async function getOfflineQueue(): Promise<OfflineQueueItem[]> {
   });
 }
 
+async function getPendingComposeItems(): Promise<ComposeItem[]> {
+  const db = await openDB();
+  if (!db.objectStoreNames.contains(COMPOSE_ITEMS_STORE)) {
+    return [];
+  }
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(COMPOSE_ITEMS_STORE, 'readonly');
+    const request = tx.objectStore(COMPOSE_ITEMS_STORE).getAll();
+    request.onsuccess = () => {
+      const items = (request.result as ComposeItem[])
+        .filter((item) => item.status === 'pending')
+        .sort((a, b) =>
+          (b.timestamp - a.timestamp)
+          || a.id.localeCompare(b.id)
+          || a.itemId.localeCompare(b.itemId),
+        );
+      resolve(items);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Pending compose-items first, then any legacy offline-queue rows (which the
+// app-side migration normally drains, but the SW may run before the app opens).
+async function getSyncEntries(): Promise<SyncEntry[]> {
+  const [compose, legacy] = await Promise.all([
+    getPendingComposeItems(),
+    getOfflineQueue(),
+  ]);
+  return [
+    ...compose.map((item): SyncEntry => ({ item, origin: 'compose' })),
+    ...legacy.map((item): SyncEntry => ({ item, origin: 'offline' })),
+  ];
+}
+
 async function getStoredToken(serverUrl: string, spaceId: string): Promise<string | undefined> {
   const db = await openDB();
   const key = `${serverUrl}:${spaceId}`;
@@ -184,6 +240,27 @@ async function removeOfflineQueueItem(id: string): Promise<void> {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+async function removeComposeItem(id: string): Promise<void> {
+  const db = await openDB();
+  if (!db.objectStoreNames.contains(COMPOSE_ITEMS_STORE)) {
+    return;
+  }
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(COMPOSE_ITEMS_STORE, 'readwrite');
+    tx.objectStore(COMPOSE_ITEMS_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function removeSyncEntry(entry: SyncEntry): Promise<void> {
+  if (entry.origin === 'compose') {
+    await removeComposeItem(entry.item.id);
+  } else {
+    await removeOfflineQueueItem(entry.item.id);
+  }
 }
 
 async function uploadOfflineQueueItem(item: OfflineQueueItem, token: string): Promise<void> {
@@ -235,7 +312,7 @@ async function uploadOfflineQueueItem(item: OfflineQueueItem, token: string): Pr
 }
 
 async function syncOfflineQueueInBackground(): Promise<SyncSummary> {
-  const queue = await getOfflineQueue();
+  const queue = await getSyncEntries();
   if (queue.length === 0) {
     return { synced: 0, failed: 0, retryable: 0, spaces: [] };
   }
@@ -245,7 +322,8 @@ async function syncOfflineQueueInBackground(): Promise<SyncSummary> {
   let retryable = 0;
   const affectedSpaces = new Map<string, { serverUrl: string; spaceId: string }>();
 
-  for (const item of queue) {
+  for (const entry of queue) {
+    const { item } = entry;
     affectedSpaces.set(`${item.serverUrl}|${item.spaceId}`, {
       serverUrl: item.serverUrl,
       spaceId: item.spaceId,
@@ -260,12 +338,12 @@ async function syncOfflineQueueInBackground(): Promise<SyncSummary> {
 
     try {
       await uploadOfflineQueueItem(item, token);
-      await removeOfflineQueueItem(item.id);
+      await removeSyncEntry(entry);
       synced++;
     } catch (error) {
       const status = error instanceof SyncUploadError ? error.status : undefined;
       if (isPermanentSyncFailure(status)) {
-        await removeOfflineQueueItem(item.id);
+        await removeSyncEntry(entry);
       } else {
         retryable++;
       }

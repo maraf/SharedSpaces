@@ -538,14 +538,15 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
 
-      // Directly set the component's reactive state to show pending uploads
-      // (IDB-based injection gets auto-synced by the service worker when online)
+      // Directly set the component's reactive state to show pending uploads.
+      // Pending uploads now live in the unified compose list as rows with
+      // status 'pending' (folded into the compose box, not a separate section).
       await page.evaluate(() => {
         const sv = document.querySelector('space-view') as any;
         if (sv) {
-          sv.offlineQueueItems = [
-            { id: '1', itemId: 'a1', spaceId: 'x', serverUrl: 'y', type: 'text', content: 'This message is waiting to be uploaded', timestamp: Date.now() },
-            { id: '2', itemId: 'a2', spaceId: 'x', serverUrl: 'y', type: 'file', fileName: 'presentation.pdf', fileType: 'application/pdf', timestamp: Date.now() - 30000 },
+          sv.composeItems = [
+            { id: '1', status: 'pending', itemId: 'a1', type: 'text', name: '', content: 'This message is waiting to be uploaded', timestamp: Date.now() },
+            { id: '2', status: 'pending', itemId: 'a2', type: 'file', name: 'presentation.pdf', fileType: 'application/pdf', timestamp: Date.now() - 30000 },
           ];
         }
       });
@@ -565,18 +566,20 @@ test.describe('Screenshot Capture', () => {
       await page.reload();
       await page.waitForSelector('app-shell');
 
-      // Pre-populate offline queue with pending items for this dead server
+      // Pre-populate the unified compose store with pending items for this dead
+      // server. Pending uploads are compose-items with status 'pending'.
       await page.evaluate(({ serverUrl, spaceId, dbVersion }) => {
         return new Promise<void>((resolve, reject) => {
           const request = indexedDB.open('shared-spaces-db', dbVersion);
           request.onerror = () => reject(request.error);
           request.onsuccess = () => {
             const db = request.result;
-            const tx = db.transaction('offline-queue', 'readwrite');
-            const store = tx.objectStore('offline-queue');
+            const tx = db.transaction('compose-items', 'readwrite');
+            const store = tx.objectStore('compose-items');
 
             store.put({
               id: crypto.randomUUID(),
+              status: 'pending',
               itemId: crypto.randomUUID(),
               spaceId,
               serverUrl,
@@ -586,6 +589,7 @@ test.describe('Screenshot Capture', () => {
             });
             store.put({
               id: crypto.randomUUID(),
+              status: 'pending',
               itemId: crypto.randomUUID(),
               spaceId,
               serverUrl,
@@ -948,8 +952,8 @@ test.describe('Screenshot Capture', () => {
             const db = request.result;
             if (!db.objectStoreNames.contains('pending-shares'))
               db.createObjectStore('pending-shares', { keyPath: 'id' });
-            if (!db.objectStoreNames.contains('compose-drafts'))
-              db.createObjectStore('compose-drafts', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('compose-items'))
+              db.createObjectStore('compose-items', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('offline-queue'))
               db.createObjectStore('offline-queue', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('auth-tokens'))

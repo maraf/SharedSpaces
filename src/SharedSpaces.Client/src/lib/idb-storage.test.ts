@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
+import { openDB, type IDBPDatabase } from 'idb';
 
 import {
   addToOfflineQueue,
   clearAllCachedFiles,
   clearCachedFilesForSpace,
+  clearComposeItems,
+  clearComposeItemsForSpace,
   clearJournalCache,
   clearOfflineQueue,
   clearOfflineQueueForSpace,
@@ -12,25 +15,33 @@ import {
   clearStoredTokens,
   getCachedFile,
   getCachedFilesTotalSize,
+  getComposeItems,
+  getComposeItemsForSpace,
   getJournalCache,
   getJournalSyncEnabled,
   getOfflineQueue,
   getOfflineQueueForSpace,
+  getPendingComposeItems,
   getPendingShares,
   getStoredToken,
   getViewedFilesBudget,
   getViewedFilesStorageStatus,
+  migrateOfflineQueueIfNeeded,
   pruneCachedFiles,
   removeCachedFile,
+  removeComposeItem,
   removeFromOfflineQueue,
   removePendingShare,
   removeStoredToken,
   requestPersistentStorage,
+  saveComposeItem,
   setCachedFile,
   setJournalCache,
   setJournalSyncEnabled,
   setStoredToken,
   syncStoredTokens,
+  updateComposeItem,
+  type ComposeItem,
   type OfflineQueueItem,
   type PendingShareItem,
 } from './idb-storage';
@@ -38,6 +49,7 @@ import {
 beforeEach(async () => {
   await clearPendingShares();
   await clearOfflineQueue();
+  await clearComposeItems();
   await clearStoredTokens();
   await clearAllCachedFiles();
 });
@@ -226,6 +238,250 @@ describe('idb-storage', () => {
       const queue = await getOfflineQueue();
       expect(queue[0].fileData).toBeInstanceOf(ArrayBuffer);
       expect(new Uint8Array(queue[0].fileData!)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    });
+  });
+
+  describe('compose items', () => {
+    const draftText: ComposeItem = {
+      id: 'c-1',
+      status: 'draft',
+      type: 'text',
+      serverUrl: 'http://server1',
+      spaceId: 'space-A',
+      itemId: 'item-1',
+      content: 'draft text',
+      timestamp: 1000,
+    };
+
+    const pendingFile: ComposeItem = {
+      id: 'c-2',
+      status: 'pending',
+      type: 'file',
+      serverUrl: 'http://server1',
+      spaceId: 'space-A',
+      itemId: 'item-2',
+      fileName: 'photo.png',
+      fileType: 'image/png',
+      fileData: new ArrayBuffer(8),
+      fileSize: 8,
+      timestamp: 2000,
+    };
+
+    const draftOtherSpace: ComposeItem = {
+      id: 'c-3',
+      status: 'draft',
+      type: 'text',
+      serverUrl: 'http://server1',
+      spaceId: 'space-B',
+      itemId: 'item-3',
+      content: 'other space',
+      timestamp: 3000,
+    };
+
+    it('starts empty', async () => {
+      expect(await getComposeItems()).toEqual([]);
+    });
+
+    it('saveComposeItem stores an item', async () => {
+      await saveComposeItem(draftText);
+      const items = await getComposeItems();
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe('c-1');
+      expect(items[0].status).toBe('draft');
+      expect(items[0].content).toBe('draft text');
+    });
+
+    it('saveComposeItem overwrites item with same id (put semantics)', async () => {
+      await saveComposeItem(draftText);
+      await saveComposeItem({ ...draftText, content: 'updated' });
+      const items = await getComposeItems();
+      expect(items).toHaveLength(1);
+      expect(items[0].content).toBe('updated');
+    });
+
+    it('getComposeItems returns oldest-first with stable tie-breakers', async () => {
+      await saveComposeItem({ ...draftText, id: 'c-9', timestamp: 1000 });
+      await saveComposeItem({ ...draftText, id: 'c-1', timestamp: 1000 });
+      await saveComposeItem({ ...pendingFile, id: 'c-2', timestamp: 2000 });
+
+      expect((await getComposeItems()).map((i) => i.id)).toEqual(['c-1', 'c-9', 'c-2']);
+    });
+
+    it('getPendingComposeItems returns only pending rows', async () => {
+      await saveComposeItem(draftText);
+      await saveComposeItem(pendingFile);
+      await saveComposeItem(draftOtherSpace);
+
+      const pending = await getPendingComposeItems();
+      expect(pending).toHaveLength(1);
+      expect(pending[0].id).toBe('c-2');
+      expect(pending[0].status).toBe('pending');
+    });
+
+    it('getComposeItemsForSpace filters by serverUrl and spaceId', async () => {
+      await saveComposeItem(draftText);
+      await saveComposeItem(pendingFile);
+      await saveComposeItem(draftOtherSpace);
+
+      const spaceA = await getComposeItemsForSpace('http://server1', 'space-A');
+      expect(spaceA.map((i) => i.id).sort()).toEqual(['c-1', 'c-2']);
+
+      const spaceB = await getComposeItemsForSpace('http://server1', 'space-B');
+      expect(spaceB).toHaveLength(1);
+      expect(spaceB[0].id).toBe('c-3');
+    });
+
+    it('getComposeItemsForSpace returns empty for unknown space', async () => {
+      await saveComposeItem(draftText);
+      expect(await getComposeItemsForSpace('http://other', 'space-X')).toEqual([]);
+    });
+
+    it('updateComposeItem flips a draft to pending', async () => {
+      await saveComposeItem(draftText);
+      const result = await updateComposeItem('c-1', (item) => ({ ...item, status: 'pending' }));
+      expect(result).toBe('updated');
+      const items = await getComposeItems();
+      expect(items[0].status).toBe('pending');
+    });
+
+    it('updateComposeItem returns missing without writing for unknown id', async () => {
+      const result = await updateComposeItem('nope', (item) => ({ ...item, status: 'pending' }));
+      expect(result).toBe('missing');
+      expect(await getComposeItems()).toEqual([]);
+    });
+
+    it('removeComposeItem removes a single item', async () => {
+      await saveComposeItem(draftText);
+      await saveComposeItem(pendingFile);
+      await removeComposeItem('c-1');
+      const items = await getComposeItems();
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe('c-2');
+    });
+
+    it('removeComposeItem is no-op for nonexistent id', async () => {
+      await saveComposeItem(draftText);
+      await removeComposeItem('nonexistent');
+      expect(await getComposeItems()).toHaveLength(1);
+    });
+
+    it('clearComposeItems removes all items', async () => {
+      await saveComposeItem(draftText);
+      await saveComposeItem(pendingFile);
+      await clearComposeItems();
+      expect(await getComposeItems()).toEqual([]);
+    });
+
+    it('clearComposeItemsForSpace only removes items for that space', async () => {
+      await saveComposeItem(draftText);
+      await saveComposeItem(pendingFile);
+      await saveComposeItem(draftOtherSpace);
+
+      await clearComposeItemsForSpace('http://server1', 'space-A');
+
+      const remaining = await getComposeItems();
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].id).toBe('c-3');
+    });
+
+    it('clearComposeItemsForSpace is no-op for unknown space', async () => {
+      await saveComposeItem(draftText);
+      await clearComposeItemsForSpace('http://other', 'space-X');
+      expect(await getComposeItems()).toHaveLength(1);
+    });
+
+    it('stores and retrieves ArrayBuffer for file items', async () => {
+      const buffer = new Uint8Array([5, 6, 7, 8]).buffer;
+      await saveComposeItem({ ...pendingFile, fileData: buffer });
+      const items = await getComposeItems();
+      expect(items[0].fileData).toBeInstanceOf(ArrayBuffer);
+      expect(new Uint8Array(items[0].fileData!)).toEqual(new Uint8Array([5, 6, 7, 8]));
+    });
+  });
+
+  describe('offline-queue -> compose-items migration', () => {
+    async function openWrappedDb(): Promise<IDBPDatabase> {
+      return await openDB('shared-spaces-db', 6);
+    }
+
+    async function seedOfflineQueueRaw(
+      db: IDBPDatabase,
+      items: OfflineQueueItem[],
+    ): Promise<void> {
+      const tx = db.transaction('offline-queue', 'readwrite');
+      for (const item of items) {
+        await tx.store.put(item);
+      }
+      await tx.done;
+    }
+
+    const legacy: OfflineQueueItem = {
+      id: 'q-mig-1',
+      itemId: 'item-mig-1',
+      spaceId: 'space-A',
+      serverUrl: 'http://server1',
+      type: 'text',
+      content: 'legacy queued text',
+      timestamp: 1000,
+    };
+
+    it('copies legacy offline-queue rows into compose-items as pending and clears the queue', async () => {
+      const db = await openWrappedDb();
+      await seedOfflineQueueRaw(db, [legacy]);
+
+      await migrateOfflineQueueIfNeeded(db);
+
+      const items = await getComposeItems();
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe('q-mig-1');
+      expect(items[0].status).toBe('pending');
+      expect(items[0].itemId).toBe('item-mig-1');
+      expect(items[0].content).toBe('legacy queued text');
+      expect(await getOfflineQueue()).toEqual([]);
+
+      db.close();
+    });
+
+    it('is idempotent and does not resurrect rows on re-run', async () => {
+      const db = await openWrappedDb();
+      await seedOfflineQueueRaw(db, [legacy]);
+
+      await migrateOfflineQueueIfNeeded(db);
+      // Second run sees an empty queue; the already-migrated row must survive.
+      await migrateOfflineQueueIfNeeded(db);
+
+      const items = await getComposeItems();
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe('q-mig-1');
+
+      db.close();
+    });
+
+    it('does not overwrite an existing compose-item with the same id', async () => {
+      await saveComposeItem({
+        id: 'q-mig-1',
+        status: 'draft',
+        type: 'text',
+        serverUrl: 'http://server1',
+        spaceId: 'space-A',
+        itemId: 'item-mig-1',
+        content: 'existing draft',
+        timestamp: 5000,
+      });
+
+      const db = await openWrappedDb();
+      await seedOfflineQueueRaw(db, [legacy]);
+
+      await migrateOfflineQueueIfNeeded(db);
+
+      const items = await getComposeItems();
+      expect(items).toHaveLength(1);
+      expect(items[0].status).toBe('draft');
+      expect(items[0].content).toBe('existing draft');
+      // Legacy row is still drained from the queue even when skipped.
+      expect(await getOfflineQueue()).toEqual([]);
+
+      db.close();
     });
   });
 

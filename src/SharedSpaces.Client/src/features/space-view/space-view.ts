@@ -32,12 +32,11 @@ import {
 import {
   getPendingShares,
   removePendingShare,
-  getComposeDrafts,
-  saveComposeDraft,
-  removeComposeDraft,
-  clearOfflineQueueForSpace,
-  getOfflineQueueForSpace,
-  removeFromOfflineQueue,
+  getComposeItemsForSpace,
+  saveComposeItem,
+  updateComposeItem,
+  removeComposeItem,
+  clearComposeItemsForSpace,
   getJournalSyncEnabled,
   setJournalSyncEnabled,
   getJournalCache,
@@ -50,8 +49,7 @@ import {
   getViewedFilesStorageStatus,
   requestPersistentStorage,
   type PendingShareItem,
-  type ComposeDraftItem,
-  type OfflineQueueItem,
+  type ComposeItem,
   type StorageBudgetSnapshot,
 } from '../../lib/idb-storage';
 import { requestBackgroundSync } from '../../lib/sw-registration';
@@ -128,12 +126,24 @@ function normalizeClipboardImageFiles(files: File[]): File[] {
   });
 }
 
-interface ComposeFileDraft {
+// Unified in-memory compose row. Both `draft` (picked, awaiting an explicit
+// Share) and `pending` (Share pressed but upload failed, auto-retried) rows live
+// in one list and one IndexedDB store (`compose-items`). A draft -> pending
+// transition is just a status flip; the stable `itemId` keeps retries idempotent.
+interface ComposeEntry {
   id: string;
-  file: File;
+  status: 'draft' | 'pending';
+  type: 'text' | 'file';
+  itemId: string;
   name: string;
+  content?: string;
+  fileType?: string;
+  fileSize?: number;
+  // In-memory File kept only for freshly picked/promoted drafts so we can upload
+  // without re-reading from IDB. Not part of reactive render state.
+  file?: File;
   pendingShareId?: string;
-  composeDraftId?: string;
+  timestamp: number;
 }
 
 @customElement('space-view')
@@ -166,7 +176,6 @@ export class SpaceView extends BaseElement {
   @state() private connectionState: ConnectionState = 'disconnected';
   @state() private isOnline = navigator.onLine;
   @state() private pendingShares: PendingShareItem[] = [];
-  @state() private offlineQueueItems: OfflineQueueItem[] = [];
   @state() private syncMessage = '';
   @state() private deleteConfirmItemId: string | null = null;
   @state() private transferModalItem: SpaceItemResponse | null = null;
@@ -190,8 +199,8 @@ export class SpaceView extends BaseElement {
   @state() private shareModalQrCodeDataUrls: Record<string, string> = {};
   @state() private shareModalName = '';
   @state() private openMenuItemId: string | null = null;
-  @state() private composeFileDrafts: ComposeFileDraft[] = [];
-  @state() private composePendingTextShares: PendingShareItem[] = [];
+  @state() private composeItems: ComposeEntry[] = [];
+  @state() private uploadingComposeItemIds = new Set<string>();
   @state() private composeQueueError = '';
   @state() private leaveConfirm = false;
   @state() private journalSyncEnabled = false;
@@ -201,9 +210,12 @@ export class SpaceView extends BaseElement {
 
   private _previewRequestId = 0;
 
-  // Compose-draft ids the user removed/uploaded this session. Guards against an
-  // in-flight persist or a re-hydration resurrecting an already-discarded draft.
-  private discardedComposeDraftIds = new Set<string>();
+  // Compose-item ids the user removed or that uploaded successfully this session.
+  // Guards against an in-flight persist or a re-hydration resurrecting a row that
+  // was already discarded/uploaded.
+  private discardedComposeItemIds = new Set<string>();
+  // Monotonic token so a slower refresh can't clobber a newer one.
+  private composeRefreshVersion = 0;
 
   private token?: string;
   private lastLoadedKey = '';
@@ -302,8 +314,7 @@ export class SpaceView extends BaseElement {
     document.addEventListener('scroll', this.handleKebabScroll, { passive: true, capture: true });
     globalThis.addEventListener('resize', this.handleKebabScroll);
     this.loadPendingShares();
-    this.loadComposeDrafts();
-    this.refreshOfflineQueue();
+    this.refreshComposeItems();
   }
 
   override disconnectedCallback() {
@@ -353,8 +364,8 @@ export class SpaceView extends BaseElement {
     // Remove token from storage
     await removeToken(this.serverUrl, this.spaceId);
 
-    // Clear any queued offline items for this space
-    await clearOfflineQueueForSpace(this.serverUrl, this.spaceId).catch(() => {});
+    // Clear any queued compose items for this space
+    await clearComposeItemsForSpace(this.serverUrl, this.spaceId).catch(() => {});
 
     // Redirect to join view and tell app-shell to reload spaces
     this.dispatchEvent(
@@ -379,9 +390,9 @@ export class SpaceView extends BaseElement {
     this.errorMessage = '';
     this.connectionErrorType = 'none';
 
-    // Refresh offline queue and pending shares for the current space
+    // Refresh compose items and pending shares for the current space
     await Promise.all([
-      this.refreshOfflineQueue(),
+      this.refreshComposeItems(),
       this.loadPendingShares(),
       this.loadJournalSyncSetting(),
     ]);
@@ -830,23 +841,29 @@ export class SpaceView extends BaseElement {
   }
 
   private async uploadAllPendingShares() {
-    const fileDrafts = this.pendingShares
-      .filter((share) => share.type === 'file')
-      .map((share) => {
-        const file = this.pendingShareToFile(share);
-        return file
-          ? this.createComposeFileDraft(file, share.id, share.id)
-          : null;
-      })
-      .filter((draft): draft is ComposeFileDraft => draft !== null);
+    const fileShares = this.pendingShares.filter((share) => share.type === 'file');
 
-    if (fileDrafts.length > 0) {
-      const textShares = this.pendingShares.filter(
-        (share): share is PendingShareItem =>
-          share.type === 'text' && typeof share.content === 'string',
-      );
-      this.populateComposeQueue(fileDrafts, textShares);
-      return;
+    if (fileShares.length > 0) {
+      // Promote file shares into editable drafts so the user can rename them
+      // before uploading, instead of uploading immediately.
+      const now = Date.now();
+      const entries: ComposeEntry[] = [];
+      fileShares.forEach((share, index) => {
+        const file = this.pendingShareToFile(share);
+        if (file) {
+          entries.push(this.createFileDraftEntry(file, now + index, share.id));
+        }
+      });
+
+      if (entries.length > 0) {
+        this.composeItems = [...this.composeItems, ...entries];
+        this.composeQueueError = '';
+        this.uploadError = '';
+        for (const entry of entries) {
+          void this.persistDraftEntry(entry);
+        }
+        return;
+      }
     }
 
     for (const share of [...this.pendingShares]) {
@@ -871,17 +888,117 @@ export class SpaceView extends BaseElement {
     );
   }
 
-  private createComposeFileDraft(
+  private createFileDraftEntry(
     file: File,
-    id: string,
+    timestamp: number,
     pendingShareId?: string,
-  ): ComposeFileDraft {
+  ): ComposeEntry {
     return {
-      id,
-      file,
+      id: crypto.randomUUID(),
+      status: 'draft',
+      type: 'file',
+      itemId: crypto.randomUUID(),
       name: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      file,
       pendingShareId,
+      timestamp,
     };
+  }
+
+  // Persists a freshly-picked/promoted draft to the unified store so it survives
+  // a refresh. Guards against the user removing the row mid-read (tombstone).
+  private async persistDraftEntry(entry: ComposeEntry) {
+    if (!this.serverUrl || !this.spaceId || !entry.file) return;
+    if (this.discardedComposeItemIds.has(entry.id)) return;
+
+    try {
+      const fileData = await entry.file.arrayBuffer();
+      if (this.discardedComposeItemIds.has(entry.id)) return;
+      const current = this.composeItems.find((i) => i.id === entry.id);
+      if (!current) return; // removed before the read finished
+
+      await saveComposeItem({
+        id: entry.id,
+        status: 'draft',
+        type: 'file',
+        serverUrl: this.serverUrl,
+        spaceId: this.spaceId,
+        itemId: entry.itemId,
+        fileName: current.name,
+        fileType: entry.fileType,
+        fileData,
+        fileSize: entry.fileSize,
+        pendingShareId: entry.pendingShareId,
+        timestamp: entry.timestamp,
+      });
+
+      // If the user removed the row while we were saving, undo the write.
+      if (this.discardedComposeItemIds.has(entry.id)) {
+        await removeComposeItem(entry.id).catch(() => {});
+      }
+    } catch {
+      // IndexedDB may not be available; keep the in-memory entry.
+    }
+  }
+
+  private storedToEntry(item: ComposeItem, file?: File): ComposeEntry {
+    return {
+      id: item.id,
+      status: item.status === 'pending' ? 'pending' : 'draft',
+      type: item.type,
+      itemId: item.itemId,
+      name: item.type === 'file' ? (item.fileName ?? 'file') : (item.content ?? ''),
+      content: item.content,
+      fileType: item.fileType,
+      fileSize: item.fileSize,
+      file,
+      pendingShareId: item.pendingShareId,
+      timestamp: item.timestamp,
+    };
+  }
+
+  // Loads the unified compose items (drafts + pending uploads) for the current
+  // space and rebuilds the in-memory list. Version-guarded so a slower refresh
+  // can't overwrite a newer one; preserves in-memory File handles and any
+  // freshly-picked drafts whose persist may still be in flight.
+  private async refreshComposeItems() {
+    if (!this.serverUrl || !this.spaceId) return;
+
+    const version = ++this.composeRefreshVersion;
+    let stored: ComposeItem[];
+    try {
+      stored = await getComposeItemsForSpace(this.serverUrl, this.spaceId);
+    } catch {
+      return; // IndexedDB may not be available
+    }
+    if (version !== this.composeRefreshVersion) return; // a newer refresh won
+
+    const fileById = new Map<string, File>();
+    for (const item of this.composeItems) {
+      if (item.file) fileById.set(item.id, item.file);
+    }
+
+    const storedIds = new Set(stored.map((item) => item.id));
+    // Keep just-picked drafts whose store write hasn't landed yet so a refresh
+    // racing with promptFilesForUpload doesn't drop them.
+    const carriedOver = this.composeItems.filter(
+      (item) =>
+        item.file &&
+        !storedIds.has(item.id) &&
+        !this.discardedComposeItemIds.has(item.id),
+    );
+
+    this.composeItems = [
+      ...stored
+        .filter((item) => !this.discardedComposeItemIds.has(item.id))
+        .map((item) => this.storedToEntry(item, fileById.get(item.id))),
+      ...carriedOver,
+    ].sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'draft' ? -1 : 1;
+      return a.timestamp - b.timestamp;
+    });
   }
 
   private pendingShareToFile(share: PendingShareItem): File | null {
@@ -895,95 +1012,20 @@ export class SpaceView extends BaseElement {
     });
   }
 
-  private populateComposeQueue(
-    drafts: ComposeFileDraft[],
-    pendingTextShares: PendingShareItem[] = [],
-  ) {
-    this.composeFileDrafts = drafts;
-    this.composePendingTextShares = pendingTextShares;
-    this.composeQueueError = '';
-    this.uploadError = '';
-  }
-
   private promptFilesForUpload(files: File[]) {
     if (files.length === 0) return;
 
     const now = Date.now();
-    const newDrafts = files.map((file, index) => {
-      const id = `${file.name}-${file.lastModified}-${index}-${now}`;
-      return { ...this.createComposeFileDraft(file, id), composeDraftId: id };
-    });
+    const newEntries = files.map((file, index) =>
+      this.createFileDraftEntry(file, now + index));
     // Append to the inline compose queue instead of replacing it so users can
     // keep adding files before sharing.
-    this.composeFileDrafts = [...this.composeFileDrafts, ...newDrafts];
+    this.composeItems = [...this.composeItems, ...newEntries];
     this.composeQueueError = '';
     this.uploadError = '';
     // Persist so the queue survives a page refresh (best-effort).
-    void this.persistComposeDrafts(newDrafts);
-  }
-
-  // Loads compose-box file drafts persisted in a previous session/visit so the
-  // inline queue is restored after a page refresh.
-  private async loadComposeDrafts() {
-    let drafts: ComposeDraftItem[];
-    try {
-      drafts = await getComposeDrafts();
-    } catch {
-      return; // IndexedDB may not be available
-    }
-
-    const existingIds = new Set(
-      this.composeFileDrafts
-        .map((draft) => draft.composeDraftId)
-        .filter((id): id is string => Boolean(id)),
-    );
-    const hydrated = drafts
-      .filter(
-        (draft) =>
-          !existingIds.has(draft.id) &&
-          !this.discardedComposeDraftIds.has(draft.id),
-      )
-      .map((draft) => {
-        const blob = new Blob([draft.fileData], {
-          type: draft.fileType || 'application/octet-stream',
-        });
-        const file = new File([blob], draft.fileName, {
-          type: blob.type,
-          lastModified: draft.timestamp,
-        });
-        return { ...this.createComposeFileDraft(file, draft.id), composeDraftId: draft.id };
-      });
-
-    if (hydrated.length > 0) {
-      this.composeFileDrafts = [...this.composeFileDrafts, ...hydrated];
-    }
-  }
-
-  private async persistComposeDrafts(drafts: ComposeFileDraft[]) {
-    for (const draft of drafts) {
-      const id = draft.composeDraftId;
-      if (!id || this.discardedComposeDraftIds.has(id)) continue;
-      // Skip if the draft was removed before we got here.
-      if (!this.composeFileDrafts.some((d) => d.composeDraftId === id)) continue;
-
-      try {
-        const fileData = await draft.file.arrayBuffer();
-        // Re-check after the async read in case it was removed meanwhile.
-        if (this.discardedComposeDraftIds.has(id)) continue;
-        const current = this.composeFileDrafts.find((d) => d.composeDraftId === id);
-        if (!current) continue;
-
-        await saveComposeDraft({
-          id,
-          fileName: current.name,
-          fileType: draft.file.type,
-          fileData,
-          fileSize: draft.file.size,
-          timestamp: Date.now(),
-        });
-      } catch {
-        // IndexedDB may not be available; keep the in-memory draft.
-      }
+    for (const entry of newEntries) {
+      void this.persistDraftEntry(entry);
     }
   }
 
@@ -999,90 +1041,89 @@ export class SpaceView extends BaseElement {
       return;
     }
 
-    this.populateComposeQueue([
-      this.createComposeFileDraft(file, share.id, share.id),
-    ]);
+    // Promote the file pending share into an editable draft.
+    const entry = this.createFileDraftEntry(file, Date.now(), share.id);
+    this.composeItems = [...this.composeItems, entry];
+    this.composeQueueError = '';
+    this.uploadError = '';
+    void this.persistDraftEntry(entry);
   }
 
-  private clearComposeQueue = () => {
-    if (this.isUploading) return;
-
-    this.composeFileDrafts = [];
-    this.composePendingTextShares = [];
-    this.composeQueueError = '';
-  };
-
-  private handleComposeFileNameInput = (draftId: string, value: string) => {
-    this.composeFileDrafts = this.composeFileDrafts.map((draft) =>
-      draft.id === draftId
-        ? { ...draft, name: value }
-        : draft,
+  private handleComposeNameInput = (id: string, value: string) => {
+    this.composeItems = this.composeItems.map((entry) =>
+      entry.id === id ? { ...entry, name: value } : entry,
     );
     this.composeQueueError = '';
-  };
-
-  private removeComposeFileDraft = (draftId: string) => {
-    const draft = this.composeFileDrafts.find((d) => d.id === draftId);
-    this.composeFileDrafts = this.composeFileDrafts.filter(
-      (d) => d.id !== draftId,
-    );
-    this.composeQueueError = '';
-
-    if (draft?.composeDraftId) {
-      this.discardedComposeDraftIds.add(draft.composeDraftId);
-      void removeComposeDraft(draft.composeDraftId).catch(() => {
-        // IndexedDB may not be available
-      });
-    }
   };
 
   // Persists an edited filename (on blur) so it survives a refresh.
-  private persistComposeFileDraftName = (draftId: string) => {
-    const draft = this.composeFileDrafts.find((d) => d.id === draftId);
-    if (draft?.composeDraftId) {
-      void this.persistComposeDrafts([draft]);
-    }
-  };
-
-  private removeComposePendingTextShare = (id: string) => {
-    this.composePendingTextShares = this.composePendingTextShares.filter(
-      (share) => share.id !== id,
+  private persistComposeName = (id: string) => {
+    const entry = this.composeItems.find((i) => i.id === id);
+    if (!entry || entry.type !== 'file') return;
+    void updateComposeItem(id, (item) => ({ ...item, fileName: entry.name })).catch(
+      () => {
+        // IndexedDB may not be available
+      },
     );
   };
+
+  // Removes a compose item (draft or pending) from the list and the store.
+  // When `removePendingShare` is set, also clears the originating Web Share
+  // Target share so it doesn't reappear; user-initiated removals leave it so
+  // the "Shared from other apps" row comes back.
+  private removeComposeEntry(
+    id: string,
+    options: { removePendingShare?: boolean } = {},
+  ) {
+    const entry = this.composeItems.find((i) => i.id === id);
+    this.discardedComposeItemIds.add(id);
+    this.composeItems = this.composeItems.filter((i) => i.id !== id);
+    this.composeQueueError = '';
+
+    void removeComposeItem(id).catch(() => {
+      // IndexedDB may not be available
+    });
+
+    if (options.removePendingShare && entry?.pendingShareId) {
+      void this.removePendingSharesById([entry.pendingShareId]).catch(() => {});
+    }
+  }
+
+  private removeComposeEntryByUser = (id: string) => {
+    if (this.isUploading || this.uploadingComposeItemIds.has(id)) return;
+    this.removeComposeEntry(id);
+  };
+
+  private get draftEntries(): ComposeEntry[] {
+    return this.composeItems.filter((entry) => entry.status === 'draft');
+  }
 
   private get hasComposeQueue(): boolean {
-    return (
-      this.composeFileDrafts.length > 0 ||
-      this.composePendingTextShares.length > 0
-    );
+    return this.draftEntries.length > 0;
   }
 
   // Pending shares from other apps that have not yet been promoted into the
-  // compose queue (drafts / pending text shares). Promoting a file pending
-  // share keeps it in `pendingShares` until the upload is confirmed, so we
-  // filter the already-promoted ones out to avoid rendering duplicate rows.
+  // compose queue. Promoting a file pending share keeps it in `pendingShares`
+  // until the upload is confirmed, so we filter the already-promoted ones out
+  // to avoid rendering duplicate rows.
   private get visiblePendingShares(): PendingShareItem[] {
-    const promotedIds = new Set<string>([
-      ...this.composeFileDrafts
-        .map((draft) => draft.pendingShareId)
+    const promotedIds = new Set<string>(
+      this.composeItems
+        .map((entry) => entry.pendingShareId)
         .filter((id): id is string => Boolean(id)),
-      ...this.composePendingTextShares.map((share) => share.id),
-    ]);
+    );
     return this.pendingShares.filter((share) => !promotedIds.has(share.id));
   }
 
   // Whether the compose box should render its queue area: the user's own
-  // drafts/text shares, pending shares folded in from other apps, or the
-  // offline upload queue folded in as display-only rows. The global Share
-  // button keys off `hasComposeQueue` (not this), so folding pending shares
-  // and offline-queue items in here never makes Share act on them.
+  // drafts, pending uploads (failed Shares retrying), or pending shares folded
+  // in from other apps. The global Share button keys off `hasComposeQueue`
+  // (drafts only), so folding pending uploads/shares in here never makes Share
+  // act on them.
   private get hasComposeContent(): boolean {
-    return (
-      this.hasComposeQueue ||
-      this.visiblePendingShares.length > 0 ||
-      this.offlineQueueItems.length > 0
-    );
+    return this.composeItems.length > 0 || this.visiblePendingShares.length > 0;
   }
+
 
   private handleComposeShare = async () => {
     if (this.hasComposeQueue) {
@@ -1116,106 +1157,152 @@ export class SpaceView extends BaseElement {
     this.notifyPendingSharesChanged();
   }
 
-  private async uploadPendingTextShares(shares: PendingShareItem[]) {
-    for (const share of shares) {
-      await this.uploadPendingShare(share);
-      if (this.uploadError) break;
-    }
-  }
-
+  // Uploads every staged draft in order. Each draft that fails on offline /
+  // network flips to a `pending` row (kept visible and auto-retried) rather
+  // than being dropped. Stops the batch on auth/unexpected errors.
   private uploadComposeQueue = async () => {
-    const currentDrafts = this.composeFileDrafts.map((draft) => ({
-      ...draft,
-      name: draft.name.trim(),
+    const trimmed = this.draftEntries.map((entry) => ({
+      ...entry,
+      name: entry.name.trim(),
     }));
-    const invalidDraft = currentDrafts.find((draft) => draft.name.length === 0);
-    if (invalidDraft) {
+    if (trimmed.some((entry) => entry.name.length === 0)) {
       this.composeQueueError = 'File names cannot be empty.';
       return;
     }
 
-    this.composeFileDrafts = currentDrafts;
+    // Commit trimmed names back into state (and persist them).
+    this.composeItems = this.composeItems.map((entry) => {
+      const match = trimmed.find((t) => t.id === entry.id);
+      return match ? { ...entry, name: match.name } : entry;
+    });
+    for (const entry of trimmed) {
+      this.persistComposeName(entry.id);
+    }
+
     this.composeQueueError = '';
     this.uploadError = '';
+    this.isUploading = true;
 
-    const renamedFiles = currentDrafts.map((draft) =>
-      new File([draft.file], draft.name, {
-        type: draft.file.type,
-        lastModified: draft.file.lastModified,
-      }));
-    const pendingTextShares = [...this.composePendingTextShares];
-    const processedCount = await this.uploadFiles(renamedFiles);
-    const processedDrafts = currentDrafts.slice(0, processedCount);
-    const remainingDrafts = currentDrafts.slice(processedCount);
-    const processedPendingShareIds = processedDrafts
-      .map((draft) => draft.pendingShareId)
-      .filter((id): id is string => Boolean(id));
-
-    // Discard the persisted copies of any drafts that uploaded successfully so
-    // they don't reappear after a refresh.
-    const processedComposeDraftIds = processedDrafts
-      .map((draft) => draft.composeDraftId)
-      .filter((id): id is string => Boolean(id));
-    for (const id of processedComposeDraftIds) {
-      this.discardedComposeDraftIds.add(id);
-      void removeComposeDraft(id).catch(() => {
-        // IndexedDB may not be available
-      });
-    }
-
-    if (processedPendingShareIds.length > 0) {
-      try {
-        await this.removePendingSharesById(processedPendingShareIds);
-      } catch {
-        this.composeFileDrafts = remainingDrafts;
-        this.composePendingTextShares = pendingTextShares;
-        this.composeQueueError = 'Files uploaded, but clearing the pending share failed.';
-        return;
+    try {
+      for (const draft of trimmed) {
+        const result = await this.uploadDraftEntry(draft);
+        if (result === 'auth' || result === 'error') break;
       }
-    }
-
-    if (remainingDrafts.length > 0) {
-      if (this.connectionErrorType === 'auth') {
-        this.clearComposeQueue();
-        return;
-      }
-
-      this.composeFileDrafts = remainingDrafts;
-      this.composePendingTextShares = pendingTextShares;
-      this.composeQueueError = this.uploadError || 'Failed to upload file.';
-      return;
-    }
-
-    this.composeFileDrafts = [];
-    this.composePendingTextShares = [];
-    this.composeQueueError = '';
-
-    if (pendingTextShares.length > 0) {
-      await this.uploadPendingTextShares(pendingTextShares);
+    } finally {
+      this.isUploading = false;
     }
   };
 
-  private async dismissOfflineQueueItem(item: OfflineQueueItem) {
+  private async uploadDraftEntry(
+    draft: ComposeEntry,
+  ): Promise<'uploaded' | 'pending' | 'auth' | 'error'> {
+    if (!this.serverUrl || !this.spaceId || !this.token) return 'error';
+
+    const file = await this.resolveDraftFile(draft);
+    if (!file) {
+      this.composeQueueError = 'Could not read the file to upload.';
+      return 'error';
+    }
+    const renamedFile = new File([file], draft.name, {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+
+    if (!navigator.onLine) {
+      await this.flipDraftToPending(draft, renamedFile);
+      return 'pending';
+    }
+
+    this.pendingItemIds.add(draft.itemId);
     try {
-      await removeFromOfflineQueue(item.id);
-      this.offlineQueueItems = this.offlineQueueItems.filter((i) => i.id !== item.id);
-    } catch {
-      // IndexedDB may not be available
+      const item = await shareFile(
+        this.serverUrl,
+        this.spaceId,
+        draft.itemId,
+        renamedFile,
+        this.token,
+      );
+      this.items = [item, ...this.items];
+      this.removeComposeEntry(draft.id, { removePendingShare: true });
+      return 'uploaded';
+    } catch (error) {
+      if (error instanceof SpaceApiError && !error.status) {
+        // Network error: keep it visible and auto-retry.
+        await this.flipDraftToPending(draft, renamedFile);
+        return 'pending';
+      }
+      if (
+        error instanceof SpaceApiError &&
+        (error.status === 401 || error.status === 404)
+      ) {
+        this.connectionErrorType = 'auth';
+        this.errorMessage =
+          'Authentication failed. Your token may have been revoked or the space no longer exists.';
+        return 'auth';
+      }
+      this.uploadError =
+        error instanceof SpaceApiError ? error.message : 'Failed to upload file.';
+      this.composeQueueError = this.uploadError;
+      return 'error';
+    } finally {
+      this.pendingItemIds.delete(draft.itemId);
     }
   }
 
-  // --- Offline Queue ---
-
-  private async refreshOfflineQueue() {
-    if (!this.serverUrl || !this.spaceId) return;
+  // Resolves the File backing a draft, reconstructing it from the persisted
+  // store row when the in-memory File handle is gone (e.g. after a refresh).
+  private async resolveDraftFile(draft: ComposeEntry): Promise<File | null> {
+    if (draft.file) return draft.file;
+    if (!this.serverUrl || !this.spaceId) return null;
     try {
-      const items = await getOfflineQueueForSpace(this.serverUrl, this.spaceId);
-      // Strip fileData to avoid keeping large ArrayBuffers in reactive state
-      const lightweight = items.map(({ fileData: _fileData, ...rest }) => rest);
-      this.offlineQueueItems = lightweight;
+      const stored = await getComposeItemsForSpace(this.serverUrl, this.spaceId);
+      const match = stored.find((i) => i.id === draft.id);
+      if (!match?.fileData) return null;
+      const blob = new Blob([match.fileData], {
+        type: match.fileType || 'application/octet-stream',
+      });
+      return new File([blob], match.fileName ?? draft.name, {
+        type: blob.type,
+        lastModified: match.timestamp,
+      });
     } catch {
-      // IndexedDB may not be available
+      return null;
     }
+  }
+
+  // Flips a staged draft to a pending upload: persists status='pending' and
+  // requests a background sync so it retries even with the tab closed.
+  private async flipDraftToPending(draft: ComposeEntry, file: File) {
+    if (!this.serverUrl || !this.spaceId) return;
+    if (this.discardedComposeItemIds.has(draft.id)) return;
+
+    try {
+      const fileData = await file.arrayBuffer();
+      if (this.discardedComposeItemIds.has(draft.id)) return;
+      await saveComposeItem({
+        id: draft.id,
+        status: 'pending',
+        type: 'file',
+        serverUrl: this.serverUrl,
+        spaceId: this.spaceId,
+        itemId: draft.itemId,
+        fileName: draft.name,
+        fileType: file.type,
+        fileData,
+        fileSize: file.size,
+        pendingShareId: draft.pendingShareId,
+        timestamp: draft.timestamp,
+      });
+    } catch {
+      // IndexedDB may not be available; still flip the in-memory status.
+    }
+
+    this.composeItems = this.composeItems.map((entry) =>
+      entry.id === draft.id
+        ? { ...entry, status: 'pending', file: undefined }
+        : entry,
+    );
+    void requestBackgroundSync();
   }
 
   private async enqueueForOffline(
@@ -1224,15 +1311,24 @@ export class SpaceView extends BaseElement {
   ) {
     if (!this.serverUrl || !this.spaceId) return;
     await queueForOffline(this.serverUrl, this.spaceId, type, options);
-    await this.refreshOfflineQueue();
+    await this.refreshComposeItems();
   }
 
   private async syncOfflineQueue() {
     if (!navigator.onLine || !this.token || !this.serverUrl || !this.spaceId) return;
 
+    // Mark currently-pending rows as uploading so their controls disable.
+    const pendingIds = this.composeItems
+      .filter((entry) => entry.status === 'pending')
+      .map((entry) => entry.id);
+    this.uploadingComposeItemIds = new Set([
+      ...this.uploadingComposeItemIds,
+      ...pendingIds,
+    ]);
+
     try {
       const result = await processOfflineQueue(this.serverUrl, this.spaceId, this.token);
-      await this.refreshOfflineQueue();
+      await this.refreshComposeItems();
       this.showSyncResult(result);
 
       if (result.synced > 0) {
@@ -1240,6 +1336,10 @@ export class SpaceView extends BaseElement {
       }
     } catch {
       // Queue processing failed
+    } finally {
+      const next = new Set(this.uploadingComposeItemIds);
+      for (const id of pendingIds) next.delete(id);
+      this.uploadingComposeItemIds = next;
     }
   }
 
@@ -1256,7 +1356,7 @@ export class SpaceView extends BaseElement {
 
     if (!affectsCurrentSpace) return;
 
-    await this.refreshOfflineQueue();
+    await this.refreshComposeItems();
     this.showSyncResult({
       synced: result?.synced ?? 0,
       failed: result?.failed ?? 0,
@@ -1266,6 +1366,7 @@ export class SpaceView extends BaseElement {
       this.refreshItemsAfterReconnect();
     }
   }
+
 
   private showSyncResult(result: { synced: number; failed: number }) {
     if (result.synced === 0 && result.failed === 0) return;
@@ -2233,42 +2334,20 @@ export class SpaceView extends BaseElement {
 
   private renderComposeQueue() {
     const pendingShares = this.visiblePendingShares;
+    const hasPending = this.composeItems.some((entry) => entry.status === 'pending');
     const canSyncOffline = this.isOnline && this.connectionErrorType !== 'network';
 
     return html`
       <div class="border-t border-slate-800">
-        ${this.composeFileDrafts.map((draft, index) =>
-          this.renderComposeFileRow(draft, index))}
-        ${this.composePendingTextShares.map((share) =>
-          this.renderComposeTextRow(share))}
-        ${pendingShares.length > 0
+        ${this.composeItems.map((entry, index) =>
+          this.renderComposeRow(entry, index))}
+        ${hasPending
           ? html`
             <div
-              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5 first:border-t-0"
-            >
-              <span class="text-xs font-medium text-amber-300/80">
-                Shared from other apps
-              </span>
-              <button
-                @click=${() => this.uploadAllPendingShares()}
-                ?disabled=${this.isUploading}
-                class="rounded px-2 py-1 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
-              >
-                Upload all
-              </button>
-            </div>
-            ${pendingShares.map((share) =>
-              this.renderComposePendingShareRow(share))}
-          `
-          : nothing}
-        ${this.offlineQueueItems.length > 0
-          ? html`
-            <div
-              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5 first:border-t-0"
+              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5"
             >
               <span class="text-xs font-medium text-sky-300/80">
-                📤 ${this.offlineQueueItems.length}
-                item${this.offlineQueueItems.length !== 1 ? 's' : ''} pending upload
+                Pending upload
               </span>
               ${canSyncOffline
                 ? html`
@@ -2288,8 +2367,26 @@ export class SpaceView extends BaseElement {
                   </span>
                 `}
             </div>
-            ${this.offlineQueueItems.map((item) =>
-              this.renderComposeOfflineRow(item))}
+          `
+          : nothing}
+        ${pendingShares.length > 0
+          ? html`
+            <div
+              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5"
+            >
+              <span class="text-xs font-medium text-amber-300/80">
+                Shared from other apps
+              </span>
+              <button
+                @click=${() => this.uploadAllPendingShares()}
+                ?disabled=${this.isUploading}
+                class="rounded px-2 py-1 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
+              >
+                Upload all
+              </button>
+            </div>
+            ${pendingShares.map((share) =>
+              this.renderComposePendingShareRow(share))}
           `
           : nothing}
         ${this.composeQueueError
@@ -2299,32 +2396,95 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderComposeOfflineRow(item: OfflineQueueItem) {
-    const icon = item.type === 'file'
-      ? getFileTypeIcon(item.fileName ?? 'file')
-      : getTextItemIcon();
-    const label = item.type === 'file'
-      ? item.fileName ?? 'File'
-      : (item.content ?? '').substring(0, 100);
+  // Renders a single unified compose row. File rows expose an editable name
+  // (rename + remove); text rows are display-only with remove. Drafts and
+  // pending uploads share this layout, differing only by their status sub-label.
+  private renderComposeRow(entry: ComposeEntry, index: number) {
+    const locked = this.isUploading || this.uploadingComposeItemIds.has(entry.id);
+    const subLabel =
+      entry.status === 'pending' ? 'Pending upload' : 'Queued for upload';
+
+    if (entry.type === 'text') {
+      const icon = getTextItemIcon();
+      return html`
+        <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
+          <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+            ${icon.svg}
+          </div>
+          <div class="min-w-0 flex-1 px-1">
+            <p class="truncate text-sm font-medium text-slate-200">
+              ${(entry.content ?? entry.name ?? '').substring(0, 100)}
+            </p>
+            <p class="text-xs text-slate-500">${subLabel}</p>
+          </div>
+          <button
+            @click=${() => this.removeComposeEntryByUser(entry.id)}
+            ?disabled=${locked}
+            class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+            title="Remove"
+            aria-label="Remove pending text item"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      `;
+    }
+
+    const icon = getFileTypeIcon(entry.name || 'file');
+    const inputId = `compose-draft-input-${index}`;
+    const sizeLabel =
+      entry.fileSize !== undefined ? ` · ${this.formatFileSize(entry.fileSize)}` : '';
 
     return html`
-      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2">
+      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
         <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
           ${icon.svg}
         </div>
-        <div class="min-w-0 flex-1 px-1">
-          <p class="truncate text-sm font-medium text-slate-200">${label}</p>
-          <p class="text-xs text-slate-500">Queued for upload</p>
+        <div class="min-w-0 flex-1">
+          <input
+            id=${inputId}
+            type="text"
+            .value=${entry.name}
+            @input=${(e: Event) =>
+              this.handleComposeNameInput(
+                entry.id,
+                (e.target as HTMLInputElement).value,
+              )}
+            @change=${() => this.persistComposeName(entry.id)}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            ?disabled=${locked}
+            aria-label=${`Filename for ${entry.name}`}
+            class="w-full truncate rounded border-0 bg-transparent px-1 py-0.5 text-sm font-medium text-slate-200 transition focus:outline-none disabled:opacity-50"
+          />
+          <p class="truncate px-1 text-xs text-slate-500" title=${entry.name}>
+            ${subLabel}${sizeLabel}
+          </p>
         </div>
-        <button
-          @click=${() => this.dismissOfflineQueueItem(item)}
-          ?disabled=${this.isUploading}
-          class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
-          title="Dismiss"
-          aria-label="Dismiss pending upload"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
+        <div class="flex shrink-0 items-center gap-1">
+          <button
+            @click=${() => this.focusComposeDraftInput(index)}
+            ?disabled=${locked}
+            class="rounded p-1.5 text-slate-500 transition hover:text-sky-400 disabled:opacity-50"
+            title="Rename"
+            aria-label=${`Rename ${entry.name}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+          </button>
+          <button
+            @click=${() => this.removeComposeEntryByUser(entry.id)}
+            ?disabled=${locked}
+            class="rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+            title="Remove"
+            aria-label=${`Remove ${entry.name}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
       </div>
     `;
   }
@@ -2365,91 +2525,6 @@ export class SpaceView extends BaseElement {
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
-      </div>
-    `;
-  }
-
-  private renderComposeFileRow(draft: ComposeFileDraft, index: number) {
-    const icon = getFileTypeIcon(draft.name || draft.file.name);
-    const inputId = `compose-draft-input-${index}`;
-
-    return html`
-      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
-        <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
-          ${icon.svg}
-        </div>
-        <div class="min-w-0 flex-1">
-          <input
-            id=${inputId}
-            type="text"
-            .value=${draft.name}
-            @input=${(e: Event) =>
-              this.handleComposeFileNameInput(
-                draft.id,
-                (e.target as HTMLInputElement).value,
-              )}
-            @change=${() => this.persistComposeFileDraftName(draft.id)}
-            @keydown=${(e: KeyboardEvent) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                (e.target as HTMLInputElement).blur();
-              }
-            }}
-            ?disabled=${this.isUploading}
-            aria-label=${`Filename for ${draft.file.name}`}
-            class="w-full truncate rounded border-0 bg-transparent px-1 py-0.5 text-sm font-medium text-slate-200 transition focus:outline-none disabled:opacity-50"
-          />
-          <p class="truncate px-1 text-xs text-slate-500" title=${draft.file.name}>
-            Queued for upload · ${this.formatFileSize(draft.file.size)}
-          </p>
-        </div>
-        <div class="flex shrink-0 items-center gap-1">
-          <button
-            @click=${() => this.focusComposeDraftInput(index)}
-            ?disabled=${this.isUploading}
-            class="rounded p-1.5 text-slate-500 transition hover:text-sky-400 disabled:opacity-50"
-            title="Rename"
-            aria-label=${`Rename ${draft.file.name}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-          </button>
-          <button
-            @click=${() => this.removeComposeFileDraft(draft.id)}
-            ?disabled=${this.isUploading}
-            class="rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
-            title="Remove"
-            aria-label=${`Remove ${draft.file.name}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
-        </div>
-      </div>
-    `;
-  }
-
-  private renderComposeTextRow(share: PendingShareItem) {
-    const icon = getTextItemIcon();
-
-    return html`
-      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
-        <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
-          ${icon.svg}
-        </div>
-        <div class="min-w-0 flex-1 px-1">
-          <p class="truncate text-sm font-medium text-slate-200">
-            ${(share.content ?? '').substring(0, 100)}
-          </p>
-          <p class="text-xs text-slate-500">Queued for upload</p>
-        </div>
-        <button
-          @click=${() => this.removeComposePendingTextShare(share.id)}
-          ?disabled=${this.isUploading}
-          class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
-          title="Remove"
-          aria-label="Remove pending text item"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
       </div>
     `;
   }

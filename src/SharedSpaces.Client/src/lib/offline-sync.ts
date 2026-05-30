@@ -1,9 +1,9 @@
 import {
-  addToOfflineQueue,
-  getOfflineQueue,
-  getOfflineQueueForSpace,
-  removeFromOfflineQueue,
-  type OfflineQueueItem,
+  saveComposeItem,
+  getPendingComposeItems,
+  getComposeItemsForSpace,
+  removeComposeItem,
+  type ComposeItem,
 } from './idb-storage';
 import { getServiceWorkerToken } from './token-storage';
 import { shareText, shareFile, SpaceApiError } from '../features/space-view/space-api';
@@ -18,11 +18,17 @@ function isOnline(): boolean {
   return typeof navigator === 'undefined' || !('onLine' in navigator) || navigator.onLine;
 }
 
+// A permanent failure is a 4xx the server will keep rejecting, so retrying is
+// pointless and the row is dropped. Auth failures (401/404) are deliberately
+// EXCLUDED: a missing/expired token is recoverable (re-auth), so those rows stay
+// queued and visible instead of being silently discarded.
 function isPermanentSyncFailure(error: unknown): boolean {
   return error instanceof SpaceApiError
     && typeof error.status === 'number'
     && error.status >= 400
     && error.status < 500
+    && error.status !== 401
+    && error.status !== 404
     && error.status !== 408
     && error.status !== 425
     && error.status !== 429;
@@ -30,6 +36,8 @@ function isPermanentSyncFailure(error: unknown): boolean {
 
 /**
  * Queue a text or file item for later upload when connectivity is restored.
+ * Stored as a `pending` row in the unified compose-items store so it shows up in
+ * the same compose queue as staged drafts and is retried by the background sync.
  */
 export async function queueForOffline(
   serverUrl: string,
@@ -42,8 +50,9 @@ export async function queueForOffline(
     fileData?: ArrayBuffer;
   },
 ): Promise<void> {
-  await addToOfflineQueue({
+  await saveComposeItem({
     id: crypto.randomUUID(),
+    status: 'pending',
     itemId: crypto.randomUUID(),
     spaceId,
     serverUrl,
@@ -56,24 +65,24 @@ export async function queueForOffline(
 }
 
 /**
- * Get the number of queued items for a given space.
+ * Get the number of pending (queued for upload) items for a given space.
  */
 export async function getOfflineQueueCount(
   serverUrl: string,
   spaceId: string,
 ): Promise<number> {
-  const queue = await getOfflineQueueForSpace(serverUrl, spaceId);
-  return queue.length;
+  const queue = await getComposeItemsForSpace(serverUrl, spaceId);
+  return queue.filter((item) => item.status === 'pending').length;
 }
 
 /**
- * Process every queued space that has a mirrored token available for the
- * service worker, skipping spaces that still need a foreground migration.
+ * Process every space that has pending items and a mirrored token available for
+ * the service worker, skipping spaces that still need a foreground migration.
  */
 export async function processAllOfflineQueues(): Promise<SyncResult> {
   if (!isOnline()) return { synced: 0, failed: 0 };
 
-  const queue = await getOfflineQueue();
+  const queue = await getPendingComposeItems();
   if (queue.length === 0) return { synced: 0, failed: 0 };
 
   const processedSpaces = new Set<string>();
@@ -97,11 +106,12 @@ export async function processAllOfflineQueues(): Promise<SyncResult> {
 }
 
 /**
- * Process all queued items for a space by uploading each via the space API.
+ * Process all pending items for a space by uploading each via the space API.
  *
  * - Successfully uploaded items are removed from the queue.
- * - Permanent 4xx auth/validation failures are removed (won't succeed on retry).
- * - Transient and network failures stay queued for a future attempt.
+ * - Permanent non-auth 4xx failures are removed (won't succeed on retry).
+ * - Auth (401/404), transient, and network failures stay queued for a future
+ *   attempt so the user never loses items to a recoverable error.
  */
 export async function processOfflineQueue(
   serverUrl: string,
@@ -110,7 +120,8 @@ export async function processOfflineQueue(
 ): Promise<SyncResult> {
   if (!isOnline()) return { synced: 0, failed: 0 };
 
-  const queue = await getOfflineQueueForSpace(serverUrl, spaceId);
+  const queue = (await getComposeItemsForSpace(serverUrl, spaceId))
+    .filter((item) => item.status === 'pending');
   if (queue.length === 0) return { synced: 0, failed: 0 };
 
   let synced = 0;
@@ -119,11 +130,11 @@ export async function processOfflineQueue(
   for (const item of queue) {
     try {
       await uploadQueueItem(item, token);
-      await removeFromOfflineQueue(item.id);
+      await removeComposeItem(item.id);
       synced++;
     } catch (error) {
       if (isPermanentSyncFailure(error)) {
-        await removeFromOfflineQueue(item.id);
+        await removeComposeItem(item.id);
       }
       failed++;
     }
@@ -133,7 +144,7 @@ export async function processOfflineQueue(
 }
 
 async function uploadQueueItem(
-  item: OfflineQueueItem,
+  item: ComposeItem,
   token: string,
 ): Promise<void> {
   if (item.type === 'text' && item.content) {
