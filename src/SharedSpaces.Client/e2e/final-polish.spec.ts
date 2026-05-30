@@ -1,4 +1,5 @@
 import { test, type Page } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,20 @@ const SERVER_URL = process.env.SERVER_URL || 'http://localhost:5165';
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots/variants');
+
+let deterministicCounter = 0;
+function deterministicUUID(): string {
+  const seq = deterministicCounter++;
+  const hash = createHash('sha256').update(`final-polish-item:${seq}`).digest();
+  const hex = hash.subarray(0, 16).toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    '4' + hex.slice(13, 16),
+    ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
 
 async function apiCall(url: string, options: RequestInit = {}) {
   const res = await fetch(url, options);
@@ -43,7 +58,7 @@ async function createSpaceAndJoin(name: string) {
 }
 
 async function addTextItem(spaceId: string, token: string, content: string) {
-  const itemId = crypto.randomUUID();
+  const itemId = deterministicUUID();
   const form = new FormData();
   form.append('id', itemId);
   form.append('contentType', 'text');
@@ -56,7 +71,7 @@ async function addTextItem(spaceId: string, token: string, content: string) {
 }
 
 async function addFileItem(spaceId: string, token: string, fileName: string, fileContent: string) {
-  const itemId = crypto.randomUUID();
+  const itemId = deterministicUUID();
   const form = new FormData();
   form.append('id', itemId);
   form.append('contentType', 'file');
