@@ -202,6 +202,13 @@ export class SpaceView extends BaseElement {
   @state() private composeItems: ComposeEntry[] = [];
   @state() private uploadingComposeItemIds = new Set<string>();
   @state() private composeQueueError = '';
+  // Edited file names for pending shares from other apps, keyed by the pending
+  // share id. Applied when the share is claimed into a draft on Share.
+  @state() private shareNameEdits: Record<string, string> = {};
+  // Re-entrancy guard for handleComposeShare that also drives the Share button
+  // and compose controls during the claim/upload window (before isUploading is
+  // toggled by the individual upload paths).
+  @state() private isComposeSharing = false;
   @state() private leaveConfirm = false;
   @state() private journalSyncEnabled = false;
   @state() private journalSyncLoading = false;
@@ -784,95 +791,12 @@ export class SpaceView extends BaseElement {
     }
   }
 
-  private async uploadPendingShare(share: PendingShareItem) {
-    if (!this.serverUrl || !this.spaceId || !this.token) return;
-
-    this.isUploading = true;
-    this.uploadError = '';
-
-    try {
-      const itemId = crypto.randomUUID();
-      this.pendingItemIds.add(itemId);
-      let uploaded = false;
-
-      try {
-        if (share.type === 'text' && share.content) {
-          const item = await shareText(
-            this.serverUrl,
-            this.spaceId,
-            itemId,
-            share.content,
-            this.token,
-          );
-          this.items = [item, ...this.items];
-          uploaded = true;
-        } else if (share.type === 'file' && share.fileData) {
-          const blob = new Blob([share.fileData], { type: share.fileType ?? 'application/octet-stream' });
-          const file = new File([blob], share.fileName ?? 'shared-file', { type: blob.type });
-          const item = await shareFile(
-            this.serverUrl,
-            this.spaceId,
-            itemId,
-            file,
-            this.token,
-          );
-          this.items = [item, ...this.items];
-          uploaded = true;
-        }
-
-        if (uploaded) {
-          await removePendingShare(share.id);
-          this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
-          this.notifyPendingSharesChanged();
-        } else {
-          this.uploadError = 'Shared item has no content to upload.';
-        }
-      } finally {
-        this.pendingItemIds.delete(itemId);
-      }
-    } catch (error) {
-      this.uploadError =
-        error instanceof SpaceApiError
-          ? error.message
-          : 'Failed to upload shared item.';
-    } finally {
-      this.isUploading = false;
-    }
-  }
-
-  private async uploadAllPendingShares() {
-    const fileShares = this.pendingShares.filter((share) => share.type === 'file');
-
-    if (fileShares.length > 0) {
-      // Promote file shares into editable drafts so the user can rename them
-      // before uploading, instead of uploading immediately.
-      const now = Date.now();
-      const entries: ComposeEntry[] = [];
-      fileShares.forEach((share, index) => {
-        const file = this.pendingShareToFile(share);
-        if (file) {
-          entries.push(this.createFileDraftEntry(file, now + index, share.id));
-        }
-      });
-
-      if (entries.length > 0) {
-        this.composeItems = [...this.composeItems, ...entries];
-        this.composeQueueError = '';
-        this.uploadError = '';
-        for (const entry of entries) {
-          void this.persistDraftEntry(entry);
-        }
-        return;
-      }
-    }
-
-    for (const share of [...this.pendingShares]) {
-      await this.uploadPendingShare(share);
-      if (this.uploadError) break;
-    }
-  }
-
   private async dismissPendingShare(share: PendingShareItem) {
+    if (this.shareNameEdits[share.id] !== undefined) {
+      const next = { ...this.shareNameEdits };
+      delete next[share.id];
+      this.shareNameEdits = next;
+    }
     try {
       await removePendingShare(share.id);
       this.pendingShares = this.pendingShares.filter((s) => s.id !== share.id);
@@ -907,17 +831,18 @@ export class SpaceView extends BaseElement {
     };
   }
 
-  // Persists a freshly-picked/promoted draft to the unified store so it survives
+  // Persists a freshly-picked/claimed draft to the unified store so it survives
   // a refresh. Guards against the user removing the row mid-read (tombstone).
-  private async persistDraftEntry(entry: ComposeEntry) {
-    if (!this.serverUrl || !this.spaceId || !entry.file) return;
-    if (this.discardedComposeItemIds.has(entry.id)) return;
+  // Returns true only when the draft was durably written to IndexedDB.
+  private async persistDraftEntry(entry: ComposeEntry): Promise<boolean> {
+    if (!this.serverUrl || !this.spaceId || !entry.file) return false;
+    if (this.discardedComposeItemIds.has(entry.id)) return false;
 
     try {
       const fileData = await entry.file.arrayBuffer();
-      if (this.discardedComposeItemIds.has(entry.id)) return;
+      if (this.discardedComposeItemIds.has(entry.id)) return false;
       const current = this.composeItems.find((i) => i.id === entry.id);
-      if (!current) return; // removed before the read finished
+      if (!current) return false; // removed before the read finished
 
       await saveComposeItem({
         id: entry.id,
@@ -937,9 +862,12 @@ export class SpaceView extends BaseElement {
       // If the user removed the row while we were saving, undo the write.
       if (this.discardedComposeItemIds.has(entry.id)) {
         await removeComposeItem(entry.id).catch(() => {});
+        return false;
       }
+      return true;
     } catch {
       // IndexedDB may not be available; keep the in-memory entry.
+      return false;
     }
   }
 
@@ -1029,25 +957,18 @@ export class SpaceView extends BaseElement {
     }
   }
 
-  private requestPendingShareUpload(share: PendingShareItem) {
-    if (share.type !== 'file') {
-      void this.uploadPendingShare(share);
-      return;
-    }
-
-    const file = this.pendingShareToFile(share);
-    if (!file) {
-      void this.uploadPendingShare(share);
-      return;
-    }
-
-    // Promote the file pending share into an editable draft.
-    const entry = this.createFileDraftEntry(file, Date.now(), share.id);
-    this.composeItems = [...this.composeItems, entry];
+  private handleShareNameInput = (id: string, value: string) => {
+    this.shareNameEdits = { ...this.shareNameEdits, [id]: value };
     this.composeQueueError = '';
-    this.uploadError = '';
-    void this.persistDraftEntry(entry);
-  }
+  };
+
+  private focusComposeShareInput = (index: number) => {
+    const input = this.querySelector<HTMLInputElement>(
+      `#compose-share-input-${index}`,
+    );
+    input?.focus();
+    input?.select();
+  };
 
   private handleComposeNameInput = (id: string, value: string) => {
     this.composeItems = this.composeItems.map((entry) =>
@@ -1090,7 +1011,12 @@ export class SpaceView extends BaseElement {
   }
 
   private removeComposeEntryByUser = (id: string) => {
-    if (this.isUploading || this.uploadingComposeItemIds.has(id)) return;
+    if (
+      this.isUploading ||
+      this.isComposeSharing ||
+      this.uploadingComposeItemIds.has(id)
+    )
+      return;
     this.removeComposeEntry(id);
   };
 
@@ -1126,19 +1052,168 @@ export class SpaceView extends BaseElement {
 
 
   private handleComposeShare = async () => {
-    if (this.hasComposeQueue) {
-      // When text is also typed in the box, send it first, then the queued
-      // files/pending shares. If the text fails (e.g. auth/network error),
-      // stop before uploading files so the user can retry the whole batch.
+    if (this.isComposeSharing || this.isUploading) return;
+    this.isComposeSharing = true;
+    try {
+      // 1. Send any text typed directly in the box first. If it fails (auth /
+      //    network with the text still present), stop so the user can retry the
+      //    whole batch.
       if (this.textInput.trim()) {
         await this.handleTextSubmit();
         if (this.textInput.trim()) return;
       }
-      await this.uploadComposeQueue();
-      return;
+
+      // 2. Upload text shares folded in from other apps (these can't be renamed
+      //    so they bypass the draft pipeline). Stop on auth/unexpected errors.
+      const textResult = await this.uploadPendingTextShares();
+      if (textResult !== 'ok') return;
+
+      // 3. Claim file shares from other apps into editable drafts (applying any
+      //    rename edits) and transfer ownership away from the global inbox.
+      await this.claimFileShares();
+
+      // 4. Snapshot pre-existing pending uploads BEFORE uploading drafts, so we
+      //    don't immediately re-retry drafts that fail and flip to pending now.
+      const hadPending = this.composeItems.some(
+        (entry) => entry.status === 'pending',
+      );
+
+      // 5. Upload every staged draft (user-picked files + claimed shares).
+      if (this.hasComposeQueue) await this.uploadComposeQueue();
+
+      // 6. Retry pre-existing pending uploads if we're online.
+      if (hadPending && navigator.onLine) await this.syncOfflineQueue();
+
+      // 7. Surface offline feedback when items remain queued for later.
+      if (
+        !navigator.onLine &&
+        this.composeItems.some((entry) => entry.status === 'pending')
+      ) {
+        this.syncMessage = 'Will upload when back online';
+      }
+    } finally {
+      this.isComposeSharing = false;
     }
-    await this.handleTextSubmit();
   };
+
+  // Uploads text shares from other apps directly (they cannot be renamed). Each
+  // attempt uses a stable itemId so an offline/network fallback that re-queues
+  // the same text stays idempotent. Returns 'ok' when all were handled, 'auth'
+  // on an auth failure, or 'stop' on an unexpected error.
+  private async uploadPendingTextShares(): Promise<'ok' | 'auth' | 'stop'> {
+    const shares = this.visiblePendingShares.filter(
+      (share) => share.type === 'text' && (share.content ?? '').trim().length > 0,
+    );
+    if (shares.length === 0) return 'ok';
+    if (!this.serverUrl || !this.spaceId || !this.token) return 'stop';
+
+    for (const share of shares) {
+      const content = (share.content ?? '').trim();
+      const itemId = crypto.randomUUID();
+
+      if (!navigator.onLine) {
+        try {
+          await this.enqueueForOffline('text', { content, itemId });
+          await this.removePendingSharesById([share.id]).catch(() => {});
+        } catch {
+          this.uploadError = 'Failed to queue shared text.';
+          return 'stop';
+        }
+        continue;
+      }
+
+      this.pendingItemIds.add(itemId);
+      try {
+        const item = await shareText(
+          this.serverUrl,
+          this.spaceId,
+          itemId,
+          content,
+          this.token,
+        );
+        this.items = [item, ...this.items];
+        await this.removePendingSharesById([share.id]).catch(() => {});
+      } catch (error) {
+        if (error instanceof SpaceApiError && !error.status) {
+          // Network error: queue with the same itemId so the retry is idempotent.
+          try {
+            await this.enqueueForOffline('text', { content, itemId });
+            await this.removePendingSharesById([share.id]).catch(() => {});
+            continue;
+          } catch {
+            // Fall through to error handling.
+          }
+        }
+        if (
+          error instanceof SpaceApiError &&
+          (error.status === 401 || error.status === 404)
+        ) {
+          this.connectionErrorType = 'auth';
+          this.errorMessage =
+            'Authentication failed. Your token may have been revoked or the space no longer exists.';
+          return 'auth';
+        }
+        this.uploadError =
+          error instanceof SpaceApiError
+            ? error.message
+            : 'Failed to upload shared item.';
+        return 'stop';
+      } finally {
+        this.pendingItemIds.delete(itemId);
+      }
+    }
+    return 'ok';
+  }
+
+  // Folds file shares from other apps into the compose queue as editable drafts,
+  // applying any rename edits. Ownership is transferred away from the global
+  // inbox only after the draft is durably persisted (or, later, uploaded), so a
+  // persistence failure keeps the global share as a recoverable backup.
+  private async claimFileShares() {
+    const shares = this.visiblePendingShares.filter(
+      (share) => share.type === 'file',
+    );
+    if (shares.length === 0) return;
+
+    const now = Date.now();
+    const claimed: Array<{ entry: ComposeEntry; shareId: string }> = [];
+    shares.forEach((share, index) => {
+      const file = this.pendingShareToFile(share);
+      if (!file) return;
+      const hasEdit = Object.prototype.hasOwnProperty.call(
+        this.shareNameEdits,
+        share.id,
+      );
+      const name = hasEdit ? this.shareNameEdits[share.id].trim() : file.name;
+      const entry = {
+        ...this.createFileDraftEntry(file, now + index, share.id),
+        name,
+      };
+      claimed.push({ entry, shareId: share.id });
+    });
+
+    if (claimed.length === 0) return;
+
+    this.composeItems = [...this.composeItems, ...claimed.map((c) => c.entry)];
+    this.composeQueueError = '';
+    this.uploadError = '';
+
+    // Drop the rename overrides now that they're folded into the draft entries.
+    const nextEdits = { ...this.shareNameEdits };
+    for (const { shareId } of claimed) delete nextEdits[shareId];
+    this.shareNameEdits = nextEdits;
+
+    // Persist each draft, then remove the originating global share only for the
+    // ones that landed durably.
+    const persistedShareIds: string[] = [];
+    for (const { entry, shareId } of claimed) {
+      const persisted = await this.persistDraftEntry(entry);
+      if (persisted) persistedShareIds.push(shareId);
+    }
+    if (persistedShareIds.length > 0) {
+      await this.removePendingSharesById(persistedShareIds).catch(() => {});
+    }
+  }
 
   private focusComposeDraftInput = (index: number) => {
     const input = this.querySelector<HTMLInputElement>(
@@ -1307,7 +1382,13 @@ export class SpaceView extends BaseElement {
 
   private async enqueueForOffline(
     type: 'text' | 'file',
-    options: { content?: string; fileName?: string; fileType?: string; fileData?: ArrayBuffer },
+    options: {
+      content?: string;
+      fileName?: string;
+      fileType?: string;
+      fileData?: ArrayBuffer;
+      itemId?: string;
+    },
   ) {
     if (!this.serverUrl || !this.spaceId) return;
     await queueForOffline(this.serverUrl, this.spaceId, type, options);
@@ -2334,61 +2415,13 @@ export class SpaceView extends BaseElement {
 
   private renderComposeQueue() {
     const pendingShares = this.visiblePendingShares;
-    const hasPending = this.composeItems.some((entry) => entry.status === 'pending');
-    const canSyncOffline = this.isOnline && this.connectionErrorType !== 'network';
 
     return html`
       <div class="border-t border-slate-800">
         ${this.composeItems.map((entry, index) =>
           this.renderComposeRow(entry, index))}
-        ${hasPending
-          ? html`
-            <div
-              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5"
-            >
-              <span class="text-xs font-medium text-sky-300/80">
-                Pending upload
-              </span>
-              ${canSyncOffline
-                ? html`
-                  <button
-                    @click=${() => this.syncOfflineQueue()}
-                    ?disabled=${this.isUploading}
-                    class="rounded px-2 py-1 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
-                  >
-                    Sync Now
-                  </button>
-                `
-                : html`
-                  <span class="text-xs text-slate-500">
-                    ${this.isOnline
-                      ? 'Will retry when reachable'
-                      : 'Will upload when back online'}
-                  </span>
-                `}
-            </div>
-          `
-          : nothing}
-        ${pendingShares.length > 0
-          ? html`
-            <div
-              class="flex items-center justify-between gap-2 border-t border-slate-800/60 px-3 py-1.5"
-            >
-              <span class="text-xs font-medium text-amber-300/80">
-                Shared from other apps
-              </span>
-              <button
-                @click=${() => this.uploadAllPendingShares()}
-                ?disabled=${this.isUploading}
-                class="rounded px-2 py-1 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
-              >
-                Upload all
-              </button>
-            </div>
-            ${pendingShares.map((share) =>
-              this.renderComposePendingShareRow(share))}
-          `
-          : nothing}
+        ${pendingShares.map((share, index) =>
+          this.renderComposeShareRow(share, index))}
         ${this.composeQueueError
           ? html`<p class="px-4 py-2 text-xs text-red-400">${this.composeQueueError}</p>`
           : nothing}
@@ -2400,7 +2433,10 @@ export class SpaceView extends BaseElement {
   // (rename + remove); text rows are display-only with remove. Drafts and
   // pending uploads share this layout, differing only by their status sub-label.
   private renderComposeRow(entry: ComposeEntry, index: number) {
-    const locked = this.isUploading || this.uploadingComposeItemIds.has(entry.id);
+    const locked =
+      this.isUploading ||
+      this.isComposeSharing ||
+      this.uploadingComposeItemIds.has(entry.id);
     const subLabel =
       entry.status === 'pending' ? 'Pending upload' : 'Queued for upload';
 
@@ -2489,35 +2525,87 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private renderComposePendingShareRow(share: PendingShareItem) {
-    const icon = share.type === 'file'
-      ? getFileTypeIcon(share.fileName ?? 'file')
-      : getTextItemIcon();
-    const label = share.type === 'file'
-      ? share.fileName ?? 'File'
-      : (share.content ?? '').substring(0, 100);
+  // Renders a pending share from another app inline in the compose queue. File
+  // shares are renamable (mirroring draft rows); text shares are display-only.
+  // Neither has an Upload button - everything is sent together via Share.
+  private renderComposeShareRow(share: PendingShareItem, index: number) {
+    const locked = this.isUploading || this.isComposeSharing;
+
+    if (share.type === 'text') {
+      const icon = getTextItemIcon();
+      return html`
+        <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
+          <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
+            ${icon.svg}
+          </div>
+          <div class="min-w-0 flex-1 px-1">
+            <p class="truncate text-sm font-medium text-slate-200">
+              ${(share.content ?? '').substring(0, 100)}
+            </p>
+            <p class="text-xs text-slate-500">Shared from another app</p>
+          </div>
+          <button
+            @click=${() => this.dismissPendingShare(share)}
+            ?disabled=${locked}
+            class="shrink-0 rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
+            title="Dismiss"
+            aria-label="Dismiss shared item"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      `;
+    }
+
+    const fileName = share.fileName ?? 'file';
+    const icon = getFileTypeIcon(fileName);
+    const inputId = `compose-share-input-${index}`;
+    const value = this.shareNameEdits[share.id] ?? fileName;
+    const sizeLabel =
+      share.fileSize !== undefined ? ` · ${this.formatFileSize(share.fileSize)}` : '';
 
     return html`
-      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2">
+      <div class="flex items-center gap-3 border-t border-slate-800/60 px-3 py-2 first:border-t-0">
         <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
           ${icon.svg}
         </div>
-        <div class="min-w-0 flex-1 px-1">
-          <p class="truncate text-sm font-medium text-slate-200">${label}</p>
-          <p class="text-xs text-slate-500">Shared from another app</p>
+        <div class="min-w-0 flex-1">
+          <input
+            id=${inputId}
+            type="text"
+            .value=${value}
+            @input=${(e: Event) =>
+              this.handleShareNameInput(
+                share.id,
+                (e.target as HTMLInputElement).value,
+              )}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            ?disabled=${locked}
+            aria-label=${`Filename for ${value}`}
+            class="w-full truncate rounded border-0 bg-transparent px-1 py-0.5 text-sm font-medium text-slate-200 transition focus:outline-none disabled:opacity-50"
+          />
+          <p class="truncate px-1 text-xs text-slate-500">
+            Shared from another app${sizeLabel}
+          </p>
         </div>
         <div class="flex shrink-0 items-center gap-1">
           <button
-            @click=${() => this.requestPendingShareUpload(share)}
-            ?disabled=${this.isUploading}
-            class="rounded px-3 py-1.5 text-xs font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
-            title="Upload this item"
+            @click=${() => this.focusComposeShareInput(index)}
+            ?disabled=${locked}
+            class="rounded p-1.5 text-slate-500 transition hover:text-sky-400 disabled:opacity-50"
+            title="Rename"
+            aria-label=${`Rename ${value}`}
           >
-            Upload
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
           </button>
           <button
             @click=${() => this.dismissPendingShare(share)}
-            ?disabled=${this.isUploading}
+            ?disabled=${locked}
             class="rounded p-1.5 text-slate-500 transition hover:text-red-400 disabled:opacity-50"
             title="Dismiss"
             aria-label="Dismiss shared item"
@@ -2560,7 +2648,7 @@ export class SpaceView extends BaseElement {
             @input=${this.handleTextInput}
             @keydown=${this.handleTextKeydown}
             @paste=${this.handleTextareaPaste}
-            ?disabled=${this.isUploading}
+            ?disabled=${this.isUploading || this.isComposeSharing}
             class="w-full resize-none rounded-t-lg border-0 bg-transparent px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
           ></textarea>
 
@@ -2577,7 +2665,7 @@ export class SpaceView extends BaseElement {
               <!-- File upload button -->
               <button
                 @click=${this.triggerFileSelect}
-                ?disabled=${this.isUploading}
+                ?disabled=${this.isUploading || this.isComposeSharing}
                 class="flex items-center gap-1.5 rounded px-2 py-1.5 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
                 title="Upload files"
                 aria-label="Upload files"
@@ -2601,7 +2689,7 @@ export class SpaceView extends BaseElement {
                 type="file"
                 multiple
                 @change=${this.handleFileSelect}
-                ?disabled=${this.isUploading}
+                ?disabled=${this.isUploading || this.isComposeSharing}
                 class="hidden"
                 aria-label="Upload files input"
                 id="file-input-hidden"
@@ -2613,10 +2701,11 @@ export class SpaceView extends BaseElement {
               <button
                 @click=${this.handleComposeShare}
                 ?disabled=${this.isUploading ||
-                (!this.textInput.trim() && !this.hasComposeQueue)}
+                this.isComposeSharing ||
+                (!this.textInput.trim() && !this.hasComposeContent)}
                 class="rounded-full bg-sky-400 px-4 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                ${this.isUploading ? 'Sending…' : 'Share'}
+                ${this.isUploading || this.isComposeSharing ? 'Sending…' : 'Share'}
               </button>
             </div>
           </div>

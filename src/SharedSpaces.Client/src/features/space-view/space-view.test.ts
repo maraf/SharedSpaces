@@ -998,7 +998,7 @@ describe('SpaceView - Deduplication Logic', () => {
       // Mock crypto.randomUUID
       vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(sharedItemId);
 
-      // Simulate uploadPendingShare call with text share
+      // Simulate uploading a folded-in text share via the unified Share path.
       (element as any).token = token;
       const pendingShare = {
         id: 'pending-share-1',
@@ -1007,7 +1007,8 @@ describe('SpaceView - Deduplication Logic', () => {
         timestamp: Date.now(),
       };
 
-      const uploadSharePromise = (element as any).uploadPendingShare(pendingShare);
+      (element as any).pendingShares = [pendingShare];
+      const uploadSharePromise = (element as any).uploadPendingTextShares();
 
       // Wait for pendingItemIds.add to execute
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1112,19 +1113,23 @@ describe('SpaceView - Deduplication Logic', () => {
       // Mock crypto.randomUUID
       vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(sharedFileId);
 
-      // Simulate uploadPendingShare call with file share
+      // Simulate uploading a folded-in file share via the unified draft path.
       (element as any).token = token;
       const fileData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic bytes
-      const pendingShare = {
-        id: 'pending-share-2',
+      const draft = {
+        id: 'draft-file-1',
+        status: 'draft' as const,
         type: 'file' as const,
-        fileName: 'shared-image.jpg',
+        itemId: sharedFileId,
+        name: 'shared-image.jpg',
         fileType: 'image/jpeg',
-        fileData,
+        fileSize: fileData.length,
+        file: new File([fileData], 'shared-image.jpg', { type: 'image/jpeg' }),
         timestamp: Date.now(),
       };
 
-      const uploadSharePromise = (element as any).uploadPendingShare(pendingShare);
+      (element as any).composeItems = [draft];
+      const uploadSharePromise = (element as any).uploadDraftEntry(draft);
 
       // Wait for pendingItemIds.add to execute
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1225,8 +1230,9 @@ describe('SpaceView - Deduplication Logic', () => {
         timestamp: Date.now(),
       };
 
+      (element as any).pendingShares = [pendingShare];
       try {
-        await (element as any).uploadPendingShare(pendingShare);
+        await (element as any).uploadPendingTextShares();
       } catch {
         // Expected to fail
       }
@@ -2636,11 +2642,15 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
       const textarea = element.querySelector('textarea');
       const composeSection = textarea?.closest('section');
-      expect(composeSection?.textContent).toContain('shared-doc.pdf');
+      // File shares render the name in an editable rename input (its value).
+      const input = composeSection?.querySelector(
+        'input#compose-share-input-0',
+      ) as HTMLInputElement | null;
+      expect(input?.value).toBe('shared-doc.pdf');
       expect(composeSection?.textContent).toContain('Shared from another app');
     });
 
-    it('renders Upload, Dismiss, and Upload all actions for pending shares', async () => {
+    it('renders only a Dismiss action for pending text shares (no Upload/Upload all)', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
@@ -2657,44 +2667,62 @@ describe('SpaceView - Unified Item Card Layout', () => {
       const uploadButton = buttons.find(
         (b) => b.textContent?.trim() === 'Upload' && b.title === 'Upload this item',
       );
-      expect(uploadButton).toBeTruthy();
+      expect(uploadButton).toBeFalsy();
+
+      const uploadAllButton = buttons.find(
+        (b) => b.textContent?.trim() === 'Upload all',
+      );
+      expect(uploadAllButton).toBeFalsy();
 
       const dismissButton = buttons.find(
         (b) => b.getAttribute('aria-label') === 'Dismiss shared item',
       );
       expect(dismissButton).toBeTruthy();
-
-      const uploadAllButton = buttons.find(
-        (b) => b.textContent?.trim() === 'Upload all',
-      );
-      expect(uploadAllButton).toBeTruthy();
     });
 
-    it('does not duplicate a file pending share once it is promoted into a draft', async () => {
-      const share = {
-        id: 'pending-file',
-        type: 'file' as const,
-        fileName: 'photo.jpg',
-        fileType: 'image/jpeg',
-        fileData: new Uint8Array([1, 2, 3]).buffer,
-        timestamp: Date.now(),
-      };
-      (element as any).pendingShares = [share];
-      // Promote it into the compose queue (keeps it in pendingShares until upload).
-      (element as any).requestPendingShareUpload(share);
+    it('allows renaming a pending file share before upload', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-file-rename',
+          type: 'file',
+          fileName: 'shared-doc.pdf',
+          fileType: 'application/pdf',
+          fileData: new Uint8Array([1, 2, 3]).buffer,
+        },
+      ];
+      (element as any).isLoading = false;
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      // The promoted share should now be an editable draft row, not also a
-      // folded-in pending row.
-      expect((element as any).visiblePendingShares).toHaveLength(0);
-      const subtitles = Array.from(element.querySelectorAll('p')).filter(
-        (p) => p.textContent?.trim() === 'Shared from another app',
-      );
-      expect(subtitles).toHaveLength(0);
+      const input = element.querySelector(
+        'input#compose-share-input-0',
+      ) as HTMLInputElement | null;
+      expect(input).toBeTruthy();
+      expect(input?.value).toBe('shared-doc.pdf');
+
+      (element as any).handleShareNameInput('pending-file-rename', 'renamed.pdf');
+      await element.updateComplete;
+
+      expect((element as any).shareNameEdits['pending-file-rename']).toBe('renamed.pdf');
     });
 
-    it('keeps the Share button disabled when only pending shares exist', async () => {
+    it('does not render a rename input for pending text shares', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-text-norename',
+          type: 'text',
+          content: 'Just text',
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const input = element.querySelector('input#compose-share-input-0');
+      expect(input).toBeFalsy();
+    });
+
+    it('enables the Share button when only pending shares exist', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
@@ -2711,11 +2739,17 @@ describe('SpaceView - Unified Item Card Layout', () => {
         (b) => b.textContent?.trim() === 'Share',
       );
       expect(shareButton).toBeTruthy();
-      expect((shareButton as HTMLButtonElement).disabled).toBe(true);
+      expect((shareButton as HTMLButtonElement).disabled).toBe(false);
     });
 
     describe('compose queue upload', () => {
-      it('uploadAllPendingShares promotes file shares into the compose queue and leaves text shares as pending shares', async () => {
+      it('claimFileShares folds file shares into the compose queue and leaves text shares as pending shares', async () => {
+        // Let the connectedCallback hydration settle so it can't overwrite the
+        // pendingShares we set below mid-claim.
+        await element.updateComplete;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        (element as any).token = token;
         (element as any).pendingShares = [
           {
             id: 'pending-text',
@@ -2733,14 +2767,35 @@ describe('SpaceView - Unified Item Card Layout', () => {
           },
         ];
 
-        await (element as any).uploadAllPendingShares();
+        await (element as any).claimFileShares();
 
         expect((element as any).draftEntries).toHaveLength(1);
         expect((element as any).draftEntries[0].name).toBe('shared-image.jpg');
-        // The text share is not promoted; it stays visible as a pending share.
+        // The text share is not claimed; it stays visible as a pending share.
         const visible = (element as any).visiblePendingShares;
         expect(visible).toHaveLength(1);
         expect(visible[0].content).toBe('Shared note');
+      });
+
+      it('claimFileShares applies an edited filename from the pending share row', async () => {
+        (element as any).token = token;
+        (element as any).pendingShares = [
+          {
+            id: 'pending-file',
+            type: 'file',
+            fileName: 'shared-image.jpg',
+            fileType: 'image/jpeg',
+            fileData: new Uint8Array([1, 2, 3]).buffer,
+            timestamp: Date.now(),
+          },
+        ];
+        (element as any).handleShareNameInput('pending-file', 'renamed.jpg');
+
+        await (element as any).claimFileShares();
+
+        expect((element as any).draftEntries).toHaveLength(1);
+        expect((element as any).draftEntries[0].name).toBe('renamed.jpg');
+        expect((element as any).shareNameEdits['pending-file']).toBeUndefined();
       });
 
       it('uploadComposeQueue uploads the edited filename online and clears the draft', async () => {
@@ -2780,10 +2835,8 @@ describe('SpaceView - Unified Item Card Layout', () => {
           };
 
           (element as any).pendingShares = [pendingShare];
-          (element as any).requestPendingShareUpload(pendingShare);
-
-          const draftId = (element as any).draftEntries[0].id;
-          (element as any).handleComposeNameInput(draftId, 'renamed-image.jpg');
+          (element as any).handleShareNameInput('pending-file-offline', 'renamed-image.jpg');
+          await (element as any).claimFileShares();
           await (element as any).uploadComposeQueue();
 
           const stored = (await getComposeItemsForSpace(serverUrl, spaceId)).filter(
@@ -2979,7 +3032,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
       expect(composeSection?.textContent).toContain('Pending upload');
     });
 
-    it('shows a Sync Now action when online', async () => {
+    it('does not render a Sync Now action for pending uploads', async () => {
       (element as any).composeItems = [pendingTextEntry()];
       (element as any).isOnline = true;
       (element as any).connectionErrorType = null;
@@ -2990,10 +3043,10 @@ describe('SpaceView - Unified Item Card Layout', () => {
       const syncButton = Array.from(element.querySelectorAll('button')).find(
         (b) => b.textContent?.trim() === 'Sync Now',
       );
-      expect(syncButton).toBeTruthy();
+      expect(syncButton).toBeFalsy();
     });
 
-    it('hides Sync Now and shows offline copy when offline', async () => {
+    it('does not render a Sync Now action when offline', async () => {
       (element as any).composeItems = [pendingTextEntry()];
       (element as any).isOnline = false;
       (element as any).isLoading = false;
@@ -3004,10 +3057,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
         (b) => b.textContent?.trim() === 'Sync Now',
       );
       expect(syncButton).toBeFalsy();
-      expect(element.textContent).toContain('Will upload when back online');
     });
 
-    it('keeps the Share button disabled when only pending uploads exist', async () => {
+    it('enables the Share button when only pending uploads exist', async () => {
       (element as any).composeItems = [pendingTextEntry()];
       (element as any).textInput = '';
       (element as any).isOnline = true;
@@ -3019,7 +3071,7 @@ describe('SpaceView - Unified Item Card Layout', () => {
         (b) => b.textContent?.trim() === 'Share',
       );
       expect(shareButton).toBeTruthy();
-      expect((shareButton as HTMLButtonElement).disabled).toBe(true);
+      expect((shareButton as HTMLButtonElement).disabled).toBe(false);
     });
   });
 });

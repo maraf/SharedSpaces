@@ -48,16 +48,18 @@ export async function queueForOffline(
     fileName?: string;
     fileType?: string;
     fileData?: ArrayBuffer;
+    itemId?: string;
   },
 ): Promise<void> {
+  const { itemId, ...rest } = options;
   await saveComposeItem({
     id: crypto.randomUUID(),
     status: 'pending',
-    itemId: crypto.randomUUID(),
+    itemId: itemId ?? crypto.randomUUID(),
     spaceId,
     serverUrl,
     type,
-    ...options,
+    ...rest,
     timestamp: Date.now(),
   });
 
