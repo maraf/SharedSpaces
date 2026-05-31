@@ -281,6 +281,25 @@ export async function removePendingShare(id: string): Promise<void> {
   await db.delete(PENDING_SHARES_STORE, id);
 }
 
+// Transactionally update a pending share (e.g. persist a rename) so the edit
+// survives a refresh. Returns 'missing' if the row was dismissed/claimed in the
+// meantime so a stale in-flight write never resurrects it.
+export async function updatePendingShare(
+  id: string,
+  updater: (item: PendingShareItem) => PendingShareItem,
+): Promise<'updated' | 'missing'> {
+  const db = await getDB();
+  const tx = db.transaction(PENDING_SHARES_STORE, 'readwrite');
+  const existing = (await tx.store.get(id)) as PendingShareItem | undefined;
+  if (!existing) {
+    await tx.done;
+    return 'missing';
+  }
+  await tx.store.put(updater(existing));
+  await tx.done;
+  return 'updated';
+}
+
 export async function clearPendingShares(): Promise<void> {
   const db = await getDB();
   await db.clear(PENDING_SHARES_STORE);

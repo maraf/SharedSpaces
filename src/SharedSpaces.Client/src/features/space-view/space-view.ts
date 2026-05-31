@@ -32,6 +32,7 @@ import {
 import {
   getPendingShares,
   removePendingShare,
+  updatePendingShare,
   getComposeItemsForSpace,
   saveComposeItem,
   updateComposeItem,
@@ -962,6 +963,30 @@ export class SpaceView extends BaseElement {
     this.composeQueueError = '';
   };
 
+  // Persists an edited share filename (on blur) so the rename survives a refresh.
+  // Mirrors `persistComposeName`: the in-memory `shareNameEdits` override only
+  // lives until the next load, so without writing it back to the `pending-shares`
+  // store the rename is lost on reload (getPendingShares returns the original
+  // fileName). Empty/whitespace names fall back to the existing fileName.
+  private persistShareName = (id: string) => {
+    const share = this.pendingShares.find((s) => s.id === id);
+    if (!share || share.type !== 'file') return;
+    const edited = this.shareNameEdits[id];
+    if (edited === undefined) return;
+    const trimmed = edited.trim();
+    const finalName = trimmed.length > 0 ? trimmed : (share.fileName ?? '');
+    // Keep the in-memory row consistent so the input value and claim path agree
+    // with what was persisted (immutable update so Lit re-renders).
+    this.pendingShares = this.pendingShares.map((s) =>
+      s.id === id ? { ...s, fileName: finalName } : s,
+    );
+    void updatePendingShare(id, (item) => ({ ...item, fileName: finalName })).catch(
+      () => {
+        // IndexedDB may not be available
+      },
+    );
+  };
+
   private focusComposeShareInput = (index: number) => {
     const input = this.querySelector<HTMLInputElement>(
       `#compose-share-input-${index}`,
@@ -1637,6 +1662,9 @@ export class SpaceView extends BaseElement {
   };
 
   private triggerFileSelect = () => {
+    // The visible Files button is disabled during upload/share; guard here too so
+    // any non-button caller can't open the picker mid-flight.
+    if (this.isUploading || this.isComposeSharing) return;
     const input = this.querySelector<HTMLInputElement>('#file-input-hidden');
     if (input) {
       input.click();
@@ -2590,6 +2618,7 @@ export class SpaceView extends BaseElement {
                 share.id,
                 (e.target as HTMLInputElement).value,
               )}
+            @change=${() => this.persistShareName(share.id)}
             @keydown=${(e: KeyboardEvent) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -2700,8 +2729,7 @@ export class SpaceView extends BaseElement {
                 type="file"
                 multiple
                 @change=${this.handleFileSelect}
-                ?disabled=${this.isUploading || this.isComposeSharing}
-                class="hidden"
+                class="sr-only"
                 aria-label="Upload files input"
                 id="file-input-hidden"
               />

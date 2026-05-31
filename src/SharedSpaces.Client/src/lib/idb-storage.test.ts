@@ -41,6 +41,7 @@ import {
   setStoredToken,
   syncStoredTokens,
   updateComposeItem,
+  updatePendingShare,
   type ComposeItem,
   type OfflineQueueItem,
   type PendingShareItem,
@@ -101,6 +102,38 @@ describe('idb-storage', () => {
         '1000-0000-a',
         '1000-0001-b',
       ]);
+    });
+
+    it('updatePendingShare persists a rename to an existing share', async () => {
+      await seedPendingShares([
+        {
+          id: 'share-1',
+          type: 'file',
+          fileName: 'original.pdf',
+          fileType: 'application/pdf',
+          timestamp: 1000,
+        },
+      ]);
+
+      const result = await updatePendingShare('share-1', (item) => ({
+        ...item,
+        fileName: 'renamed.pdf',
+      }));
+
+      expect(result).toBe('updated');
+      const shares = await getPendingShares();
+      expect(shares).toHaveLength(1);
+      expect(shares[0].fileName).toBe('renamed.pdf');
+    });
+
+    it('updatePendingShare returns missing for an unknown id and does not create a row', async () => {
+      const result = await updatePendingShare('does-not-exist', (item) => ({
+        ...item,
+        fileName: 'nope.pdf',
+      }));
+
+      expect(result).toBe('missing');
+      expect(await getPendingShares()).toEqual([]);
     });
   });
 

@@ -2706,6 +2706,76 @@ describe('SpaceView - Unified Item Card Layout', () => {
       expect((element as any).shareNameEdits['pending-file-rename']).toBe('renamed.pdf');
     });
 
+    it('persists a pending share rename on blur so it survives a refresh', async () => {
+      const updateSpy = vi
+        .spyOn(idbStorage, 'updatePendingShare')
+        .mockResolvedValue('updated');
+      (element as any).pendingShares = [
+        {
+          id: 'pending-file-persist',
+          type: 'file',
+          fileName: 'shared-doc.pdf',
+          fileType: 'application/pdf',
+          fileData: new Uint8Array([1, 2, 3]).buffer,
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      (element as any).handleShareNameInput('pending-file-persist', '  renamed.pdf  ');
+      (element as any).persistShareName('pending-file-persist');
+      await element.updateComplete;
+
+      // In-memory row is updated (trimmed) so the value/claim path stay consistent.
+      const share = (element as any).pendingShares.find(
+        (s: any) => s.id === 'pending-file-persist',
+      );
+      expect(share.fileName).toBe('renamed.pdf');
+      // The trimmed name was written back to the pending-shares store.
+      expect(updateSpy).toHaveBeenCalledWith(
+        'pending-file-persist',
+        expect.any(Function),
+      );
+      const updater = updateSpy.mock.calls[0][1] as (item: any) => any;
+      expect(updater({ id: 'pending-file-persist', fileName: 'shared-doc.pdf' }).fileName).toBe(
+        'renamed.pdf',
+      );
+      updateSpy.mockRestore();
+    });
+
+    it('falls back to the original filename when a pending share rename is cleared', async () => {
+      const updateSpy = vi
+        .spyOn(idbStorage, 'updatePendingShare')
+        .mockResolvedValue('updated');
+      (element as any).pendingShares = [
+        {
+          id: 'pending-file-empty',
+          type: 'file',
+          fileName: 'keep-me.pdf',
+          fileType: 'application/pdf',
+          fileData: new Uint8Array([1, 2, 3]).buffer,
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      (element as any).handleShareNameInput('pending-file-empty', '   ');
+      (element as any).persistShareName('pending-file-empty');
+      await element.updateComplete;
+
+      const share = (element as any).pendingShares.find(
+        (s: any) => s.id === 'pending-file-empty',
+      );
+      expect(share.fileName).toBe('keep-me.pdf');
+      const updater = updateSpy.mock.calls[0][1] as (item: any) => any;
+      expect(updater({ id: 'pending-file-empty', fileName: 'keep-me.pdf' }).fileName).toBe(
+        'keep-me.pdf',
+      );
+      updateSpy.mockRestore();
+    });
+
     it('does not render a rename input for pending text shares', async () => {
       (element as any).pendingShares = [
         {
