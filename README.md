@@ -24,13 +24,40 @@ Anonymous by design: users pick a display name when joining a space. No email, n
 
 ## Screenshots
 
-**Home view** — Your spaces across multiple servers:
-
-![SharedSpaces home view](docs/screenshots/home--desktop.png)
-
 **Inside a space** — Real-time shared content:
 
 ![SharedSpaces space view with content](docs/screenshots/space--desktop.png)
+
+## Deployment
+
+```mermaid
+graph LR
+    subgraph "Static Host (single deployment)"
+        Client[Web Client<br/>SPA]
+    end
+
+    subgraph "Server A"
+        API_A[API + SignalR]
+        DB_A[(SQLite)]
+        FS_A[File Storage]
+        API_A --- DB_A
+        API_A --- FS_A
+    end
+
+    subgraph "Server B"
+        API_B[API + SignalR]
+        DB_B[(SQLite)]
+        FS_B[File Storage]
+        API_B --- DB_B
+        API_B --- FS_B
+    end
+
+    Client -- "JWT + REST/WS" --> API_A
+    Client -- "JWT + REST/WS" --> API_B
+
+    CLI[CLI Tool] -- "JWT + REST/WS" --> API_A
+    CLI -- "JWT + REST/WS" --> API_B
+```
 
 ## Tech Stack
 
