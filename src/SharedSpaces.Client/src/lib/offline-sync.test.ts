@@ -8,8 +8,8 @@ import {
   processAllOfflineQueues,
 } from './offline-sync';
 import {
-  clearOfflineQueue,
-  getOfflineQueue,
+  clearComposeItems,
+  getComposeItems,
   setStoredToken,
 } from './idb-storage';
 
@@ -40,7 +40,7 @@ const TOKEN = 'test-token';
 beforeEach(async () => {
   vi.clearAllMocks();
   localStorage.clear();
-  await clearOfflineQueue();
+  await clearComposeItems();
   Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
 });
 
@@ -49,7 +49,7 @@ describe('offline-sync', () => {
     it('queues a text item', async () => {
       await queueForOffline(SERVER, SPACE, 'text', { content: 'hello' });
 
-      const queue = await getOfflineQueue();
+      const queue = await getComposeItems();
       expect(queue).toHaveLength(1);
       expect(queue[0].type).toBe('text');
       expect(queue[0].content).toBe('hello');
@@ -72,7 +72,7 @@ describe('offline-sync', () => {
         fileData: data,
       });
 
-      const queue = await getOfflineQueue();
+      const queue = await getComposeItems();
       expect(queue).toHaveLength(1);
       expect(queue[0].type).toBe('file');
       expect(queue[0].fileName).toBe('test.bin');
@@ -82,7 +82,7 @@ describe('offline-sync', () => {
       await queueForOffline(SERVER, SPACE, 'text', { content: 'a' });
       await queueForOffline(SERVER, SPACE, 'text', { content: 'b' });
 
-      const queue = await getOfflineQueue();
+      const queue = await getComposeItems();
       expect(queue).toHaveLength(2);
       expect(queue[0].id).not.toBe(queue[1].id);
       expect(queue[0].itemId).not.toBe(queue[1].itemId);
