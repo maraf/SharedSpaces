@@ -5,8 +5,16 @@ import './space-view';
 import { SpaceView } from './space-view';
 import type { ItemAddedPayload } from '../../lib/signalr-client';
 import type { SpaceItemResponse } from './space-api';
+import {
+  clearAllCachedFiles,
+  clearOfflineQueue,
+  clearPendingShares,
+  clearStoredAuthTokens,
+  getComposeItemsForSpace,
+  saveComposeItem,
+  clearComposeItems,
+} from '../../lib/idb-storage';
 import * as idbStorage from '../../lib/idb-storage';
-import { clearAllCachedFiles, clearStoredAuthTokens } from '../../lib/idb-storage';
 import * as tokenStorage from '../../lib/token-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
 import { buildShareUrl } from '../../lib/share-link';
@@ -14,6 +22,9 @@ import { buildShareUrl } from '../../lib/share-link';
 async function resetTokenStorageState(): Promise<void> {
   await waitForTokenMirrorWritesForTests();
   localStorage.clear();
+  await clearPendingShares();
+  await clearOfflineQueue();
+  await clearComposeItems();
   await clearStoredAuthTokens();
 }
 
@@ -987,7 +998,7 @@ describe('SpaceView - Deduplication Logic', () => {
       // Mock crypto.randomUUID
       vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(sharedItemId);
 
-      // Simulate uploadPendingShare call with text share
+      // Simulate uploading a folded-in text share via the unified Share path.
       (element as any).token = token;
       const pendingShare = {
         id: 'pending-share-1',
@@ -996,7 +1007,8 @@ describe('SpaceView - Deduplication Logic', () => {
         timestamp: Date.now(),
       };
 
-      const uploadSharePromise = (element as any).uploadPendingShare(pendingShare);
+      (element as any).pendingShares = [pendingShare];
+      const uploadSharePromise = (element as any).uploadPendingTextShares();
 
       // Wait for pendingItemIds.add to execute
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1101,19 +1113,23 @@ describe('SpaceView - Deduplication Logic', () => {
       // Mock crypto.randomUUID
       vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(sharedFileId);
 
-      // Simulate uploadPendingShare call with file share
+      // Simulate uploading a folded-in file share via the unified draft path.
       (element as any).token = token;
       const fileData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic bytes
-      const pendingShare = {
-        id: 'pending-share-2',
+      const draft = {
+        id: 'draft-file-1',
+        status: 'draft' as const,
         type: 'file' as const,
-        fileName: 'shared-image.jpg',
+        itemId: sharedFileId,
+        name: 'shared-image.jpg',
         fileType: 'image/jpeg',
-        fileData,
+        fileSize: fileData.length,
+        file: new File([fileData], 'shared-image.jpg', { type: 'image/jpeg' }),
         timestamp: Date.now(),
       };
 
-      const uploadSharePromise = (element as any).uploadPendingShare(pendingShare);
+      (element as any).composeItems = [draft];
+      const uploadSharePromise = (element as any).uploadDraftEntry(draft);
 
       // Wait for pendingItemIds.add to execute
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1214,8 +1230,9 @@ describe('SpaceView - Deduplication Logic', () => {
         timestamp: Date.now(),
       };
 
+      (element as any).pendingShares = [pendingShare];
       try {
-        await (element as any).uploadPendingShare(pendingShare);
+        await (element as any).uploadPendingTextShares();
       } catch {
         // Expected to fail
       }
@@ -1271,7 +1288,7 @@ describe('SpaceView - Leave Space', () => {
 
     vi.spyOn(element as any, 'loadData').mockResolvedValue(undefined);
     vi.spyOn(element as any, 'loadPendingShares').mockResolvedValue(undefined);
-    vi.spyOn(element as any, 'refreshOfflineQueue').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'refreshComposeItems').mockResolvedValue(undefined);
 
     document.body.appendChild(element);
     element.serverUrl = serverUrl;
@@ -1314,9 +1331,9 @@ describe('SpaceView - Leave Space', () => {
     expect(findButton('Cancel')).toBeUndefined();
   });
 
-  it('clicking "Confirm" removes the token, clears offline queue, and dispatches view-change for join with reloadSpaces', async () => {
+  it('clicking "Confirm" removes the token, clears compose items, and dispatches view-change for join with reloadSpaces', async () => {
     const removeTokenSpy = vi.spyOn(tokenStorage, 'removeToken').mockResolvedValue();
-    const clearOfflineQueueSpy = vi.spyOn(idbStorage, 'clearOfflineQueueForSpace').mockResolvedValue();
+    const clearComposeItemsSpy = vi.spyOn(idbStorage, 'clearComposeItemsForSpace').mockResolvedValue();
     const stopSignalRSpy = vi.spyOn(element as any, 'stopSignalR').mockResolvedValue(undefined);
     const viewChangeHandler = vi.fn();
     element.addEventListener('view-change', viewChangeHandler as EventListener);
@@ -1329,7 +1346,7 @@ describe('SpaceView - Leave Space', () => {
 
     expect(stopSignalRSpy).toHaveBeenCalledOnce();
     expect(removeTokenSpy).toHaveBeenCalledWith(serverUrl, spaceId);
-    expect(clearOfflineQueueSpy).toHaveBeenCalledWith(serverUrl, spaceId);
+    expect(clearComposeItemsSpy).toHaveBeenCalledWith(serverUrl, spaceId);
     expect(viewChangeHandler).toHaveBeenCalledTimes(1);
     expect((viewChangeHandler.mock.calls[0][0] as CustomEvent).detail).toEqual({
       view: 'join',
@@ -1876,24 +1893,24 @@ describe('SpaceView - Delete Confirmation', () => {
         bubbles: true,
         cancelable: true,
       });
-      
+
       // Mock dataTransfer with types property
       const mockDataTransfer = {
         types: includeFiles ? ['Files'] : ['text/plain'],
         files: includeFiles ? ({} as FileList) : ({} as FileList),
       };
-      
+
       Object.defineProperty(event, 'dataTransfer', {
         value: mockDataTransfer,
         writable: false,
       });
-      
+
       return event;
     };
 
     it('registers document-level drag listeners on connect', () => {
       document.body.appendChild(element);
-      
+
       expect(addEventListenerSpy).toHaveBeenCalledWith('dragenter', expect.any(Function));
       expect(addEventListenerSpy).toHaveBeenCalledWith('dragleave', expect.any(Function));
       expect(addEventListenerSpy).toHaveBeenCalledWith('drop', expect.any(Function));
@@ -1902,7 +1919,7 @@ describe('SpaceView - Delete Confirmation', () => {
 
     it('removes document-level drag listeners on disconnect', () => {
       document.body.appendChild(element);
-      
+
       const dragEnterHandler = addEventListenerSpy.mock.calls.find(
         (call) => call[0] === 'dragenter'
       )?.[1];
@@ -1994,16 +2011,10 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragOver).toBe(false);
     });
 
-    it('handleDrop on compose box resets state and processes files', async () => {
+    it('handleDrop on compose box resets state and populates the compose queue for files', async () => {
       // Set up drag state
       (element as any).dragCounter = 2;
       (element as any).dragOver = true;
-      (element as any).token = token;
-      (element as any).serverUrl = serverUrl;
-      (element as any).spaceId = spaceId;
-
-      // Mock uploadFiles
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
 
       // Create drop event with files
       const dropEvent = createDragEvent('drop', true);
@@ -2019,15 +2030,15 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragCounter).toBe(0);
       expect((element as any).dragOver).toBe(false);
 
-      // uploadFiles should be called with the files
-      expect(uploadFilesSpy).toHaveBeenCalledWith([mockFile]);
+      // The compose queue should be populated instead of uploading immediately
+      expect((element as any).draftEntries).toHaveLength(1);
+      expect((element as any).draftEntries[0].file).toBe(mockFile);
+      expect((element as any).draftEntries[0].name).toBe('test.txt');
     });
 
-    it('handleDrop does not call uploadFiles if no files present', async () => {
+    it('handleDrop does not populate the compose queue if no files are present', async () => {
       (element as any).dragCounter = 1;
       (element as any).dragOver = true;
-
-      const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
 
       // Drop event with no files
       const dropEvent = createDragEvent('drop', true);
@@ -2042,8 +2053,8 @@ describe('SpaceView - Delete Confirmation', () => {
       expect((element as any).dragCounter).toBe(0);
       expect((element as any).dragOver).toBe(false);
 
-      // But uploadFiles not called
-      expect(uploadFilesSpy).not.toHaveBeenCalled();
+      // No compose queue should be populated
+      expect((element as any).draftEntries).toHaveLength(0);
     });
 
     it('multiple nested dragenter/dragleave pairs work correctly', () => {
@@ -2235,47 +2246,47 @@ describe('SpaceView - Clipboard paste', () => {
 describe('SpaceView - WebSocket Disconnect on Space Switching (Issue #86)', () => {
   // Regression tests for Issue #86: WebSocket is not disconnected when switching between spaces
   // The bug manifests as stale connection state in the dot indicator when rapidly switching spaces
-  
+
   const serverUrl = 'http://localhost:5000';
   const spaceId = '550e8400-e29b-41d4-a716-446655440000';
   const token = 'test-jwt-token';
-  
+
   let element: SpaceView;
   let mockFetch: ReturnType<typeof vi.fn>;
-  
+
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     // Re-mock SignalR connection after clearAllMocks
     mockSignalRConnection.start = vi.fn().mockResolvedValue(undefined);
     mockSignalRConnection.stop = vi.fn().mockResolvedValue(undefined);
     mockSignalRConnection.on = vi.fn();
     mockSignalRConnection.state = 'Disconnected';
-    
+
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
       if (key === `${serverUrl}:${spaceId}`) return token;
       return null;
     });
-    
+
     mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => [],
     });
     globalThis.fetch = mockFetch;
-    
+
     element = document.createElement('space-view') as SpaceView;
     element.setAttribute('server-url', serverUrl);
     element.setAttribute('space-id', spaceId);
   });
-  
+
   afterEach(() => {
     if (element?.parentNode) {
       element.parentNode.removeChild(element);
     }
     vi.restoreAllMocks();
   });
-  
+
   it('calls stopSignalR when element is removed from DOM', async () => {
     // Set up a mock SignalR client to verify cleanup
     const mockClient = {
@@ -2284,183 +2295,183 @@ describe('SpaceView - WebSocket Disconnect on Space Switching (Issue #86)', () =
     };
     (element as any).signalRClient = mockClient;
     (element as any).connectionState = 'connected';
-    
+
     document.body.appendChild(element);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Remove from DOM - should trigger disconnectedCallback
     document.body.removeChild(element);
-    
+
     // Wait for async stopSignalR to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
-    
+
     // Verify stop was called
     expect(mockClient.stop).toHaveBeenCalled();
-    
+
     // Verify signalRClient is cleared
     expect((element as any).signalRClient).toBeUndefined();
-    
+
     // Verify state is set to disconnected
     expect((element as any).connectionState).toBe('disconnected');
   });
-  
+
   it('emits connection-state-change event with correct spaceId when state changes', async () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
-    
+
     let capturedEvent: CustomEvent | null = null;
     element1.addEventListener('connection-state-change', (e) => {
       capturedEvent = e as CustomEvent;
     });
-    
+
     document.body.appendChild(element1);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Change connection state
     (element1 as any).connectionState = 'connected';
     await (element1 as any).updateComplete;
-    
+
     // Verify event was emitted with correct spaceId
     expect(capturedEvent).not.toBeNull();
     if (capturedEvent) {
       expect(capturedEvent.detail.spaceId).toBe(spaceId1);
       expect(capturedEvent.detail.state).toBe('connected');
     }
-    
+
     // Clean up
     document.body.removeChild(element1);
   });
-  
+
   it('each space-view instance tracks its own connection state independently', () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const spaceId2 = '550e8400-e29b-41d4-a716-446655440002';
-    
+
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
     (element1 as any).connectionState = 'connected';
-    
+
     const element2 = document.createElement('space-view') as SpaceView;
     element2.setAttribute('server-url', serverUrl);
     element2.setAttribute('space-id', spaceId2);
     (element2 as any).connectionState = 'disconnected';
-    
+
     // Each element should have its own state
     expect((element1 as any).spaceId).toBe(spaceId1);
     expect((element1 as any).connectionState).toBe('connected');
-    
+
     expect((element2 as any).spaceId).toBe(spaceId2);
     expect((element2 as any).connectionState).toBe('disconnected');
-    
+
     // States should be independent
     (element1 as any).connectionState = 'disconnected';
     expect((element1 as any).connectionState).toBe('disconnected');
     expect((element2 as any).connectionState).toBe('disconnected'); // Still disconnected, not affected
   });
-  
+
   it('startSignalR stops existing connection before starting new one', async () => {
     const mockClient1 = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
     };
-    
+
     (element as any).serverUrl = serverUrl;
     (element as any).spaceId = spaceId;
     (element as any).token = token;
     (element as any).signalRClient = mockClient1;
-    
+
     // Call startSignalR - should stop existing client first
     await (element as any).startSignalR();
-    
+
     // Verify old client was stopped
     expect(mockClient1.stop).toHaveBeenCalled();
   });
-  
+
   it('stopSignalR clears signalRClient and sets state to disconnected', async () => {
     const mockClient = {
       stop: vi.fn().mockResolvedValue(undefined),
     };
-    
+
     (element as any).signalRClient = mockClient;
     (element as any).connectionState = 'connected';
-    
+
     await (element as any).stopSignalR();
-    
+
     expect(mockClient.stop).toHaveBeenCalled();
     expect((element as any).signalRClient).toBeUndefined();
     expect((element as any).connectionState).toBe('disconnected');
   });
-  
+
   it('connection state remains independent when multiple space-view elements exist', async () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const spaceId2 = '550e8400-e29b-41d4-a716-446655440002';
-    
+
     // Create two space-view elements
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
-    
+
     const element2 = document.createElement('space-view') as SpaceView;
     element2.setAttribute('server-url', serverUrl);
     element2.setAttribute('space-id', spaceId2);
-    
+
     // Set up mock clients
     const mockClient1 = { stop: vi.fn().mockResolvedValue(undefined) };
     const mockClient2 = { stop: vi.fn().mockResolvedValue(undefined) };
     (element1 as any).signalRClient = mockClient1;
     (element2 as any).signalRClient = mockClient2;
-    
+
     document.body.appendChild(element1);
     document.body.appendChild(element2);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Remove first element
     document.body.removeChild(element1);
-    
+
     // Wait for async cleanup
     await new Promise((resolve) => setTimeout(resolve, 50));
-    
+
     // Only element1's client should be stopped
     expect(mockClient1.stop).toHaveBeenCalled();
     expect(mockClient2.stop).not.toHaveBeenCalled();
-    
+
     // Clean up
     document.body.removeChild(element2);
   });
-  
+
   it('re-adding a space-view after removal creates fresh connection state', async () => {
     const spaceId1 = '550e8400-e29b-41d4-a716-446655440001';
     const element1 = document.createElement('space-view') as SpaceView;
     element1.setAttribute('server-url', serverUrl);
     element1.setAttribute('space-id', spaceId1);
-    
+
     // Set up mock client
     const mockClient1 = { stop: vi.fn().mockResolvedValue(undefined) };
     (element1 as any).signalRClient = mockClient1;
     (element1 as any).connectionState = 'connected';
-    
+
     document.body.appendChild(element1);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Remove element
     document.body.removeChild(element1);
-    
+
     // Wait for async cleanup
     await new Promise((resolve) => setTimeout(resolve, 50));
-    
+
     expect(mockClient1.stop).toHaveBeenCalled();
     expect((element1 as any).signalRClient).toBeUndefined();
-    
+
     // Re-add the same element
     document.body.appendChild(element1);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    
+
     // Connection state should still be disconnected (until startSignalR is called)
     // This tests that we don't have stale state from before removal
     expect((element1 as any).signalRClient).toBeUndefined();
-    
+
     // Clean up
     document.body.removeChild(element1);
   });
@@ -2526,9 +2537,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
 
       // Query the rendered card - use individual class checks
       const cards = element.querySelectorAll('li');
-      const card = Array.from(cards).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800')
       );
       expect(card).toBeTruthy();
@@ -2545,9 +2556,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const cards = element.querySelectorAll('li');
-      const card = Array.from(cards).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800') &&
         c.textContent?.includes('My test note')
       );
@@ -2557,8 +2568,8 @@ describe('SpaceView - Unified Item Card Layout', () => {
     });
 
     it('renders file items with unified card layout', async () => {
-      const item = makeItem({ 
-        contentType: 'file', 
+      const item = makeItem({
+        contentType: 'file',
         content: 'test.pdf',
         fileSize: 12345,
         fileName: 'test.pdf'
@@ -2569,9 +2580,9 @@ describe('SpaceView - Unified Item Card Layout', () => {
       await element.updateComplete;
 
       const cards = element.querySelectorAll('li');
-      const card = Array.from(cards).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
+      const card = Array.from(cards).find(c =>
+        c.classList.contains('rounded-lg') &&
+        c.classList.contains('border') &&
         c.classList.contains('border-slate-800') &&
         c.textContent?.includes('test.pdf')
       );
@@ -2581,19 +2592,21 @@ describe('SpaceView - Unified Item Card Layout', () => {
     });
   });
 
-  describe('renderPendingSharesSection', () => {
-    it('does not render when there are no pending shares', async () => {
+  describe('pending shares folded into compose box', () => {
+    it('does not render pending shares when there are none', async () => {
       (element as any).pendingShares = [];
       (element as any).isLoading = false;
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => s.classList.contains('border-amber-500/30'));
-      expect(section).toBeFalsy();
+      expect(element.textContent).not.toContain('Shared from another app');
+      const uploadAll = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Upload all',
+      );
+      expect(uploadAll).toBeFalsy();
     });
 
-    it('renders pending text share with unified card layout', async () => {
+    it('folds a pending text share into the compose box', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
@@ -2605,30 +2618,16 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      // Verify the pending shares section exists
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
-        s.textContent?.includes('Shared text from another app')
-      );
-      expect(section).toBeTruthy();
-
-      // Verify the unified card layout is used
-      const cards = section?.querySelectorAll('li');
-      const card = Array.from(cards || []).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
-        c.classList.contains('border-amber-500/40')
-      );
-      expect(card).toBeTruthy();
-      expect(card?.classList.contains('px-4')).toBe(true);
-      expect(card?.classList.contains('py-3')).toBe(true);
-      expect(card?.classList.contains('bg-amber-950/20')).toBe(true);
-
-      // Verify content is rendered
-      expect(section?.textContent).toContain('Shared text from another app');
+      // The pending row lives inside the compose box (the section that also
+      // contains the share textarea), not in a separate section below it.
+      const textarea = element.querySelector('textarea');
+      const composeSection = textarea?.closest('section');
+      expect(composeSection).toBeTruthy();
+      expect(composeSection?.textContent).toContain('Shared text from another app');
+      expect(composeSection?.textContent).toContain('Shared from another app');
     });
 
-    it('renders pending file share with unified card layout', async () => {
+    it('folds a pending file share into the compose box', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-2',
@@ -2641,29 +2640,17 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
-        s.textContent?.includes('shared-doc.pdf')
-      );
-      expect(section).toBeTruthy();
-
-      // Verify the unified card layout is used with amber variant
-      const cards = section?.querySelectorAll('li');
-      const card = Array.from(cards || []).find(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
-        c.classList.contains('border-amber-500/40')
-      );
-      expect(card).toBeTruthy();
-      expect(card?.classList.contains('px-4')).toBe(true);
-      expect(card?.classList.contains('py-3')).toBe(true);
-      expect(card?.classList.contains('bg-amber-950/20')).toBe(true);
-
-      // Verify file name is rendered
-      expect(section?.textContent).toContain('shared-doc.pdf');
+      const textarea = element.querySelector('textarea');
+      const composeSection = textarea?.closest('section');
+      // File shares render the name in an editable rename input (its value).
+      const input = composeSection?.querySelector(
+        'input#compose-share-input-0',
+      ) as HTMLInputElement | null;
+      expect(input?.value).toBe('shared-doc.pdf');
+      expect(composeSection?.textContent).toContain('Shared from another app');
     });
 
-    it('renders Upload and Dismiss buttons for each pending share', async () => {
+    it('renders only a Dismiss action for pending text shares (no Upload/Upload all)', async () => {
       (element as any).pendingShares = [
         {
           id: 'pending-1',
@@ -2675,108 +2662,486 @@ describe('SpaceView - Unified Item Card Layout', () => {
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
-        s.textContent?.includes('Test share')
-      );
-      const buttons = section?.querySelectorAll('button');
-      
-      // Should have Upload All, Upload (per item), and Dismiss (per item)
-      expect(buttons?.length).toBeGreaterThanOrEqual(3);
+      const buttons = Array.from(element.querySelectorAll('button'));
 
-      // Find the Upload button (per item)
-      const uploadButton = Array.from(buttons || []).find(b => 
-        b.textContent?.trim() === 'Upload' && b.title === 'Upload this item'
+      const uploadButton = buttons.find(
+        (b) => b.textContent?.trim() === 'Upload' && b.title === 'Upload this item',
       );
-      expect(uploadButton).toBeTruthy();
+      expect(uploadButton).toBeFalsy();
 
-      // Find the Dismiss button
-      const dismissButton = Array.from(buttons || []).find(b => 
-        b.getAttribute('aria-label') === 'Dismiss shared item'
+      const uploadAllButton = buttons.find(
+        (b) => b.textContent?.trim() === 'Upload all',
+      );
+      expect(uploadAllButton).toBeFalsy();
+
+      const dismissButton = buttons.find(
+        (b) => b.getAttribute('aria-label') === 'Dismiss shared item',
       );
       expect(dismissButton).toBeTruthy();
     });
 
-    it('renders multiple pending shares each with unified card layout', async () => {
+    it('allows renaming a pending file share before upload', async () => {
       (element as any).pendingShares = [
         {
-          id: 'pending-1',
-          type: 'text',
-          content: 'First share',
-        },
-        {
-          id: 'pending-2',
+          id: 'pending-file-rename',
           type: 'file',
-          fileName: 'document.pdf',
-          blob: new Blob(['test']),
+          fileName: 'shared-doc.pdf',
+          fileType: 'application/pdf',
+          fileData: new Uint8Array([1, 2, 3]).buffer,
         },
       ];
       (element as any).isLoading = false;
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      const sections = element.querySelectorAll('section');
-      const section = Array.from(sections).find(s => 
-        s.textContent?.includes('First share')
-      );
-      
-      const allLis = section?.querySelectorAll('li');
-      const cards = Array.from(allLis || []).filter(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
-        c.classList.contains('border-amber-500/40')
-      );
-      
-      // Should have 2 cards
-      expect(cards.length).toBe(2);
+      const input = element.querySelector(
+        'input#compose-share-input-0',
+      ) as HTMLInputElement | null;
+      expect(input).toBeTruthy();
+      expect(input?.value).toBe('shared-doc.pdf');
 
-      // Each card should have the unified layout classes
-      cards.forEach(card => {
-        expect(card.classList.contains('px-4')).toBe(true);
-        expect(card.classList.contains('py-3')).toBe(true);
-        expect(card.classList.contains('relative')).toBe(true);
-      });
+      (element as any).handleShareNameInput('pending-file-rename', 'renamed.pdf');
+      await element.updateComplete;
+
+      expect((element as any).shareNameEdits['pending-file-rename']).toBe('renamed.pdf');
     });
 
-    it('pending share cards and regular item cards share the same base layout classes', async () => {
-      // Set up both regular items and pending shares
-      const item = makeItem({ content: 'Regular item' });
-      (element as any).items = [item];
+    it('persists a pending share rename on blur so it survives a refresh', async () => {
+      const updateSpy = vi
+        .spyOn(idbStorage, 'updatePendingShare')
+        .mockResolvedValue('updated');
       (element as any).pendingShares = [
         {
-          id: 'pending-1',
-          type: 'text',
-          content: 'Pending share',
+          id: 'pending-file-persist',
+          type: 'file',
+          fileName: 'shared-doc.pdf',
+          fileType: 'application/pdf',
+          fileData: new Uint8Array([1, 2, 3]).buffer,
         },
       ];
       (element as any).isLoading = false;
       (element as any).requestUpdate();
       await element.updateComplete;
 
-      // Get regular item cards (border-slate-800)
-      const allLis = element.querySelectorAll('li');
-      const regularCards = Array.from(allLis).filter(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
-        c.classList.contains('border-slate-800')
-      );
-      expect(regularCards.length).toBeGreaterThanOrEqual(1);
+      (element as any).handleShareNameInput('pending-file-persist', '  renamed.pdf  ');
+      (element as any).persistShareName('pending-file-persist');
+      await element.updateComplete;
 
-      // Get pending share cards (border-amber-500/40)
-      const pendingCards = Array.from(allLis).filter(c => 
-        c.classList.contains('rounded-lg') && 
-        c.classList.contains('border') && 
-        c.classList.contains('border-amber-500/40')
+      // In-memory row is updated (trimmed) so the value/claim path stay consistent.
+      const share = (element as any).pendingShares.find(
+        (s: any) => s.id === 'pending-file-persist',
       );
-      expect(pendingCards.length).toBeGreaterThanOrEqual(1);
+      expect(share.fileName).toBe('renamed.pdf');
+      // The trimmed name was written back to the pending-shares store.
+      expect(updateSpy).toHaveBeenCalledWith(
+        'pending-file-persist',
+        expect.any(Function),
+      );
+      const updater = updateSpy.mock.calls[0][1] as (item: any) => any;
+      expect(updater({ id: 'pending-file-persist', fileName: 'shared-doc.pdf' }).fileName).toBe(
+        'renamed.pdf',
+      );
+      updateSpy.mockRestore();
+    });
 
-      // Verify all cards share the same base layout classes
-      const expectedClasses = ['relative', 'rounded-lg', 'border', 'px-4', 'py-3'];
-      [...regularCards, ...pendingCards].forEach(card => {
-        expectedClasses.forEach(cls => {
-          expect(card.classList.contains(cls)).toBe(true);
+    it('falls back to the original filename when a pending share rename is cleared', async () => {
+      const updateSpy = vi
+        .spyOn(idbStorage, 'updatePendingShare')
+        .mockResolvedValue('updated');
+      (element as any).pendingShares = [
+        {
+          id: 'pending-file-empty',
+          type: 'file',
+          fileName: 'keep-me.pdf',
+          fileType: 'application/pdf',
+          fileData: new Uint8Array([1, 2, 3]).buffer,
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      (element as any).handleShareNameInput('pending-file-empty', '   ');
+      (element as any).persistShareName('pending-file-empty');
+      await element.updateComplete;
+
+      const share = (element as any).pendingShares.find(
+        (s: any) => s.id === 'pending-file-empty',
+      );
+      expect(share.fileName).toBe('keep-me.pdf');
+      const updater = updateSpy.mock.calls[0][1] as (item: any) => any;
+      expect(updater({ id: 'pending-file-empty', fileName: 'keep-me.pdf' }).fileName).toBe(
+        'keep-me.pdf',
+      );
+      updateSpy.mockRestore();
+    });
+
+    it('does not render a rename input for pending text shares', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-text-norename',
+          type: 'text',
+          content: 'Just text',
+        },
+      ];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const input = element.querySelector('input#compose-share-input-0');
+      expect(input).toBeFalsy();
+    });
+
+    it('enables the Share button when only pending shares exist', async () => {
+      (element as any).pendingShares = [
+        {
+          id: 'pending-1',
+          type: 'text',
+          content: 'Only pending',
+        },
+      ];
+      (element as any).textInput = '';
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const shareButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Share',
+      );
+      expect(shareButton).toBeTruthy();
+      expect((shareButton as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    describe('compose queue upload', () => {
+      it('claimFileShares folds file shares into the compose queue and leaves text shares as pending shares', async () => {
+        // Let the connectedCallback hydration settle so it can't overwrite the
+        // pendingShares we set below mid-claim.
+        await element.updateComplete;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        (element as any).token = token;
+        (element as any).pendingShares = [
+          {
+            id: 'pending-text',
+            type: 'text',
+            content: 'Shared note',
+            timestamp: Date.now(),
+          },
+          {
+            id: 'pending-file',
+            type: 'file',
+            fileName: 'shared-image.jpg',
+            fileType: 'image/jpeg',
+            fileData: new Uint8Array([1, 2, 3]).buffer,
+            timestamp: Date.now(),
+          },
+        ];
+
+        await (element as any).claimFileShares();
+
+        expect((element as any).draftEntries).toHaveLength(1);
+        expect((element as any).draftEntries[0].name).toBe('shared-image.jpg');
+        // The text share is not claimed; it stays visible as a pending share.
+        const visible = (element as any).visiblePendingShares;
+        expect(visible).toHaveLength(1);
+        expect(visible[0].content).toBe('Shared note');
+      });
+
+      it('claimFileShares applies an edited filename from the pending share row', async () => {
+        (element as any).token = token;
+        (element as any).pendingShares = [
+          {
+            id: 'pending-file',
+            type: 'file',
+            fileName: 'shared-image.jpg',
+            fileType: 'image/jpeg',
+            fileData: new Uint8Array([1, 2, 3]).buffer,
+            timestamp: Date.now(),
+          },
+        ];
+        (element as any).handleShareNameInput('pending-file', 'renamed.jpg');
+
+        await (element as any).claimFileShares();
+
+        expect((element as any).draftEntries).toHaveLength(1);
+        expect((element as any).draftEntries[0].name).toBe('renamed.jpg');
+        expect((element as any).shareNameEdits['pending-file']).toBeUndefined();
+      });
+
+      it('uploadComposeQueue uploads the edited filename online and clears the draft', async () => {
+        (element as any).token = token;
+        const originalFile = new File(['hello'], 'original.txt', { type: 'text/plain' });
+        (element as any).composeItems = [
+          (element as any).createFileDraftEntry(originalFile, Date.now()),
+        ];
+        const draftId = (element as any).composeItems[0].id;
+
+        (element as any).handleComposeNameInput(draftId, 'renamed.txt');
+        await (element as any).uploadComposeQueue();
+
+        const putCall = mockFetch.mock.calls.find(
+          ([, init]: [string, RequestInit?]) => init?.method === 'PUT',
+        );
+        expect(putCall).toBeTruthy();
+        const body = (putCall as unknown[])[1] as RequestInit;
+        const uploadedFile = (body.body as FormData).get('file') as File;
+        expect(uploadedFile.name).toBe('renamed.txt');
+        expect((element as any).draftEntries).toHaveLength(0);
+      });
+
+      it('flips renamed pending share files to pending uploads when offline and hides the pending share', async () => {
+        (element as any).token = token;
+        const originalOnline = navigator.onLine;
+        Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+
+        try {
+          const pendingShare = {
+            id: 'pending-file-offline',
+            type: 'file' as const,
+            fileName: 'shared-image.jpg',
+            fileType: 'image/jpeg',
+            fileData: new Uint8Array([7, 8, 9]).buffer,
+            timestamp: Date.now(),
+          };
+
+          (element as any).pendingShares = [pendingShare];
+          (element as any).handleShareNameInput('pending-file-offline', 'renamed-image.jpg');
+          await (element as any).claimFileShares();
+          await (element as any).uploadComposeQueue();
+
+          const stored = (await getComposeItemsForSpace(serverUrl, spaceId)).filter(
+            (i) => i.status === 'pending',
+          );
+          expect(stored).toHaveLength(1);
+          expect(stored[0].fileName).toBe('renamed-image.jpg');
+          // The row stays in the unified list (now pending), so there are no
+          // remaining drafts and the originating pending share is hidden.
+          expect((element as any).draftEntries).toEqual([]);
+          expect(
+            (element as any).composeItems.filter((e: any) => e.status === 'pending'),
+          ).toHaveLength(1);
+          expect((element as any).visiblePendingShares).toHaveLength(0);
+        } finally {
+          Object.defineProperty(navigator, 'onLine', {
+            value: originalOnline,
+            configurable: true,
+          });
+        }
+      });
+
+      describe('compose draft persistence', () => {
+        beforeEach(async () => {
+          await clearComposeItems();
+          // Let any connectedCallback hydration settle, then start from a clean
+          // in-memory queue so cross-test global-DB leakage can't pollute state.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          (element as any).composeItems = [];
+          (element as any).discardedComposeItemIds.clear();
+        });
+        afterEach(async () => {
+          await clearComposeItems();
+        });
+
+        it('persists selected files to the compose-items store as drafts', async () => {
+          const file = new File(['hello'], 'note.txt', { type: 'text/plain' });
+          (element as any).promptFilesForUpload([file]);
+
+          const draft = (element as any).composeItems[0];
+          await (element as any).persistDraftEntry(draft);
+
+          const stored = (await getComposeItemsForSpace(serverUrl, spaceId)).filter(
+            (s) => s.id === draft.id,
+          );
+          expect(stored).toHaveLength(1);
+          expect(stored[0].status).toBe('draft');
+          expect(stored[0].fileName).toBe('note.txt');
+        });
+
+        it('persists the edited filename, not the original', async () => {
+          const file = new File(['hello'], 'original.txt', { type: 'text/plain' });
+          (element as any).promptFilesForUpload([file]);
+          const draft = (element as any).composeItems[0];
+
+          (element as any).handleComposeNameInput(draft.id, 'renamed.txt');
+          await (element as any).persistDraftEntry((element as any).composeItems[0]);
+
+          const stored = (await getComposeItemsForSpace(serverUrl, spaceId)).filter(
+            (s) => s.id === draft.id,
+          );
+          expect(stored).toHaveLength(1);
+          expect(stored[0].fileName).toBe('renamed.txt');
+        });
+
+        it('re-hydrates persisted drafts on refresh (survives reload)', async () => {
+          await saveComposeItem({
+            id: 'persisted-1',
+            status: 'draft',
+            type: 'file',
+            serverUrl,
+            spaceId,
+            itemId: 'item-persisted-1',
+            fileName: 'restored.txt',
+            fileType: 'text/plain',
+            fileData: new Uint8Array([1, 2, 3]).buffer,
+            fileSize: 3,
+            timestamp: 1000,
+          });
+
+          await (element as any).refreshComposeItems();
+
+          const drafts = (element as any).draftEntries;
+          expect(drafts).toHaveLength(1);
+          expect(drafts[0].id).toBe('persisted-1');
+          expect(drafts[0].name).toBe('restored.txt');
+        });
+
+        it('does not duplicate a draft across repeated refreshes', async () => {
+          await saveComposeItem({
+            id: 'dup-1',
+            status: 'draft',
+            type: 'file',
+            serverUrl,
+            spaceId,
+            itemId: 'item-dup-1',
+            fileName: 'dup.txt',
+            fileType: 'text/plain',
+            fileData: new Uint8Array([1]).buffer,
+            fileSize: 1,
+            timestamp: 1000,
+          });
+
+          await (element as any).refreshComposeItems();
+          await (element as any).refreshComposeItems();
+
+          expect((element as any).draftEntries).toHaveLength(1);
+        });
+
+        it('removing a draft clears it from storage and prevents resurrection on reload', async () => {
+          const file = new File(['hello'], 'gone.txt', { type: 'text/plain' });
+          (element as any).promptFilesForUpload([file]);
+          const draft = (element as any).composeItems[0];
+          await (element as any).persistDraftEntry(draft);
+          expect(
+            (await getComposeItemsForSpace(serverUrl, spaceId)).filter(
+              (s) => s.id === draft.id,
+            ),
+          ).toHaveLength(1);
+
+          (element as any).removeComposeEntryByUser(draft.id);
+          await Promise.resolve();
+
+          expect((element as any).composeItems).toHaveLength(0);
+          expect(
+            (await getComposeItemsForSpace(serverUrl, spaceId)).filter(
+              (s) => s.id === draft.id,
+            ),
+          ).toHaveLength(0);
+
+          // A reload must not resurrect the removed draft.
+          await (element as any).refreshComposeItems();
+          expect((element as any).composeItems).toHaveLength(0);
         });
       });
+    });
+  });
+
+  describe('offline upload queue folded into compose box', () => {
+    function pendingFileEntry(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'pending-file-1',
+        status: 'pending' as const,
+        type: 'file' as const,
+        itemId: 'item-pending-file-1',
+        name: 'queued-photo.jpg',
+        fileType: 'image/jpeg',
+        timestamp: Date.now(),
+        ...overrides,
+      };
+    }
+
+    function pendingTextEntry(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'pending-text-1',
+        status: 'pending' as const,
+        type: 'text' as const,
+        itemId: 'item-pending-text-1',
+        name: 'queued note',
+        content: 'queued note',
+        timestamp: Date.now(),
+        ...overrides,
+      };
+    }
+
+    it('does not render a pending upload row when the queue is empty', async () => {
+      (element as any).composeItems = [];
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      expect(element.textContent).not.toContain('Pending upload');
+    });
+
+    it('folds pending uploads into the compose box', async () => {
+      (element as any).composeItems = [pendingFileEntry()];
+      (element as any).isOnline = true;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // The pending row lives inside the compose box (the section that also
+      // contains the share textarea), not in a separate section below it.
+      const textarea = element.querySelector('textarea');
+      const composeSection = textarea?.closest('section');
+      expect(composeSection).toBeTruthy();
+      // File rows render the name in an editable input (its value, not text).
+      const nameInputs = Array.from(
+        composeSection?.querySelectorAll('input[type="text"]') ?? [],
+      ) as HTMLInputElement[];
+      expect(nameInputs.some((i) => i.value === 'queued-photo.jpg')).toBe(true);
+      // Pending rows show a "Pending upload" sub-label and a matching footer.
+      expect(composeSection?.textContent).toContain('Pending upload');
+    });
+
+    it('does not render a Sync Now action for pending uploads', async () => {
+      (element as any).composeItems = [pendingTextEntry()];
+      (element as any).isOnline = true;
+      (element as any).connectionErrorType = null;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const syncButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Sync Now',
+      );
+      expect(syncButton).toBeFalsy();
+    });
+
+    it('does not render a Sync Now action when offline', async () => {
+      (element as any).composeItems = [pendingTextEntry()];
+      (element as any).isOnline = false;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const syncButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Sync Now',
+      );
+      expect(syncButton).toBeFalsy();
+    });
+
+    it('enables the Share button when only pending uploads exist', async () => {
+      (element as any).composeItems = [pendingTextEntry()];
+      (element as any).textInput = '';
+      (element as any).isOnline = true;
+      (element as any).isLoading = false;
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const shareButton = Array.from(element.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Share',
+      );
+      expect(shareButton).toBeTruthy();
+      expect((shareButton as HTMLButtonElement).disabled).toBe(false);
     });
   });
 });
@@ -4124,7 +4489,7 @@ describe('SpaceView - Background Sync Completion', () => {
   });
 
   it('refreshes the current space and shows a sync summary when background sync completes', async () => {
-    const refreshOfflineQueue = vi.spyOn(element as any, 'refreshOfflineQueue').mockResolvedValue(undefined);
+    const refreshComposeItems = vi.spyOn(element as any, 'refreshComposeItems').mockResolvedValue(undefined);
     const refreshItemsAfterReconnect = vi.spyOn(element as any, 'refreshItemsAfterReconnect').mockResolvedValue(undefined);
 
     await (element as any).handleBackgroundSyncComplete({
@@ -4133,13 +4498,13 @@ describe('SpaceView - Background Sync Completion', () => {
       spaces: [{ serverUrl, spaceId }],
     });
 
-    expect(refreshOfflineQueue).toHaveBeenCalledTimes(1);
+    expect(refreshComposeItems).toHaveBeenCalledTimes(1);
     expect(refreshItemsAfterReconnect).toHaveBeenCalledTimes(1);
     expect((element as any).syncMessage).toBe('Synced 2 items, 1 failed');
   });
 
   it('ignores background sync results for other spaces', async () => {
-    const refreshOfflineQueue = vi.spyOn(element as any, 'refreshOfflineQueue').mockResolvedValue(undefined);
+    const refreshComposeItems = vi.spyOn(element as any, 'refreshComposeItems').mockResolvedValue(undefined);
     const refreshItemsAfterReconnect = vi.spyOn(element as any, 'refreshItemsAfterReconnect').mockResolvedValue(undefined);
 
     await (element as any).handleBackgroundSyncComplete({
@@ -4148,7 +4513,7 @@ describe('SpaceView - Background Sync Completion', () => {
       spaces: [{ serverUrl: 'http://other-server', spaceId: 'other-space' }],
     });
 
-    expect(refreshOfflineQueue).not.toHaveBeenCalled();
+    expect(refreshComposeItems).not.toHaveBeenCalled();
     expect(refreshItemsAfterReconnect).not.toHaveBeenCalled();
     expect((element as any).syncMessage).toBe('');
   });
