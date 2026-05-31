@@ -151,10 +151,13 @@ function normalizeUrl(url: string) {
   return url.replace(/\/+$/, '');
 }
 
+// Auth failures (401/404) are recoverable via re-auth, so keep rows queued.
 function isPermanentSyncFailure(status?: number): boolean {
   return status !== undefined
     && status >= 400
     && status < 500
+    && status !== 401
+    && status !== 404
     && status !== 408
     && status !== 425
     && status !== 429;
