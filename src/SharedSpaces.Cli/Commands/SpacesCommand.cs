@@ -35,6 +35,7 @@ public static class SpacesCommand
                 spaceName = s.SpaceName,
                 displayName = s.DisplayName,
                 serverUrl = s.ServerUrl,
+                serverName = string.IsNullOrEmpty(s.ServerName) ? null : s.ServerName,
                 spaceId = s.SpaceId,
             });
             Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
@@ -58,8 +59,11 @@ public static class SpacesCommand
 
         foreach (var space in config.Spaces)
         {
+            var serverLabel = !string.IsNullOrEmpty(space.ServerName)
+                ? $"{space.ServerName} ({space.ServerUrl})"
+                : space.ServerUrl;
             Console.WriteLine(
-                $"{space.SpaceName,nameWidth}  {space.DisplayName,displayWidth}  {space.ServerUrl,serverWidth}  {space.SpaceId}");
+                $"{space.SpaceName,nameWidth}  {space.DisplayName,displayWidth}  {serverLabel,serverWidth}  {space.SpaceId}");
         }
     }
 }

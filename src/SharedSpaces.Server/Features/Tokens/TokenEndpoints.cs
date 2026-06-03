@@ -94,15 +94,23 @@ public static class TokenEndpoints
             JwtTokenSigningKeyFactory.Create(configuration),
             SecurityAlgorithms.HmacSha256);
 
+        var claims = new List<Claim>
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, member.Id.ToString()),
+            new Claim(SpaceMemberClaimTypes.DisplayName, member.DisplayName),
+            new Claim(SpaceMemberClaimTypes.ServerUrl, serverUrl),
+            new Claim(SpaceMemberClaimTypes.SpaceId, member.SpaceId.ToString()),
+            new Claim(SpaceMemberClaimTypes.SpaceName, spaceName)
+        };
+
+        var serverName = configuration["Server:Name"];
+        if (!string.IsNullOrWhiteSpace(serverName))
+        {
+            claims.Add(new Claim(SpaceMemberClaimTypes.ServerName, serverName));
+        }
+
         var token = new JwtSecurityToken(
-            claims:
-            [
-                new Claim(JwtRegisteredClaimNames.Sub, member.Id.ToString()),
-                new Claim(SpaceMemberClaimTypes.DisplayName, member.DisplayName),
-                new Claim(SpaceMemberClaimTypes.ServerUrl, serverUrl),
-                new Claim(SpaceMemberClaimTypes.SpaceId, member.SpaceId.ToString()),
-                new Claim(SpaceMemberClaimTypes.SpaceName, spaceName)
-            ],
+            claims: claims,
             signingCredentials: signingCredentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
