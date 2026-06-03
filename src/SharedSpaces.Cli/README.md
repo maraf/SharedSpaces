@@ -50,6 +50,18 @@ sharedspaces spaces
 sharedspaces spaces --json
 ```
 
+### `sharedspaces items`
+
+List all items in a space.
+
+```bash
+# Formatted table output
+sharedspaces items --space-id 550e8400-e29b-41d4-a716-446655440000
+
+# Machine-readable JSON output
+sharedspaces items --space-id 550e8400-e29b-41d4-a716-446655440000 --json
+```
+
 ### `sharedspaces sync`
 
 Sync files from a space to a local folder. By default, downloads existing files and then watches for changes in both directions in real-time. A [passive mode](#passive-mode) is also available for periodic, low-bandwidth syncing.
@@ -61,13 +73,14 @@ sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/sha
 Options:
 
 | Option | Required | Description |
-|--------|----------|-------------|
+| --- | --- | --- |
 | `--space-id <guid>` | yes | ID of the space to sync from |
 | `--folder <path>` | yes | Local folder for synced files (created if missing) |
 | `--passive` | no | Skip the SignalR hub and poll the journal on a fixed interval. See [Passive mode](#passive-mode). |
 | `--interval <seconds>` | no | Passive poll interval. Default `300`, minimum `5`. Only valid with `--passive`. |
 
 The default (active) sync engine:
+
 - **Downloads** all existing files on startup
 - **Streams** new files and deletions in real-time via SignalR
 - **Uploads** new files added to the local folder automatically
@@ -89,6 +102,7 @@ sharedspaces sync --space-id <guid> --folder ~/shared --passive --interval 60
 ```
 
 In passive mode:
+
 - **No SignalR connection** is opened.
 - The journal is fetched once at startup and again on every tick at `--interval` seconds (default `300`).
 - Local file uploads still happen immediately via the file watcher — only inbound changes are delayed.

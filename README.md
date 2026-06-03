@@ -128,6 +128,12 @@ sharedspaces spaces
 sharedspaces spaces --json   # machine-readable output
 ```
 
+**List items in a space:**
+```bash
+sharedspaces items --space-id 550e8400-e29b-41d4-a716-446655440000
+sharedspaces items --space-id 550e8400-e29b-41d4-a716-446655440000 --json
+```
+
 **Upload a file:**
 ```bash
 sharedspaces upload myfile.txt --space-id 550e8400-e29b-41d4-a716-446655440000
@@ -144,6 +150,7 @@ sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/sha
 |---------|-------------|
 | `join <url>` | Exchange an invitation PIN for an access token and store it locally |
 | `spaces` | List all joined spaces (supports `--json` for machine-readable output) |
+| `items` | List all items in a space (`--space-id` required; supports `--json`) |
 | `upload <file>` | Upload a file to a space (`--space-id` required) |
 | `sync` | Two-way file sync between a space and a local folder (`--space-id`, `--folder` required; `--passive` for periodic polling instead of real-time SignalR) |
 
@@ -200,7 +207,7 @@ SharedSpaces/
 │   │       ├── lib/                  # SignalR client, API client, utilities
 │   │       └── index.ts
 │   ├── SharedSpaces.Cli/             # .NET global tool (CLI entry point)
-│   │   └── Commands/                 # join, spaces, upload, sync
+│   │   └── Commands/                 # join, spaces, items, upload, sync
 │   └── SharedSpaces.Cli.Core/        # Shared CLI library
 │       ├── Services/                 # API client, config, sync engine
 │       └── Models/                   # Config model, JWT-backed space entry
