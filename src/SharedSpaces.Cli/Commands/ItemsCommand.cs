@@ -8,16 +8,16 @@ public static class ItemsCommand
 {
     public static Command Create()
     {
-        var spaceIdArgument = new Argument<string>("space-id") { Description = "The ID of the space to list items from" };
+        var spaceIdOption = new Option<string>("--space-id") { Description = "The ID of the space to list items from", Required = true };
         var jsonOption = new Option<bool>("--json") { Description = "Output as JSON" };
 
         var command = new Command("items", "List all items in a space");
-        command.Add(spaceIdArgument);
+        command.Add(spaceIdOption);
         command.Add(jsonOption);
 
         command.SetAction(async (parseResult, ct) =>
         {
-            var spaceId = parseResult.GetValue(spaceIdArgument)!;
+            var spaceId = parseResult.GetValue(spaceIdOption)!;
             var json = parseResult.GetValue(jsonOption);
             await HandleAsync(spaceId, json, ct);
         });
