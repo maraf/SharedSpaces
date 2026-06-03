@@ -70,6 +70,7 @@ import { toDataURL } from 'qrcode';
 
 export interface JoinedSpace {
   serverUrl: string;
+  serverName?: string;
   spaceId: string;
   spaceName: string;
   token: string;
@@ -2328,10 +2329,17 @@ export class SpaceView extends BaseElement {
   }
 
   private renderServerAddress() {
+    const currentSpace = this.spaces.find(
+      (s) => s.spaceId === this.spaceId && s.serverUrl === this.serverUrl,
+    );
+    const serverName = currentSpace?.serverName;
+    const serverLabel = serverName
+      ? `${serverName} (${this.serverUrl ?? this.apiBaseUrl})`
+      : (this.serverUrl ?? this.apiBaseUrl);
     return html`
       <div>
-        <p class="text-sm font-medium text-slate-200">Server Address</p>
-        <p class="text-xs text-slate-400 mt-1 break-words">${this.serverUrl ?? this.apiBaseUrl}</p>
+        <p class="text-sm font-medium text-slate-200">Server</p>
+        <p class="text-xs text-slate-400 mt-1 break-words">${serverLabel}</p>
       </div>
     `;
   }

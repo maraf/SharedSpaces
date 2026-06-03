@@ -47,6 +47,7 @@ import { initSwUpdate, checkForUpdates, activateUpdate } from './lib/sw-update';
 
 interface SpaceEntry {
   serverUrl: string;
+  serverName?: string;
   spaceId: string;
   spaceName: string;
   token: string;
@@ -54,6 +55,7 @@ interface SpaceEntry {
 
 interface StoredJwtClaims {
   server_url: string;
+  server_name?: string;
   space_id: string;
   space_name?: string;
   display_name?: string;
@@ -294,6 +296,7 @@ export class AppShell extends BaseElement {
           const spaceId = parts[parts.length - 1];
           entries.push({
             serverUrl: claims.server_url || serverUrl,
+            serverName: claims.server_name || undefined,
             spaceId: claims.space_id || spaceId,
             spaceName: claims.space_name || spaceId.substring(0, 8),
             token,
@@ -746,6 +749,9 @@ export class AppShell extends BaseElement {
                         : 'text-slate-200'}"
                       >${entry.spaceName}</span
                     >
+                    ${entry.serverName
+                      ? html`<span class="text-xs text-slate-500 ml-1">${entry.serverName}</span>`
+                      : nothing}
                     ${isActive
                       ? html`<span class="ml-auto text-xs text-sky-400/70"
                           >Active</span
