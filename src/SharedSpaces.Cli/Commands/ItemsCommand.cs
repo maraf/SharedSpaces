@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using SharedSpaces.Cli.Core.Models;
 using SharedSpaces.Cli.Core.Services;
 
 namespace SharedSpaces.Cli.Commands;
@@ -17,7 +18,7 @@ public static class ItemsCommand
 
         command.SetAction(async (parseResult, ct) =>
         {
-            var spaceId = parseResult.GetValue(spaceIdOption)!;
+            var spaceId = parseResult.GetRequiredValue(spaceIdOption);
             var json = parseResult.GetValue(jsonOption);
             await HandleAsync(spaceId, json, ct);
         });
@@ -28,19 +29,46 @@ public static class ItemsCommand
     private static async Task HandleAsync(string spaceId, bool json, CancellationToken ct)
     {
         var configService = new ConfigService();
-        var config = await configService.LoadAsync(ct);
+        SpaceEntry? space;
 
-        var space = config.Spaces.FirstOrDefault(s =>
-            s.SpaceId.Equals(spaceId, StringComparison.OrdinalIgnoreCase));
+        try
+        {
+            space = await configService.GetSpaceAsync(spaceId, ct);
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
 
         if (space is null)
         {
-            Console.Error.WriteLine($"Space '{spaceId}' not found in config. Use 'spaces' to list joined spaces.");
+            Console.Error.WriteLine($"Error: No token found for space {spaceId}.");
+            Console.Error.WriteLine("Run 'sharedspaces join' first to join the space.");
+            Environment.ExitCode = 1;
             return;
         }
 
         using var client = new SharedSpacesApiClient();
-        var items = await client.ListItemsAsync(space.ServerUrl, space.SpaceId, space.JwtToken, ct);
+        List<SpaceItemResponse> items;
+
+        try
+        {
+            items = await client.ListItemsAsync(space.ServerUrl, space.SpaceId, space.JwtToken, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"Error: Failed to parse server response — {ex.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
 
         if (json)
         {
