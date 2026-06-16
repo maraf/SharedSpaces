@@ -3265,8 +3265,10 @@ export class SpaceView extends BaseElement {
               </button>
             </div>
           </div>
-          <div class="overflow-y-auto flex-1 min-h-0 px-6 pb-6">
-            ${this.renderFilePreviewContent()}
+          <div class="overflow-y-auto flex-1 min-h-0">
+            <div class="px-6 pb-6">
+              ${this.renderFilePreviewContent()}
+            </div>
           </div>
         </div>
       </div>
