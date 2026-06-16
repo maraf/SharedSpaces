@@ -189,6 +189,7 @@ export class SpaceView extends BaseElement {
   @state() private filePreviewText: string | null = null;
   @state() private filePreviewLoading = false;
   @state() private filePreviewError = '';
+  @state() private filePreviewTextCopied = false;
   @state() private shareModalItem: SpaceItemResponse | null = null;
   @state() private shareModalLinks: SharedLinkResponse[] = [];
   @state() private shareModalLoading = false;
@@ -1933,6 +1934,20 @@ export class SpaceView extends BaseElement {
     this.filePreviewText = null;
     this.filePreviewLoading = false;
     this.filePreviewError = '';
+    this.filePreviewTextCopied = false;
+  };
+
+  private handleCopyTextPreview = async () => {
+    if (!this.filePreviewText) return;
+    try {
+      await navigator.clipboard.writeText(this.filePreviewText);
+      this.filePreviewTextCopied = true;
+      setTimeout(() => {
+        this.filePreviewTextCopied = false;
+      }, 1500);
+    } catch {
+      // Clipboard API may fail in insecure contexts; silently ignore.
+    }
   };
 
   private openTransferModal(item: SpaceItemResponse) {
@@ -3219,6 +3234,20 @@ export class SpaceView extends BaseElement {
               ${this.filePreviewItem.content}
             </h3>
             <div class="flex shrink-0 items-center gap-2">
+              ${this.filePreviewType === 'text' && this.filePreviewText != null
+                ? html`
+                    <button
+                      @click=${this.handleCopyTextPreview}
+                      class="rounded p-1 text-slate-400 transition hover:text-white"
+                      title=${this.filePreviewTextCopied ? 'Copied!' : 'Copy content'}
+                      aria-label=${this.filePreviewTextCopied ? 'Copied to clipboard' : 'Copy file content to clipboard'}
+                    >
+                      ${this.filePreviewTextCopied
+                        ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+                        : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+                    </button>
+                  `
+                : nothing}
               <button
                 @click=${() => this.handleDownload(this.filePreviewItem!)}
                 class="rounded p-1 text-slate-400 transition hover:text-white"
