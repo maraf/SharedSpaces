@@ -3226,7 +3226,7 @@ export class SpaceView extends BaseElement {
         @click=${this.closeFilePreview}
       >
         <div
-          class="relative w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col rounded-lg border border-slate-700 bg-slate-900"
+          class="relative w-full max-w-3xl max-h-[85vh] overflow-clip flex flex-col rounded-lg border border-slate-700 bg-slate-900"
           @click=${(e: Event) => e.stopPropagation()}
         >
           <div class="shrink-0 flex items-start justify-between gap-4 p-6 pb-0 mb-4">
