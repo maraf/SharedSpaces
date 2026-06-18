@@ -4120,6 +4120,31 @@ describe('SpaceView - File Preview Modal', () => {
       // Modal should be gone
       expect(element.querySelector('[aria-label="Close preview"]')).toBeNull();
     });
+
+    it('clears pending copied-state timeout on close', async () => {
+      vi.useFakeTimers();
+      try {
+        const writeTextMock = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(globalThis.navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: writeTextMock,
+          },
+        });
+
+        (element as any).filePreviewItem = makeItem();
+        (element as any).filePreviewText = 'copy me';
+
+        await (element as any).handleCopyTextPreview();
+        expect((element as any).filePreviewTextCopied).toBe(true);
+
+        (element as any).closeFilePreview();
+        expect((element as any).filePreviewTextCopied).toBe(false);
+        expect((element as any).filePreviewCopyResetTimer).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // --- Text preview fetches text, not blob URL ---
@@ -4194,6 +4219,97 @@ describe('SpaceView - File Preview Modal', () => {
 
       expect(element.querySelector('[aria-label="Download file"]')).not.toBeNull();
       expect(element.querySelector('[aria-label="Close preview"]')).not.toBeNull();
+    });
+  });
+
+  describe('text preview copy action', () => {
+    let writeTextMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: writeTextMock,
+        },
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('renders the copy button only for text previews', async () => {
+      const item = makeItem({ content: 'notes.txt', fileSize: 100 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'image';
+      (element as any).filePreviewUrl = 'blob:http://localhost/fake-img';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      expect(element.querySelector('[aria-label="Copy file content to clipboard"]')).toBeNull();
+
+      (element as any).filePreviewType = 'text';
+      (element as any).filePreviewUrl = null;
+      (element as any).filePreviewText = 'hello';
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      expect(element.querySelector('[aria-label="Copy file content to clipboard"]')).not.toBeNull();
+    });
+
+    it('copies text and toggles copied state for 1500ms', async () => {
+      const item = makeItem({ content: 'notes.txt', fileSize: 100 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'text';
+      (element as any).filePreviewText = 'Hello from preview';
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
+
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const copyButton = element.querySelector('[aria-label="Copy file content to clipboard"]') as HTMLButtonElement;
+      expect(copyButton).not.toBeNull();
+      copyButton.click();
+      await Promise.resolve();
+      await element.updateComplete;
+
+      expect(writeTextMock).toHaveBeenCalledWith('Hello from preview');
+      expect(element.querySelector('[aria-label="Copied to clipboard"]')).not.toBeNull();
+      expect(element.querySelector('[aria-label="Copied to clipboard"]')?.getAttribute('title')).toBe('Copied!');
+
+      await vi.advanceTimersByTimeAsync(1500);
+      await element.updateComplete;
+
+      const resetButton = element.querySelector('[aria-label="Copy file content to clipboard"]');
+      expect(resetButton).not.toBeNull();
+      expect(resetButton?.getAttribute('title')).toBe('Copy content');
+    });
+
+    it('resets copied timeout from the latest click and allows empty text', async () => {
+      (element as any).filePreviewText = '';
+      await (element as any).handleCopyTextPreview();
+      expect(writeTextMock).toHaveBeenCalledWith('');
+
+      (element as any).filePreviewText = 'updated';
+      await (element as any).handleCopyTextPreview();
+      await vi.advanceTimersByTimeAsync(1000);
+      await (element as any).handleCopyTextPreview();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect((element as any).filePreviewTextCopied).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(900);
+      expect((element as any).filePreviewTextCopied).toBe(false);
     });
   });
 

@@ -235,6 +235,7 @@ export class SpaceView extends BaseElement {
   private journalVerifyTimer: number | null = null;
   private journalVerificationInFlight: Promise<void> | null = null;
   private journalVerificationRequested = false;
+  private filePreviewCopyResetTimer: number | null = null;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -345,6 +346,10 @@ export class SpaceView extends BaseElement {
     if (this.journalVerifyTimer !== null) {
       globalThis.clearTimeout(this.journalVerifyTimer);
       this.journalVerifyTimer = null;
+    }
+    if (this.filePreviewCopyResetTimer !== null) {
+      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      this.filePreviewCopyResetTimer = null;
     }
   }
 
@@ -1928,6 +1933,10 @@ export class SpaceView extends BaseElement {
     if (this.filePreviewUrl) {
       URL.revokeObjectURL(this.filePreviewUrl);
     }
+    if (this.filePreviewCopyResetTimer !== null) {
+      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      this.filePreviewCopyResetTimer = null;
+    }
     this.filePreviewItem = null;
     this.filePreviewType = 'none';
     this.filePreviewUrl = null;
@@ -1938,12 +1947,16 @@ export class SpaceView extends BaseElement {
   };
 
   private handleCopyTextPreview = async () => {
-    if (!this.filePreviewText) return;
+    if (this.filePreviewText == null) return;
     try {
       await navigator.clipboard.writeText(this.filePreviewText);
       this.filePreviewTextCopied = true;
-      setTimeout(() => {
+      if (this.filePreviewCopyResetTimer !== null) {
+        globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      }
+      this.filePreviewCopyResetTimer = globalThis.setTimeout(() => {
         this.filePreviewTextCopied = false;
+        this.filePreviewCopyResetTimer = null;
       }, 1500);
     } catch {
       // Clipboard API may fail in insecure contexts; silently ignore.
