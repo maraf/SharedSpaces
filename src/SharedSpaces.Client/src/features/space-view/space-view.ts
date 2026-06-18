@@ -189,6 +189,7 @@ export class SpaceView extends BaseElement {
   @state() private filePreviewText: string | null = null;
   @state() private filePreviewLoading = false;
   @state() private filePreviewError = '';
+  @state() private filePreviewTextCopied = false;
   @state() private shareModalItem: SpaceItemResponse | null = null;
   @state() private shareModalLinks: SharedLinkResponse[] = [];
   @state() private shareModalLoading = false;
@@ -234,6 +235,7 @@ export class SpaceView extends BaseElement {
   private journalVerifyTimer: number | null = null;
   private journalVerificationInFlight: Promise<void> | null = null;
   private journalVerificationRequested = false;
+  private filePreviewCopyResetTimer: number | null = null;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -344,6 +346,10 @@ export class SpaceView extends BaseElement {
     if (this.journalVerifyTimer !== null) {
       globalThis.clearTimeout(this.journalVerifyTimer);
       this.journalVerifyTimer = null;
+    }
+    if (this.filePreviewCopyResetTimer !== null) {
+      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      this.filePreviewCopyResetTimer = null;
     }
   }
 
@@ -1927,12 +1933,34 @@ export class SpaceView extends BaseElement {
     if (this.filePreviewUrl) {
       URL.revokeObjectURL(this.filePreviewUrl);
     }
+    if (this.filePreviewCopyResetTimer !== null) {
+      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      this.filePreviewCopyResetTimer = null;
+    }
     this.filePreviewItem = null;
     this.filePreviewType = 'none';
     this.filePreviewUrl = null;
     this.filePreviewText = null;
     this.filePreviewLoading = false;
     this.filePreviewError = '';
+    this.filePreviewTextCopied = false;
+  };
+
+  private handleCopyTextPreview = async () => {
+    if (this.filePreviewText == null) return;
+    try {
+      await navigator.clipboard.writeText(this.filePreviewText);
+      this.filePreviewTextCopied = true;
+      if (this.filePreviewCopyResetTimer !== null) {
+        globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      }
+      this.filePreviewCopyResetTimer = globalThis.setTimeout(() => {
+        this.filePreviewTextCopied = false;
+        this.filePreviewCopyResetTimer = null;
+      }, 1500);
+    } catch {
+      // Clipboard API may fail in insecure contexts; silently ignore.
+    }
   };
 
   private openTransferModal(item: SpaceItemResponse) {
@@ -3211,7 +3239,7 @@ export class SpaceView extends BaseElement {
         @click=${this.closeFilePreview}
       >
         <div
-          class="relative w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col rounded-lg border border-slate-700 bg-slate-900"
+          class="relative w-full max-w-3xl max-h-[85vh] overflow-clip flex flex-col rounded-lg border border-slate-700 bg-slate-900"
           @click=${(e: Event) => e.stopPropagation()}
         >
           <div class="shrink-0 flex items-start justify-between gap-4 p-6 pb-0 mb-4">
@@ -3219,6 +3247,20 @@ export class SpaceView extends BaseElement {
               ${this.filePreviewItem.content}
             </h3>
             <div class="flex shrink-0 items-center gap-2">
+              ${this.filePreviewType === 'text' && this.filePreviewText != null
+                ? html`
+                    <button
+                      @click=${this.handleCopyTextPreview}
+                      class="rounded p-1 text-slate-400 transition hover:text-white"
+                      title=${this.filePreviewTextCopied ? 'Copied!' : 'Copy content'}
+                      aria-label=${this.filePreviewTextCopied ? 'Copied to clipboard' : 'Copy file content to clipboard'}
+                    >
+                      ${this.filePreviewTextCopied
+                        ? html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+                        : html`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`}
+                    </button>
+                  `
+                : nothing}
               <button
                 @click=${() => this.handleDownload(this.filePreviewItem!)}
                 class="rounded p-1 text-slate-400 transition hover:text-white"
@@ -3236,8 +3278,10 @@ export class SpaceView extends BaseElement {
               </button>
             </div>
           </div>
-          <div class="overflow-y-auto flex-1 min-h-0 px-6 pb-6">
-            ${this.renderFilePreviewContent()}
+          <div class="overflow-y-auto flex-1 min-h-0">
+            <div class="px-6 pb-6">
+              ${this.renderFilePreviewContent()}
+            </div>
           </div>
         </div>
       </div>
