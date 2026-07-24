@@ -140,6 +140,40 @@ public class ItemEndpointTests
     }
 
     [Fact]
+    public async Task ListItems_HidesExpiredItems()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        await factory.CreateItemAsync(
+            space.Id,
+            member.Id,
+            contentType: "text",
+            content: "expired",
+            sharedAt: DateTime.UtcNow.AddMinutes(-10),
+            fileSize: 0,
+            ttlSeconds: 60);
+        await factory.CreateItemAsync(
+            space.Id,
+            member.Id,
+            contentType: "text",
+            content: "active",
+            sharedAt: DateTime.UtcNow.AddMinutes(-1),
+            fileSize: 0,
+            ttlSeconds: 3600);
+
+        var response = await ListItemsAsync(client, space.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = await ReadJsonAsync<List<SpaceItemResponse>>(response);
+        items.Select(item => item.Content).Should().ContainSingle().Which.Should().Be("active");
+    }
+
+    [Fact]
     public async Task ListItems_WithoutJwt_Returns401()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -198,6 +232,27 @@ public class ItemEndpointTests
         savedItem.ContentType.Should().Be("text");
         savedItem.Content.Should().Be("hello world");
         savedItem.FileSize.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertTextItem_WithTtlSeconds_PersistsTtlAndReturnsIt()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var itemId = Guid.NewGuid();
+
+        var response = await UpsertTextItemAsync(client, space.Id, itemId, "hello world", token, ttlSeconds: 300);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await ReadJsonAsync<SpaceItemResponse>(response);
+        body.TtlSeconds.Should().Be(300);
+
+        var savedItem = await factory.WithDbContextAsync(db => db.SpaceItems.SingleAsync(item => item.Id == itemId));
+        savedItem.TtlSeconds.Should().Be(300);
     }
 
     [Fact]
@@ -523,6 +578,53 @@ public class ItemEndpointTests
         response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
     }
 
+    [Fact]
+    public async Task PushSubscriptionStatus_ReturnsFalse_WhenNoSubscriptionExists()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+
+        var response = await GetPushSubscriptionStatusAsync(client, space.Id, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadJsonAsync<WebPushSubscriptionStatusResponse>(response);
+        body.Enabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UpsertAndUnsubscribePushSubscription_TogglesStatus()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var space = await factory.CreateSpaceAsync();
+        var member = await factory.CreateMemberAsync(space.Id, "Zoe");
+        var token = GenerateTestJwt(member.Id, space.Id, member.DisplayName);
+        var request = new WebPushSubscriptionRequest(
+            "https://push.example/sub/1",
+            new WebPushSubscriptionKeysRequest("test-p256dh", "test-auth"));
+
+        var upsertResponse = await UpsertPushSubscriptionAsync(client, space.Id, request, token);
+        upsertResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var enabledResponse = await GetPushSubscriptionStatusAsync(client, space.Id, token);
+        enabledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var enabled = await ReadJsonAsync<WebPushSubscriptionStatusResponse>(enabledResponse);
+        enabled.Enabled.Should().BeTrue();
+
+        var removeResponse = await UnsubscribePushSubscriptionAsync(client, space.Id, request, token);
+        removeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var disabledResponse = await GetPushSubscriptionStatusAsync(client, space.Id, token);
+        disabledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var disabled = await ReadJsonAsync<WebPushSubscriptionStatusResponse>(disabledResponse);
+        disabled.Enabled.Should().BeFalse();
+    }
+
     private static string GenerateTestJwt(Guid memberId, Guid spaceId, string displayName = "TestUser")
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestWebApplicationFactory.JwtSigningKey));
@@ -560,13 +662,18 @@ public class ItemEndpointTests
         Guid itemId,
         string content,
         string? token = null,
-        string contentType = "text")
+        string contentType = "text",
+        int? ttlSeconds = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Put, $"/v1/spaces/{spaceId}/items/{itemId}");
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(itemId.ToString()), "id");
         form.Add(new StringContent(contentType), "contentType");
         form.Add(new StringContent(content), "content");
+        if (ttlSeconds is not null)
+        {
+            form.Add(new StringContent(ttlSeconds.Value.ToString()), "ttlSeconds");
+        }
         request.Content = form;
 
         AddAuthorizationHeader(request, token);
@@ -602,6 +709,41 @@ public class ItemEndpointTests
         return await client.SendAsync(request);
     }
 
+    private static async Task<HttpResponseMessage> GetPushSubscriptionStatusAsync(HttpClient client, Guid spaceId, string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/spaces/{spaceId}/push-subscriptions/status");
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> UpsertPushSubscriptionAsync(
+        HttpClient client,
+        Guid spaceId,
+        WebPushSubscriptionRequest payload,
+        string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/push-subscriptions")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> UnsubscribePushSubscriptionAsync(
+        HttpClient client,
+        Guid spaceId,
+        WebPushSubscriptionRequest payload,
+        string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/v1/spaces/{spaceId}/push-subscriptions/unsubscribe")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        AddAuthorizationHeader(request, token);
+        return await client.SendAsync(request);
+    }
+
     private static void AddAuthorizationHeader(HttpRequestMessage request, string? token)
     {
         if (!string.IsNullOrWhiteSpace(token))
@@ -626,7 +768,19 @@ public class ItemEndpointTests
         string ContentType,
         string Content,
         long FileSize,
-        DateTime SharedAt);
+        DateTime SharedAt,
+        int? TtlSeconds = null);
+
+    private sealed record WebPushSubscriptionRequest(
+        string Endpoint,
+        WebPushSubscriptionKeysRequest Keys);
+
+    private sealed record WebPushSubscriptionKeysRequest(
+        string P256Dh,
+        string Auth);
+
+    private sealed record WebPushSubscriptionStatusResponse(
+        bool Enabled);
 
     private sealed class TestWebApplicationFactory(long? maxSpaceQuotaBytes = null, string? seededUtcNow = null) : WebApplicationFactory<Program>
     {
@@ -709,6 +863,7 @@ public class ItemEndpointTests
             string content,
             DateTime sharedAt,
             long fileSize,
+            int? ttlSeconds = null,
             Guid? itemId = null)
         {
             return await WithDbContextAsync(async db =>
@@ -720,7 +875,8 @@ public class ItemEndpointTests
                     ContentType = contentType,
                     Content = content,
                     SharedAt = sharedAt,
-                    FileSize = fileSize
+                    FileSize = fileSize,
+                    TtlSeconds = ttlSeconds
                 };
 
                 db.SpaceItems.Add(item);

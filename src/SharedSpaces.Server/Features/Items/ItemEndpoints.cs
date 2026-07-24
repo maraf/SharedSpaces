@@ -12,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Journal;
+using SharedSpaces.Server.Features.Notifications;
 using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
@@ -24,6 +25,7 @@ public static class ItemEndpoints
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SpaceQuotaLocks = new();
     private const int DefaultMaxTextContentBytes = 1_048_576;
     private const int DefaultMaxTextToFileThresholdBytes = 65_536;
+    private const int DefaultMaxTtlSeconds = 2_592_000;
 
     public static IEndpointRouteBuilder MapItemEndpoints(this IEndpointRouteBuilder app)
     {
@@ -85,6 +87,7 @@ public static class ItemEndpoints
             return Results.NotFound(new { Error = "Space not found" });
         }
 
+        var now = DateTime.UtcNow;
         var items = await db.SpaceItems
             .AsNoTracking()
             .Where(item => item.SpaceId == spaceId)
@@ -96,10 +99,11 @@ public static class ItemEndpoints
                 item.ContentType,
                 item.Content,
                 item.FileSize,
-                item.SharedAt))
+                item.SharedAt,
+                item.TtlSeconds))
             .ToListAsync(cancellationToken);
 
-        return Results.Ok(items);
+        return Results.Ok(items.Where(item => !SpaceItemExpiry.IsExpired(item.SharedAt, item.TtlSeconds, now)));
     }
 
     private static async Task<IResult> DownloadFile(
@@ -139,6 +143,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
         CancellationToken cancellationToken)
     {
@@ -175,6 +180,16 @@ public static class ItemEndpoints
         if (normalizedContentType is not ("text" or "file"))
         {
             return Results.BadRequest(new { Error = "ContentType must be either 'text' or 'file'" });
+        }
+
+        if (request.TtlSeconds is <= 0)
+        {
+            return Results.BadRequest(new { Error = "ttlSeconds must be greater than 0 when provided" });
+        }
+
+        if (request.TtlSeconds > DefaultMaxTtlSeconds)
+        {
+            return Results.BadRequest(new { Error = $"ttlSeconds must not exceed {DefaultMaxTtlSeconds}" });
         }
 
         var space = await db.Spaces
@@ -298,6 +313,7 @@ public static class ItemEndpoints
             item.ContentType = normalizedContentType;
             item.Content = content;
             item.FileSize = fileSize;
+            item.TtlSeconds = request.TtlSeconds;
             item.SharedAt = systemClock.UtcNow;
 
             if (existingItem is null)
@@ -324,9 +340,11 @@ public static class ItemEndpoints
                         item.ContentType,
                         item.Content,
                         item.FileSize,
-                        item.SharedAt);
+                        item.SharedAt,
+                        item.TtlSeconds);
 
                     await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+                    await webPushDeliveryService.NotifyItemCreatedAsync(item, displayName, cancellationToken);
                 }
             }
             catch (Exception exception)
@@ -370,7 +388,8 @@ public static class ItemEndpoints
                 item.ContentType,
                 item.Content,
                 item.FileSize,
-                item.SharedAt);
+                item.SharedAt,
+                item.TtlSeconds);
 
             return existingItem is null
                 ? Results.Created($"/v1/spaces/{spaceId}/items/{item.Id}", response)
@@ -482,14 +501,28 @@ public static class ItemEndpoints
             var content = form.TryGetValue("content", out var contentValues)
                 ? contentValues.ToString()
                 : null;
+            var ttlSecondsValue = form.TryGetValue("ttlSeconds", out var ttlSecondsValues)
+                ? ttlSecondsValues.ToString()
+                : null;
             Guid.TryParse(idValue, out var id);
+            int? ttlSeconds = null;
+            if (!string.IsNullOrWhiteSpace(ttlSecondsValue))
+            {
+                if (!int.TryParse(ttlSecondsValue, out var parsedTtlSeconds))
+                {
+                    return (null, Results.BadRequest(new { Error = "ttlSeconds must be a valid integer" }));
+                }
+
+                ttlSeconds = parsedTtlSeconds;
+            }
 
             return (new UpsertSpaceItemRequest
             {
                 Id = id,
                 ContentType = contentType,
                 Content = content,
-                File = form.Files.GetFile("file")
+                File = form.Files.GetFile("file"),
+                TtlSeconds = ttlSeconds
             }, null);
         }
         catch (BadHttpRequestException)
@@ -511,6 +544,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
@@ -567,7 +601,7 @@ public static class ItemEndpoints
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, systemClock, configuration, journalOptions, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, webPushDeliveryService, systemClock, configuration, journalOptions, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
@@ -636,6 +670,10 @@ public static class ItemEndpoints
         using var formContent = new MultipartFormDataContent();
         formContent.Add(new StringContent(newItemId.ToString()), "id");
         formContent.Add(new StringContent(sourceItem.ContentType), "contentType");
+        if (sourceItem.TtlSeconds is not null)
+        {
+            formContent.Add(new StringContent(sourceItem.TtlSeconds.Value.ToString()), "ttlSeconds");
+        }
 
         if (isFile)
         {
@@ -766,6 +804,7 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
@@ -893,6 +932,7 @@ public static class ItemEndpoints
                 ContentType = sourceItem.ContentType,
                 Content = sourceItem.Content,
                 FileSize = sourceItem.FileSize,
+                TtlSeconds = sourceItem.TtlSeconds,
                 SharedAt = systemClock.UtcNow
             };
 
@@ -955,9 +995,11 @@ public static class ItemEndpoints
                 destinationItem.ContentType,
                 destinationItem.Content,
                 destinationItem.FileSize,
-                destinationItem.SharedAt);
+                destinationItem.SharedAt,
+                destinationItem.TtlSeconds);
 
             await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+            await webPushDeliveryService.NotifyItemCreatedAsync(destinationItem, destinationDisplayName, cancellationToken);
 
             // Broadcast ItemDeleted to source space if move
             if (action == "move")
@@ -992,7 +1034,8 @@ public static class ItemEndpoints
                 destinationItem.ContentType,
                 destinationItem.Content,
                 destinationItem.FileSize,
-                destinationItem.SharedAt);
+                destinationItem.SharedAt,
+                destinationItem.TtlSeconds);
 
             return Results.Created($"/v1/spaces/{destinationSpaceId}/items/{newItemId}", response);
         }

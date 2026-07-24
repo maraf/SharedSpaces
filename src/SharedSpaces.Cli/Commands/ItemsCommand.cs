@@ -81,6 +81,7 @@ public static class ItemsCommand
                 content = i.Content,
                 fileSize = i.FileSize,
                 sharedAt = i.SharedAt,
+                ttlSeconds = i.TtlSeconds,
             });
             Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
             return;
@@ -96,17 +97,19 @@ public static class ItemsCommand
         const int typeWidth = -12;
         const int contentWidth = -30;
         const int sizeWidth = -10;
+        const int ttlWidth = -8;
 
         Console.WriteLine(
-            $"{"ID",idWidth}  {"Type",typeWidth}  {"Content",contentWidth}  {"Size",sizeWidth}  Shared At");
+            $"{"ID",idWidth}  {"Type",typeWidth}  {"Content",contentWidth}  {"Size",sizeWidth}  {"TTL",ttlWidth}  Shared At");
         Console.WriteLine(
-            $"{new string('-', -idWidth)}  {new string('-', -typeWidth)}  {new string('-', -contentWidth)}  {new string('-', -sizeWidth)}  {new string('-', 19)}");
+            $"{new string('-', -idWidth)}  {new string('-', -typeWidth)}  {new string('-', -contentWidth)}  {new string('-', -sizeWidth)}  {new string('-', -ttlWidth)}  {new string('-', 19)}");
 
         foreach (var item in items)
         {
             var content = item.Content.Length > 30 ? item.Content[..27] + "..." : item.Content;
+            var ttlDisplay = item.TtlSeconds?.ToString() ?? "-";
             Console.WriteLine(
-                $"{item.Id.ToString(),idWidth}  {item.ContentType,typeWidth}  {content,contentWidth}  {item.FileSize.ToString(),sizeWidth}  {item.SharedAt:yyyy-MM-dd HH:mm:ss}");
+                $"{item.Id.ToString(),idWidth}  {item.ContentType,typeWidth}  {content,contentWidth}  {item.FileSize.ToString(),sizeWidth}  {ttlDisplay,ttlWidth}  {item.SharedAt:yyyy-MM-dd HH:mm:ss}");
         }
     }
 }

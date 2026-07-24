@@ -472,6 +472,27 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
   event.waitUntil(self.clients.claim());
 });
 
+self.addEventListener('push', (event: PushEvent) => {
+  const payload = event.data?.json() as { item?: { contentType?: string; content?: string } } | undefined;
+  const contentType = payload?.item?.contentType ?? 'text';
+  const content = payload?.item?.content ?? 'A new item was shared.';
+  const body = contentType === 'file'
+    ? `New file shared: ${content}`
+    : content;
+
+  event.waitUntil(
+    self.registration.showNotification('SharedSpaces', {
+      body,
+      tag: 'space-item',
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow('/'));
+});
+
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();

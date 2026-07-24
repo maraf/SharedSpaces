@@ -26,6 +26,9 @@ public class SpaceItemConfiguration : IEntityTypeConfiguration<SpaceItem>
             .HasDefaultValue(0L)
             .IsRequired();
 
+        builder.Property(item => item.TtlSeconds)
+            .IsRequired(false);
+
         builder.Property(item => item.SharedAt)
             .IsRequired();
 

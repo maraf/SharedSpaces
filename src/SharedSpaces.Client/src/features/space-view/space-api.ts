@@ -12,6 +12,25 @@ export interface SpaceItemResponse {
   content: string;
   fileSize: number;
   sharedAt: string;
+  ttlSeconds?: number | null;
+}
+
+export interface WebPushSubscriptionKeysRequest {
+  p256Dh: string;
+  auth: string;
+}
+
+export interface WebPushSubscriptionRequest {
+  endpoint: string;
+  keys: WebPushSubscriptionKeysRequest;
+}
+
+export interface WebPushPublicKeyResponse {
+  publicKey: string;
+}
+
+export interface WebPushSubscriptionStatusResponse {
+  enabled: boolean;
 }
 
 export class SpaceApiError extends Error {
@@ -120,6 +139,7 @@ export async function shareText(
   itemId: string,
   text: string,
   token: string,
+  ttlSeconds?: number,
 ): Promise<SpaceItemResponse> {
   try {
     const base = normalizeUrl(serverUrl);
@@ -127,6 +147,9 @@ export async function shareText(
     form.append('id', itemId);
     form.append('contentType', 'text');
     form.append('content', text);
+    if (typeof ttlSeconds === 'number') {
+      form.append('ttlSeconds', String(ttlSeconds));
+    }
 
     const response = await fetch(
       `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}`,
@@ -186,6 +209,7 @@ export async function shareFile(
   itemId: string,
   file: File,
   token: string,
+  ttlSeconds?: number,
 ): Promise<SpaceItemResponse> {
   try {
     const base = normalizeUrl(serverUrl);
@@ -193,6 +217,9 @@ export async function shareFile(
     form.append('id', itemId);
     form.append('contentType', 'file');
     form.append('file', file);
+    if (typeof ttlSeconds === 'number') {
+      form.append('ttlSeconds', String(ttlSeconds));
+    }
 
     const response = await fetch(
       `${base}/v1/spaces/${encodeURIComponent(spaceId)}/items/${encodeURIComponent(itemId)}`,
@@ -361,6 +388,92 @@ export async function updateJournalCheckpoint(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ checkpoint }),
+      },
+    );
+    await throwForFailed(response);
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function getWebPushPublicKey(
+  serverUrl: string,
+  spaceId: string,
+  token: string,
+): Promise<WebPushPublicKeyResponse> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/push-subscriptions/vapid-public-key`,
+      { headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+    return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function getWebPushSubscriptionStatus(
+  serverUrl: string,
+  spaceId: string,
+  token: string,
+): Promise<WebPushSubscriptionStatusResponse> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/push-subscriptions/status`,
+      { headers: authHeaders(token) },
+    );
+    await throwForFailed(response);
+    return await response.json();
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function upsertWebPushSubscription(
+  serverUrl: string,
+  spaceId: string,
+  token: string,
+  subscription: WebPushSubscriptionRequest,
+): Promise<void> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/push-subscriptions`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(subscription),
+      },
+    );
+    await throwForFailed(response);
+  } catch (error) {
+    wrapNetworkError(error);
+  }
+}
+
+export async function unsubscribeWebPushSubscription(
+  serverUrl: string,
+  spaceId: string,
+  token: string,
+  subscription: WebPushSubscriptionRequest,
+): Promise<void> {
+  try {
+    const base = normalizeUrl(serverUrl);
+    const response = await fetch(
+      `${base}/v1/spaces/${encodeURIComponent(spaceId)}/push-subscriptions/unsubscribe`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders(token),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(subscription),
       },
     );
     await throwForFailed(response);

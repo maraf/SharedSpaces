@@ -11,23 +11,33 @@ public static class UploadCommand
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Path to the file to upload" }.AcceptExistingOnly();
         var spaceIdOption = new Option<string>("--space-id") { Description = "ID of the space to upload to", Required = true };
+        var ttlSecondsOption = new Option<int?>("--ttl-seconds") { Description = "Optional item TTL in seconds" };
 
         var command = new Command("upload", "Upload a file to a space");
         command.Add(fileArg);
         command.Add(spaceIdOption);
+        command.Add(ttlSecondsOption);
 
         command.SetAction(async (parseResult, ct) =>
         {
             var file = parseResult.GetRequiredValue(fileArg);
             var spaceId = parseResult.GetRequiredValue(spaceIdOption);
-            await HandleAsync(file, spaceId, ct);
+            var ttlSeconds = parseResult.GetValue(ttlSecondsOption);
+            await HandleAsync(file, spaceId, ttlSeconds, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(FileInfo file, string spaceId, CancellationToken ct)
+    private static async Task HandleAsync(FileInfo file, string spaceId, int? ttlSeconds, CancellationToken ct)
     {
+        if (ttlSeconds is <= 0)
+        {
+            Console.Error.WriteLine("Error: --ttl-seconds must be greater than 0.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
         var configService = new ConfigService();
         SpaceEntry? space;
 
@@ -64,7 +74,8 @@ public static class UploadCommand
                 itemId,
                 space.JwtToken,
                 file.FullName,
-                ct);
+                ct,
+                ttlSeconds);
 
             Console.WriteLine($"Uploaded {file.Name} ({response.FileSize:N0} bytes).");
             Console.WriteLine($"Item ID: {response.Id}");

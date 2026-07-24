@@ -10,4 +10,5 @@ public class SpaceMember
     public DateTime? LastSyncAt { get; set; }
     public Space Space { get; set; } = null!;
     public ICollection<SpaceItem> Items { get; set; } = [];
+    public ICollection<WebPushSubscription> WebPushSubscriptions { get; set; } = [];
 }

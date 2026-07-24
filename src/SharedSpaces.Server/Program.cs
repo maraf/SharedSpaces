@@ -3,6 +3,7 @@ using SharedSpaces.Server.Features.Admin;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Invitations;
 using SharedSpaces.Server.Features.Items;
+using SharedSpaces.Server.Features.Notifications;
 using SharedSpaces.Server.Features.Journal;
 using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.SharedLinks;
@@ -30,6 +31,10 @@ builder.Services.AddOptions<StorageOptions>()
 builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ISpaceHubNotifier, SpaceHubNotifier>();
+builder.Services.AddOptions<WebPushOptions>()
+    .Bind(builder.Configuration.GetSection("WebPush"));
+builder.Services.AddScoped<IWebPushDeliveryService, WebPushDeliveryService>();
+builder.Services.AddHostedService<ExpiredItemsCleanupService>();
 builder.Services.Configure<JournalOptions>(builder.Configuration.GetSection("Journal"));
 builder.Services.AddSignalR();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -84,6 +89,7 @@ app.MapSpaceEndpoints();
 app.MapInvitationEndpoints();
 app.MapTokenEndpoints();
 app.MapItemEndpoints();
+app.MapWebPushSubscriptionEndpoints();
 app.MapJournalEndpoints();
 app.MapSharedLinkEndpoints();
 app.MapHubEndpoints();

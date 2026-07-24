@@ -24,6 +24,10 @@ import {
   deleteSharedLink,
   getJournal,
   updateJournalCheckpoint,
+  getWebPushPublicKey,
+  getWebPushSubscriptionStatus,
+  upsertWebPushSubscription,
+  unsubscribeWebPushSubscription,
   SpaceApiError,
   type JournalResponse,
   type SpaceItemResponse,
@@ -215,6 +219,9 @@ export class SpaceView extends BaseElement {
   @state() private leaveConfirm = false;
   @state() private journalSyncEnabled = false;
   @state() private journalSyncLoading = false;
+  @state() private pushNotificationsEnabled = false;
+  @state() private pushNotificationsLoading = false;
+  @state() private pushNotificationsSupported = false;
   @state() private cacheStorageStatus: StorageBudgetSnapshot | null = null;
   @state() private storagePersisted = false;
 
@@ -410,6 +417,7 @@ export class SpaceView extends BaseElement {
       this.refreshComposeItems(),
       this.loadPendingShares(),
       this.loadJournalSyncSetting(),
+      this.loadPushSubscriptionStatus(),
     ]);
 
     try {
@@ -455,6 +463,113 @@ export class SpaceView extends BaseElement {
       void this.refreshCacheStorageStatus();
     } else {
       this.cacheStorageStatus = null;
+    }
+  }
+
+  private canUsePushNotifications(): boolean {
+    return typeof window !== 'undefined'
+      && 'Notification' in window
+      && 'serviceWorker' in navigator
+      && 'PushManager' in window;
+  }
+
+  private async loadPushSubscriptionStatus() {
+    this.pushNotificationsSupported = this.canUsePushNotifications();
+    if (!this.pushNotificationsSupported || !this.serverUrl || !this.spaceId || !this.token) {
+      this.pushNotificationsEnabled = false;
+      return;
+    }
+
+    try {
+      const status = await getWebPushSubscriptionStatus(this.serverUrl, this.spaceId, this.token);
+      this.pushNotificationsEnabled = status.enabled;
+    } catch {
+      this.pushNotificationsEnabled = false;
+    }
+  }
+
+  private static decodeBase64Url(value: string): ArrayBuffer {
+    const normalized = value
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+      .padEnd(Math.ceil(value.length / 4) * 4, '=');
+    const decoded = atob(normalized);
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index++) {
+      bytes[index] = decoded.charCodeAt(index);
+    }
+    return bytes.buffer;
+  }
+
+  private async togglePushNotifications() {
+    if (!this.serverUrl || !this.spaceId || !this.token || !this.canUsePushNotifications()) {
+      return;
+    }
+
+    this.pushNotificationsLoading = true;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const existingSubscription = await registration.pushManager.getSubscription();
+
+      if (this.pushNotificationsEnabled) {
+        if (existingSubscription) {
+          const existing = existingSubscription.toJSON();
+          const p256Dh = existing.keys?.p256dh ?? '';
+          const auth = existing.keys?.auth ?? '';
+          if (existing.endpoint && p256Dh && auth) {
+            await unsubscribeWebPushSubscription(this.serverUrl, this.spaceId, this.token, {
+              endpoint: existing.endpoint,
+              keys: { p256Dh, auth },
+            });
+          }
+        }
+        this.pushNotificationsEnabled = false;
+        return;
+      }
+
+      if (Notification.permission === 'denied') {
+        this.syncMessage = 'Push notifications are blocked in browser settings.';
+        return;
+      }
+
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          this.syncMessage = 'Push notifications were not enabled.';
+          return;
+        }
+      }
+
+      let subscription = existingSubscription;
+      if (!subscription) {
+        const vapid = await getWebPushPublicKey(this.serverUrl, this.spaceId, this.token);
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: SpaceView.decodeBase64Url(vapid.publicKey),
+        });
+      }
+
+      const serialized = subscription.toJSON();
+      const endpoint = serialized.endpoint ?? '';
+      const p256Dh = serialized.keys?.p256dh ?? '';
+      const auth = serialized.keys?.auth ?? '';
+
+      if (!endpoint || !p256Dh || !auth) {
+        this.syncMessage = 'Push subscription payload is incomplete.';
+        return;
+      }
+
+      await upsertWebPushSubscription(this.serverUrl, this.spaceId, this.token, {
+        endpoint,
+        keys: { p256Dh, auth },
+      });
+
+      this.pushNotificationsEnabled = true;
+    } catch (error) {
+      console.error('Failed to toggle push notifications:', error);
+      this.syncMessage = 'Failed to update push notifications.';
+    } finally {
+      this.pushNotificationsLoading = false;
     }
   }
 
@@ -675,6 +790,7 @@ export class SpaceView extends BaseElement {
       content: payload.content,
       fileSize: payload.fileSize,
       sharedAt: payload.sharedAt,
+      ttlSeconds: payload.ttlSeconds ?? null,
     };
 
     this.items = [newItem, ...this.items];
@@ -2349,6 +2465,8 @@ export class SpaceView extends BaseElement {
       <div class="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-4">
         ${this.renderServerAddress()}
         <hr class="border-slate-700" />
+        ${this.renderPushNotificationsToggle()}
+        <hr class="border-slate-700" />
         ${this.renderJournalSyncToggle()}
         <hr class="border-slate-700" />
         ${this.renderLeaveSpace()}
@@ -2404,6 +2522,52 @@ export class SpaceView extends BaseElement {
           </button>
         </div>
         ${this.journalSyncEnabled ? this.renderCacheUsage() : nothing}
+      </div>
+    `;
+  }
+
+  private renderPushNotificationsToggle() {
+    if (!this.pushNotificationsSupported) {
+      return html`
+        <div>
+          <p class="text-sm font-medium text-slate-200">Push Notifications</p>
+          <p class="text-xs text-slate-500 mt-1">
+            Not supported by this browser.
+          </p>
+        </div>
+      `;
+    }
+
+    return html`
+      <div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-200">
+              Push Notifications
+            </p>
+            <p class="text-xs text-slate-500">
+              Notify this browser when new items arrive in this space.
+            </p>
+          </div>
+          <button
+            @click=${this.togglePushNotifications}
+            ?disabled=${this.pushNotificationsLoading}
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${this
+              .pushNotificationsEnabled
+              ? 'bg-sky-600'
+              : 'bg-slate-700'}"
+            role="switch"
+            aria-checked=${this.pushNotificationsEnabled}
+            aria-label="Toggle push notifications"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${this
+                .pushNotificationsEnabled
+                ? 'translate-x-6'
+                : 'translate-x-1'}"
+            ></span>
+          </button>
+        </div>
       </div>
     `;
   }

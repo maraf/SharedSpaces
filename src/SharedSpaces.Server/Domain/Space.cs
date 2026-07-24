@@ -10,5 +10,6 @@ public class Space
     public ICollection<SpaceInvitation> Invitations { get; set; } = [];
     public ICollection<SpaceMember> Members { get; set; } = [];
     public ICollection<SpaceItem> Items { get; set; } = [];
+    public ICollection<WebPushSubscription> WebPushSubscriptions { get; set; } = [];
     public ICollection<DeletedItem> DeletedItems { get; set; } = [];
 }

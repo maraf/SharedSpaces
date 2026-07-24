@@ -47,13 +47,18 @@ public sealed class SharedSpacesApiClient : IDisposable
         string itemId,
         string jwtToken,
         string filePath,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int? ttlSeconds = null)
     {
         var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/items/{itemId}";
 
         using var content = new MultipartFormDataContent();
         content.Add(new StringContent(itemId), "id");
         content.Add(new StringContent("file"), "contentType");
+        if (ttlSeconds is not null)
+        {
+            content.Add(new StringContent(ttlSeconds.Value.ToString()), "ttlSeconds");
+        }
 
         var fileStream = File.OpenRead(filePath);
         var fileContent = new StreamContent(fileStream);
@@ -212,7 +217,8 @@ public sealed record UploadResponse(
     [property: JsonPropertyName("contentType")] string ContentType,
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("fileSize")] long FileSize,
-    [property: JsonPropertyName("sharedAt")] DateTime SharedAt);
+    [property: JsonPropertyName("sharedAt")] DateTime SharedAt,
+    [property: JsonPropertyName("ttlSeconds")] int? TtlSeconds = null);
 
 public sealed record SpaceItemResponse(
     [property: JsonPropertyName("id")] Guid Id,
@@ -221,7 +227,8 @@ public sealed record SpaceItemResponse(
     [property: JsonPropertyName("contentType")] string ContentType,
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("fileSize")] long FileSize,
-    [property: JsonPropertyName("sharedAt")] DateTime SharedAt);
+    [property: JsonPropertyName("sharedAt")] DateTime SharedAt,
+    [property: JsonPropertyName("ttlSeconds")] int? TtlSeconds = null);
 
 public sealed record JournalResponse(
     [property: JsonPropertyName("fullSyncRequired")] bool FullSyncRequired,
