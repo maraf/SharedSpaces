@@ -11,7 +11,7 @@ public static class UploadCommand
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Path to the file to upload" }.AcceptExistingOnly();
         var spaceIdOption = new Option<string>("--space-id") { Description = "ID of the space to upload to", Required = true };
-        var ttlSecondsOption = new Option<int?>("--ttl-seconds") { Description = "Optional item TTL in seconds" };
+        var ttlSecondsOption = new Option<int?>("--ttl") { Description = "Optional item TTL in seconds" };
 
         var command = new Command("upload", "Upload a file to a space");
         command.Add(fileArg);
