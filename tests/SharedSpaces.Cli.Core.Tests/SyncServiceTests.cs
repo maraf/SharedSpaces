@@ -1031,7 +1031,7 @@ public class SyncServiceTests : IDisposable
         var localPath = Path.Combine(_tempDir, "timestamped.txt");
         var localFile = new FileInfo(localPath);
         localFile.Exists.Should().BeTrue();
-        Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds).Should().BeLessOrEqualTo(2,
+        Math.Abs((localFile.LastWriteTimeUtc - sharedAt).TotalSeconds).Should().BeLessThanOrEqualTo(2,
             "downloaded file should have LastWriteTimeUtc set to SharedAt from server");
     }
 
@@ -1133,7 +1133,7 @@ public class SyncServiceTests : IDisposable
 
         var journalGets = _mockHttp.GetRequests()
             .Count(r => r.Method == HttpMethod.Get && r.Url.EndsWith($"/v1/spaces/{spaceId}/journal"));
-        journalGets.Should().BeGreaterOrEqualTo(3,
+        journalGets.Should().BeGreaterThanOrEqualTo(3,
             "passive mode should fetch the journal once for initial sync and again on each tick");
     }
 
