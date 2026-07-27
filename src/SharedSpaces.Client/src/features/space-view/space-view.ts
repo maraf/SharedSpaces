@@ -2347,6 +2347,28 @@ export class SpaceView extends BaseElement {
     }
   }
 
+  private formatTtl(ttlSeconds: number | null | undefined): string | null {
+    if (ttlSeconds === null || ttlSeconds === undefined || !Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+      return null;
+    }
+
+    let remaining = Math.floor(ttlSeconds);
+    const days = Math.floor(remaining / 86_400);
+    remaining -= days * 86_400;
+    const hours = Math.floor(remaining / 3_600);
+    remaining -= hours * 3_600;
+    const minutes = Math.floor(remaining / 60);
+    remaining -= minutes * 60;
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (remaining > 0 || parts.length === 0) parts.push(`${remaining}s`);
+
+    return parts.slice(0, 2).join(' ');
+  }
+
   // --- Rendering ---
 
   override render() {
@@ -3167,6 +3189,7 @@ export class SpaceView extends BaseElement {
   private renderTextContent(item: SpaceItemResponse) {
     const icon = getTextItemIcon();
     const isDeleting = this.deleteConfirmItemId === item.id;
+    const ttl = this.formatTtl(item.ttlSeconds);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -3183,6 +3206,7 @@ export class SpaceView extends BaseElement {
         </p>
         <p class="text-xs text-slate-500">
           <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
+          ${ttl ? html` · TTL ${ttl}` : nothing}
         </p>
       </div>
       <!-- Right: Actions -->
@@ -3211,6 +3235,7 @@ export class SpaceView extends BaseElement {
     const icon = getFileTypeIcon(item.content);
     const canPreview = isPreviewable(item.content);
     const isDeleting = this.deleteConfirmItemId === item.id;
+    const ttl = this.formatTtl(item.ttlSeconds);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -3229,7 +3254,7 @@ export class SpaceView extends BaseElement {
           : html`<p class="truncate text-sm font-medium text-slate-200" title=${item.content}>${item.content}</p>`
         }
         <p class="text-xs text-slate-500">
-          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
+          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>${ttl ? html` · TTL ${ttl}` : nothing}
         </p>
       </div>
       <!-- Right: Actions -->

@@ -180,6 +180,29 @@ describe('SpaceView - Deduplication Logic', () => {
     });
   });
 
+  describe('SpaceView - TTL metadata formatting', () => {
+    let element: SpaceView;
+
+    beforeEach(() => {
+      element = document.createElement('space-view') as SpaceView;
+    });
+
+    it('formats a 600 second TTL as 10m', () => {
+      expect((element as any).formatTtl(600)).toBe('10m');
+    });
+
+    it('formats mixed durations with two units', () => {
+      expect((element as any).formatTtl(3661)).toBe('1h 1m');
+    });
+
+    it('returns null when TTL is missing or invalid', () => {
+      expect((element as any).formatTtl(null)).toBeNull();
+      expect((element as any).formatTtl(undefined)).toBeNull();
+      expect((element as any).formatTtl(0)).toBeNull();
+      expect((element as any).formatTtl(-5)).toBeNull();
+    });
+  });
+
   describe('Scenario 2: SignalR event arrives BEFORE API response (race condition)', () => {
     it('does not duplicate item when SignalR event arrives before API response completes', async () => {
       // Mock API responses
@@ -4705,6 +4728,7 @@ describe('SpaceView - Journal sync fallback on failure', () => {
         json: async () => ({ id: spaceId, name: 'Test Space' }),
       });
     });
+
     globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     document.body.appendChild(element);
