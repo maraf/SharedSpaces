@@ -1,4 +1,4 @@
-#:sdk Aspire.AppHost.Sdk@13.0.2
+#:sdk Aspire.AppHost.Sdk@13.4.6
 #:project .\SharedSpaces.Server\SharedSpaces.Server.csproj
 #:package Aspire.Hosting.NodeJs@9.5.2
 

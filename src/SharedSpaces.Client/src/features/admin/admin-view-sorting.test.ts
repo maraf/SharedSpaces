@@ -319,4 +319,25 @@ describe('AdminView — Alphabetical Space Sorting (Issue #96)', () => {
       'inv-c',
     ]);
   });
+
+  it('clears previously generated invitation when opening invite modal', async () => {
+    createElement();
+    await element.updateComplete;
+
+    const space = makeSpace({ id: 'space-a', name: 'Alpha' });
+    (element as any).setSpaces([space]);
+    (element as any).updateSpaceCardState(space.id, {
+      generatedInvitation: {
+        invitationString: 'http://localhost:5165|space-a|123456',
+        qrCodeBase64: null,
+      },
+      invitationGenerationError: 'Old generation error',
+    });
+
+    (element as any).openModal('invite', space.id);
+    await element.updateComplete;
+
+    expect((element as any).spaceCardState[space.id].generatedInvitation).toBeNull();
+    expect((element as any).spaceCardState[space.id].invitationGenerationError).toBe('');
+  });
 });
