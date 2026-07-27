@@ -712,6 +712,13 @@ export class AdminView extends BaseElement {
   };
 
   private openModal(type: 'members' | 'invitations' | 'invite', spaceId: string) {
+    if (type === 'invite') {
+      this.updateSpaceCardState(spaceId, {
+        generatedInvitation: null,
+        invitationGenerationError: '',
+      });
+    }
+
     this.activeModal = { type, spaceId };
     this.handleEscapeKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') this.closeModal();
