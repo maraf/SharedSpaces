@@ -60,6 +60,7 @@ export class AdminView extends BaseElement {
   @state() private newSpaceQuotaMb = '';
   @state() private isCreatingSpace = false;
   @state() private isConnecting = false;
+  @state() private isRefreshing = false;
   @state() private errorMessage = '';
 
   @state() private savedServerUrls: string[] = [];
@@ -326,6 +327,41 @@ export class AdminView extends BaseElement {
         error instanceof Error ? error.message : 'Failed to connect to server';
     } finally {
       this.isConnecting = false;
+    }
+  };
+
+  private handleRefresh = async () => {
+    if (!this.adminSecret || !this.adminServerUrl) return;
+
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+
+    this.isRefreshing = true;
+    this.errorMessage = '';
+
+    try {
+      const spaces = await listSpaces(serverUrl, adminSecret);
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      this.setSpaces(spaces);
+      void this.loadSpaceCollectionsForAll(spaces, serverUrl, adminSecret);
+    } catch (error) {
+      if (this.isUnauthorizedError(error)) {
+        this.handleUnauthorized();
+        return;
+      }
+
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+        return;
+      }
+
+      this.errorMessage =
+        error instanceof Error ? error.message : 'Failed to refresh spaces';
+    } finally {
+      this.isRefreshing = false;
     }
   };
 
@@ -866,13 +902,23 @@ export class AdminView extends BaseElement {
           Connected to
           <span class="font-mono text-xs text-slate-300">${this.adminServerUrl}</span>
         </p>
-        <button
-          type="button"
-          @click=${this.handleLogout}
-          class="shrink-0 rounded-full border border-slate-700 px-4 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800"
-        >
-          Log out
-        </button>
+        <div class="flex shrink-0 gap-2">
+          <button
+            type="button"
+            @click=${this.handleRefresh}
+            ?disabled=${this.isRefreshing}
+            class="rounded-full border border-slate-700 px-4 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ${this.isRefreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            @click=${this.handleLogout}
+            class="rounded-full border border-slate-700 px-4 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800"
+          >
+            Log out
+          </button>
+        </div>
       </div>
     `;
   }
