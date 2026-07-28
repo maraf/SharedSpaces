@@ -1,20 +1,19 @@
 name: Regenerate Screenshots
 
 on:
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: 'PR number to regenerate screenshots for'
-        required: true
-        type: number
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   regenerate:
-    name: Regenerate screenshots for PR
+    name: Regenerate screenshots
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/regenerate-screenshots')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -26,7 +25,15 @@ jobs:
         working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr checkout ${{ inputs.pr_number }}
+        run: gh pr checkout ${{ github.event.issue.number }}
+
+      - name: React to comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='rocket'
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v4

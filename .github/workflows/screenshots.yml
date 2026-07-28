@@ -49,7 +49,7 @@ jobs:
         working-directory: .
         run: |
           if [ -n "$(git status --porcelain docs/screenshots/)" ]; then
-            echo "::error::Screenshots are out of date. Please run 'npx playwright test' locally and commit the updated screenshots."
+            echo "::error::Screenshots are out of date. Run '/regenerate-screenshots' as a comment on this PR to update them."
             echo ""
             echo "Changed files:"
             git status --porcelain docs/screenshots/
