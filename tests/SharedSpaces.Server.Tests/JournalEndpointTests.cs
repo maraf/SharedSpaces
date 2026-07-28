@@ -619,7 +619,7 @@ public class JournalEndpointTests
         await factory.WithDbContextAsync(async db =>
         {
             var deletedCount = await db.DeletedItems.CountAsync(d => d.SpaceId == space.Id);
-            deletedCount.Should().BeLessOrEqualTo(5);
+            deletedCount.Should().BeLessThanOrEqualTo(5);
 
             var s = await db.Spaces.SingleAsync(s => s.Id == space.Id);
             s.JournalPrunedBefore.Should().NotBeNull();

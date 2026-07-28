@@ -3,8 +3,17 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'shared-spaces-db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const PENDING_SHARES_STORE = 'pending-shares';
+// Unified compose queue: everything the user selected/typed but hasn't
+// successfully uploaded yet. Each row carries a `status` ('draft' | 'pending').
+// Replaces the old split between `compose-drafts` (picked, not yet shared) and
+// `offline-queue` (shared but upload failed). A NEW store name is used so the
+// previously shipped v5 service worker — which background-uploads everything in
+// `offline-queue` even with the tab closed — can never auto-upload a `draft`.
+const COMPOSE_ITEMS_STORE = 'compose-items';
+// Legacy store, shipped at DB v5. Still created/read so the service worker and
+// the lazy migration can drain any rows queued before this version.
 const OFFLINE_QUEUE_STORE = 'offline-queue';
 const AUTH_TOKENS_STORE = 'auth-tokens';
 const JOURNAL_SYNC_SETTINGS_STORE = 'journal-sync-settings';
@@ -32,6 +41,35 @@ export interface PendingShareItem {
   fileType?: string;
   fileData?: ArrayBuffer;
   fileSize?: number;
+  timestamp: number;
+}
+
+// A single compose-queue row. `status` is the only thing distinguishing the two
+// former concepts:
+//  - 'draft'   = picked/typed, awaits an explicit Share, never background-synced.
+//  - 'pending' = Share was pressed but the upload hasn't succeeded yet; retried
+//                in the foreground and by the service worker background sync.
+// `serverUrl`/`spaceId`/`itemId` are assigned at creation (the space is always
+// known in the compose box) so promoting draft -> pending is just a status flip
+// and the upload is self-contained the instant the status changes. `itemId` is
+// the stable upsert key, so duplicate uploads (e.g. deploy-skew between an old
+// SW and new code) are idempotent.
+export interface ComposeItem {
+  id: string;
+  status: 'draft' | 'pending';
+  type: 'text' | 'file';
+  serverUrl: string;
+  spaceId: string;
+  itemId: string;
+  content?: string;
+  fileName?: string;
+  fileType?: string;
+  fileData?: ArrayBuffer;
+  fileSize?: number;
+  // When a draft was promoted from a Web Share Target ("Shared from other apps")
+  // file share, this links back to the originating pending share so the share can
+  // be cleared on successful upload and filtered out of the pending-shares list.
+  pendingShareId?: string;
   timestamp: number;
 }
 
@@ -79,6 +117,9 @@ function getDB(): Promise<IDBPDatabase> {
       if (!db.objectStoreNames.contains(PENDING_SHARES_STORE)) {
         db.createObjectStore(PENDING_SHARES_STORE, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains(COMPOSE_ITEMS_STORE)) {
+        db.createObjectStore(COMPOSE_ITEMS_STORE, { keyPath: 'id' });
+      }
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         db.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: 'id' });
       }
@@ -112,7 +153,9 @@ function getDB(): Promise<IDBPDatabase> {
     },
   })
     .then(async (db) => {
+      db.onversionchange = () => db.close();
       await migrateViewedFilesIfNeeded(db);
+      await migrateOfflineQueueIfNeeded(db);
       return db;
     })
     .catch((err) => {
@@ -177,7 +220,53 @@ async function migrateViewedFilesIfNeeded(db: IDBPDatabase): Promise<void> {
   await tx.done;
 }
 
-// --- Pending Shares (from Web Share Target API) ---
+// Drains the legacy `offline-queue` store into the unified `compose-items`
+// store as `pending` rows. Runs lazily on first open after the v5 -> v6 upgrade
+// (when production users still have queued items). Done in ONE readwrite
+// transaction over both stores so there's no getAll+clear race: each legacy row
+// is copied (preserving `itemId` so any concurrent SW upload stays idempotent)
+// then deleted in the same transaction. Idempotent — re-running finds an empty
+// queue. The migrated row keeps the legacy `id` so a second run that races the
+// first just overwrites the same compose-items row rather than duplicating it.
+// Exported for unit testing. Production callers reach this only through getDB().
+export async function migrateOfflineQueueIfNeeded(db: IDBPDatabase): Promise<void> {
+  if (
+    !db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)
+    || !db.objectStoreNames.contains(COMPOSE_ITEMS_STORE)
+  ) {
+    return;
+  }
+
+  const tx = db.transaction([OFFLINE_QUEUE_STORE, COMPOSE_ITEMS_STORE], 'readwrite');
+  const queueStore = tx.objectStore(OFFLINE_QUEUE_STORE);
+  const composeStore = tx.objectStore(COMPOSE_ITEMS_STORE);
+
+  let cursor = await queueStore.openCursor();
+  while (cursor) {
+    const legacy = cursor.value as OfflineQueueItem;
+    const existing = (await composeStore.get(legacy.id)) as ComposeItem | undefined;
+    if (!existing) {
+      const migrated: ComposeItem = {
+        id: legacy.id,
+        status: 'pending',
+        type: legacy.type,
+        serverUrl: legacy.serverUrl,
+        spaceId: legacy.spaceId,
+        itemId: legacy.itemId,
+        content: legacy.content,
+        fileName: legacy.fileName,
+        fileType: legacy.fileType,
+        fileData: legacy.fileData,
+        timestamp: legacy.timestamp,
+      };
+      await composeStore.put(migrated);
+    }
+    await cursor.delete();
+    cursor = await cursor.continue();
+  }
+
+  await tx.done;
+}
 
 export async function getPendingShares(): Promise<PendingShareItem[]> {
   const db = await getDB();
@@ -192,9 +281,118 @@ export async function removePendingShare(id: string): Promise<void> {
   await db.delete(PENDING_SHARES_STORE, id);
 }
 
+// Transactionally update a pending share (e.g. persist a rename) so the edit
+// survives a refresh. Returns 'missing' if the row was dismissed/claimed in the
+// meantime so a stale in-flight write never resurrects it.
+export async function updatePendingShare(
+  id: string,
+  updater: (item: PendingShareItem) => PendingShareItem,
+): Promise<'updated' | 'missing'> {
+  const db = await getDB();
+  const tx = db.transaction(PENDING_SHARES_STORE, 'readwrite');
+  const existing = (await tx.store.get(id)) as PendingShareItem | undefined;
+  if (!existing) {
+    await tx.done;
+    return 'missing';
+  }
+  await tx.store.put(updater(existing));
+  await tx.done;
+  return 'updated';
+}
+
 export async function clearPendingShares(): Promise<void> {
   const db = await getDB();
   await db.clear(PENDING_SHARES_STORE);
+}
+
+// --- Compose Items (unified compose queue: drafts + pending uploads) ---
+
+// Defensive guard: a dev who already opened this branch at v6 (before the store
+// was added to the v6 upgrade handler) will be at v6 without `compose-items`, so
+// `onupgradeneeded` never fires to create it. Rather than hard-crash, treat a
+// missing store as an empty queue. Production users upgrading v5 -> v6 always get
+// the store created in the upgrade handler.
+function hasComposeItemsStore(db: IDBPDatabase): boolean {
+  return db.objectStoreNames.contains(COMPOSE_ITEMS_STORE);
+}
+
+export async function getComposeItems(): Promise<ComposeItem[]> {
+  const db = await getDB();
+  if (!hasComposeItemsStore(db)) return [];
+  return (await db.getAll(COMPOSE_ITEMS_STORE)).sort((a, b) =>
+    (a.timestamp - b.timestamp)
+    || a.id.localeCompare(b.id),
+  );
+}
+
+export async function getComposeItemsForSpace(
+  serverUrl: string,
+  spaceId: string,
+): Promise<ComposeItem[]> {
+  const all = await getComposeItems();
+  return all.filter(
+    (item) => item.serverUrl === serverUrl && item.spaceId === spaceId,
+  );
+}
+
+export async function getPendingComposeItems(): Promise<ComposeItem[]> {
+  const all = await getComposeItems();
+  return all.filter((item) => item.status === 'pending');
+}
+
+export async function saveComposeItem(item: ComposeItem): Promise<void> {
+  const db = await getDB();
+  if (!hasComposeItemsStore(db)) return;
+  await db.put(COMPOSE_ITEMS_STORE, item);
+}
+
+// Conditionally update an existing compose item inside a single transaction.
+// Returns 'missing' (without writing) when the row no longer exists, so a stale
+// rename or status flip can never resurrect a row that foreground/background
+// sync — or the user — already removed.
+export async function updateComposeItem(
+  id: string,
+  updater: (item: ComposeItem) => ComposeItem,
+): Promise<'updated' | 'missing'> {
+  const db = await getDB();
+  if (!hasComposeItemsStore(db)) return 'missing';
+  const tx = db.transaction(COMPOSE_ITEMS_STORE, 'readwrite');
+  const existing = (await tx.store.get(id)) as ComposeItem | undefined;
+  if (!existing) {
+    await tx.done;
+    return 'missing';
+  }
+  await tx.store.put(updater(existing));
+  await tx.done;
+  return 'updated';
+}
+
+export async function removeComposeItem(id: string): Promise<void> {
+  const db = await getDB();
+  if (!hasComposeItemsStore(db)) return;
+  await db.delete(COMPOSE_ITEMS_STORE, id);
+}
+
+export async function clearComposeItems(): Promise<void> {
+  const db = await getDB();
+  if (!hasComposeItemsStore(db)) return;
+  await db.clear(COMPOSE_ITEMS_STORE);
+}
+
+export async function clearComposeItemsForSpace(
+  serverUrl: string,
+  spaceId: string,
+): Promise<void> {
+  const db = await getDB();
+  if (!hasComposeItemsStore(db)) return;
+  const all: ComposeItem[] = await db.getAll(COMPOSE_ITEMS_STORE);
+  const tx = db.transaction(COMPOSE_ITEMS_STORE, 'readwrite');
+  for (const item of all) {
+    if (item.serverUrl === serverUrl && item.spaceId === spaceId) {
+      tx.store.delete(item.id);
+    }
+  }
+  await tx.done;
 }
 
 // --- Auth Tokens (canonical store shared by the app and service worker) ---

@@ -47,6 +47,7 @@ import { initSwUpdate, checkForUpdates, activateUpdate } from './lib/sw-update';
 
 interface SpaceEntry {
   serverUrl: string;
+  serverName?: string;
   spaceId: string;
   spaceName: string;
   token: string;
@@ -54,6 +55,7 @@ interface SpaceEntry {
 
 interface StoredJwtClaims {
   server_url: string;
+  server_name?: string;
   space_id: string;
   space_name?: string;
   display_name?: string;
@@ -294,6 +296,7 @@ export class AppShell extends BaseElement {
           const spaceId = parts[parts.length - 1];
           entries.push({
             serverUrl: claims.server_url || serverUrl,
+            serverName: claims.server_name || undefined,
             spaceId: claims.space_id || spaceId,
             spaceName: claims.space_name || spaceId.substring(0, 8),
             token,
@@ -475,18 +478,18 @@ export class AppShell extends BaseElement {
             </div>
 
             <!-- Desktop pill nav — hidden on mobile -->
-            <nav class="hidden sm:flex items-center gap-2 flex-wrap" data-testid="desktop-pills">
+            <nav class="hidden sm:flex items-center gap-2 flex-wrap text-xs" data-testid="desktop-pills">
               ${this.pendingShareCount > 0
                 ? html`
                   <button
                     @click=${() => { this.view = 'pending-shares'; }}
-                    class="${this.pillBase} ${this.view === 'pending-shares'
+                    class="rounded-full border px-3 py-1.5 text-xs font-medium transition inline-flex items-center gap-1.5 ${this.view === 'pending-shares'
                       ? 'border-amber-500 bg-amber-950/60 text-amber-300'
                       : 'border-amber-500/50 bg-amber-950/40 text-amber-300 hover:border-amber-400 hover:bg-amber-950/60'}"
                     title="Items shared from other apps"
                     data-testid="pending-shares-pill"
                   >
-                    <span class="inline-flex w-4 h-4 shrink-0">${unsafeHTML(inboxFillSvg)}</span> ${this.pendingShareCount}
+                    <span class="inline-flex w-3.5 h-3.5 shrink-0">${unsafeHTML(inboxFillSvg14)}</span> ${this.pendingShareCount}
                   </button>
                 `
                 : nothing}
@@ -746,6 +749,9 @@ export class AppShell extends BaseElement {
                         : 'text-slate-200'}"
                       >${entry.spaceName}</span
                     >
+                    ${entry.serverName
+                      ? html`<span class="text-xs text-slate-500 ml-1">${entry.serverName}</span>`
+                      : nothing}
                     ${isActive
                       ? html`<span class="ml-auto text-xs text-sky-400/70"
                           >Active</span

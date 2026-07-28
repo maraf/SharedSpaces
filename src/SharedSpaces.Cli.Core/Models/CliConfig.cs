@@ -21,6 +21,9 @@ public sealed class SpaceEntry
     public string ServerUrl => GetClaim("server_url");
 
     [JsonIgnore]
+    public string ServerName => GetClaim("server_name");
+
+    [JsonIgnore]
     public string DisplayName => GetClaim("display_name");
 
     [JsonIgnore]

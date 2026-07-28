@@ -12,6 +12,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'change-this-in-production';
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 const FROZEN_SCREENSHOT_NOW = '2025-03-19T16:00:00.000Z';
+const CLIENT_DB_VERSION = 6;
 
 let deterministicCounter = 0;
 function deterministicUUID(): string {
@@ -415,6 +416,34 @@ test.describe('Screenshot Capture', () => {
       await capture(page, 'space', vp);
     });
 
+    test(`space view - compose queue - ${vp.name}`, async ({ page }) => {
+      await page.goto(CLIENT_URL);
+      await injectTokens(page, tokenMap);
+      await page.reload();
+      await page.waitForSelector('app-shell');
+      await page.click('nav button:first-child');
+      await page.waitForSelector('space-view');
+      await page.waitForTimeout(1000);
+
+      // Type a message alongside the file to show the combined compose queue.
+      await page.locator('textarea[aria-label="Text to share"]').fill(
+        'Here are the final release notes',
+      );
+
+      await page.locator('#file-input-hidden').setInputFiles([{
+        name: 'draft-release-notes.md',
+        mimeType: 'text/markdown',
+        buffer: Buffer.from('# Draft release notes'),
+      }]);
+
+      // The selected file appears inline in the compose box as an editable row.
+      const renameInput = page.locator('input[aria-label="Filename for draft-release-notes.md"]');
+      await renameInput.waitFor({ state: 'visible', timeout: 5_000 });
+      await renameInput.fill('release-notes-final.md');
+      await page.waitForTimeout(300);
+      await capture(page, 'space-compose-queue', vp, { fullPage: false });
+    });
+
     test(`space view - file preview image - ${vp.name}`, async ({ page }) => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
@@ -517,16 +546,16 @@ test.describe('Screenshot Capture', () => {
       await page.waitForSelector('space-view');
       await page.waitForTimeout(1000);
 
-      // Directly set the component's reactive state to show pending uploads
-      // (IDB-based injection gets auto-synced by the service worker when online)
+      // Directly set the component's reactive state to show pending uploads.
+      // Pending uploads now live in the unified compose list as rows with
+      // status 'pending' (folded into the compose box, not a separate section).
       await page.evaluate(() => {
         const sv = document.querySelector('space-view') as any;
         if (sv) {
-          sv.offlineQueueItems = [
-            { id: '1', itemId: 'a1', spaceId: 'x', serverUrl: 'y', type: 'text', content: 'This message is waiting to be uploaded', timestamp: Date.now() },
-            { id: '2', itemId: 'a2', spaceId: 'x', serverUrl: 'y', type: 'file', fileName: 'presentation.pdf', fileType: 'application/pdf', timestamp: Date.now() - 30000 },
+          sv.composeItems = [
+            { id: '1', status: 'pending', itemId: 'a1', type: 'text', name: '', content: 'This message is waiting to be uploaded', timestamp: Date.now() },
+            { id: '2', status: 'pending', itemId: 'a2', type: 'file', name: 'presentation.pdf', fileType: 'application/pdf', timestamp: Date.now() - 30000 },
           ];
-          sv.offlineQueueCount = 2;
         }
       });
       await page.waitForTimeout(500);
@@ -545,22 +574,24 @@ test.describe('Screenshot Capture', () => {
       await page.reload();
       await page.waitForSelector('app-shell');
 
-      // Pre-populate offline queue with pending items for this dead server
+      // Pre-populate the unified compose store with pending items for this dead
+      // server. Pending uploads are compose-items with status 'pending'.
       const pendingId1 = deterministicUUID();
       const pendingItemId1 = deterministicUUID();
       const pendingId2 = deterministicUUID();
       const pendingItemId2 = deterministicUUID();
-      await page.evaluate(({ serverUrl, spaceId, pendingId1, pendingItemId1, pendingId2, pendingItemId2 }) => {
+      await page.evaluate(({ serverUrl, spaceId, dbVersion, pendingId1, pendingItemId1, pendingId2, pendingItemId2 }) => {
         return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.open('shared-spaces-db', 5);
+          const request = indexedDB.open('shared-spaces-db', dbVersion);
           request.onerror = () => reject(request.error);
           request.onsuccess = () => {
             const db = request.result;
-            const tx = db.transaction('offline-queue', 'readwrite');
-            const store = tx.objectStore('offline-queue');
-            
+            const tx = db.transaction('compose-items', 'readwrite');
+            const store = tx.objectStore('compose-items');
+
             store.put({
               id: pendingId1,
+              status: 'pending',
               itemId: pendingItemId1,
               spaceId,
               serverUrl,
@@ -570,6 +601,7 @@ test.describe('Screenshot Capture', () => {
             });
             store.put({
               id: pendingId2,
+              status: 'pending',
               itemId: pendingItemId2,
               spaceId,
               serverUrl,
@@ -583,7 +615,7 @@ test.describe('Screenshot Capture', () => {
             tx.onerror = () => reject(tx.error);
           };
         });
-      }, { serverUrl: deadServer, spaceId: deadSpaceId, pendingId1, pendingItemId1, pendingId2, pendingItemId2 });
+      }, { serverUrl: deadServer, spaceId: deadSpaceId, dbVersion: CLIENT_DB_VERSION, pendingId1, pendingItemId1, pendingId2, pendingItemId2 });
 
       await page.click('nav button:first-child');
       await page.waitForSelector('space-view');
@@ -648,7 +680,7 @@ test.describe('Screenshot Capture', () => {
       const settingsToggle = page.locator('[data-testid="space-settings-toggle"]').first();
       await settingsToggle.waitFor({ state: 'visible', timeout: 10_000 });
       await settingsToggle.click();
-      await page.locator('text=Server Address').first().waitFor({ state: 'visible', timeout: 10_000 });
+      await page.locator('text=Server').first().waitFor({ state: 'visible', timeout: 10_000 });
       await capture(page, 'space-config', vp);
     });
 
@@ -930,15 +962,19 @@ test.describe('Screenshot Capture', () => {
       await page.goto(CLIENT_URL);
       await injectTokens(page, tokenMap);
       // Seed IndexedDB with pending share items
-      await page.evaluate(() => {
+      await page.evaluate(({ dbVersion }) => {
         return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.open('shared-spaces-db', 5);
+          const request = indexedDB.open('shared-spaces-db', dbVersion);
           request.onupgradeneeded = () => {
             const db = request.result;
             if (!db.objectStoreNames.contains('pending-shares'))
               db.createObjectStore('pending-shares', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('compose-items'))
+              db.createObjectStore('compose-items', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('offline-queue'))
               db.createObjectStore('offline-queue', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('auth-tokens'))
+              db.createObjectStore('auth-tokens');
           };
           request.onsuccess = () => {
             const db = request.result;
@@ -962,7 +998,7 @@ test.describe('Screenshot Capture', () => {
           };
           request.onerror = () => reject(request.error);
         });
-      });
+      }, { dbVersion: CLIENT_DB_VERSION });
       await page.reload();
       await page.waitForSelector('app-shell');
       await page.waitForTimeout(500);
