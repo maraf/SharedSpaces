@@ -8,12 +8,17 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: regenerate-screenshots-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   regenerate:
     name: Regenerate screenshots
     if: >-
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/regenerate-screenshots')
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.body == '/regenerate-screenshots'
     runs-on: ubuntu-latest
     defaults:
       run:
