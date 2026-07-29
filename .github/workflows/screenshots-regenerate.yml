@@ -1,0 +1,75 @@
+name: Regenerate Screenshots
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: regenerate-screenshots-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    name: Regenerate screenshots
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.body == '/regenerate-screenshots'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/SharedSpaces.Client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout PR branch
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr checkout ${{ github.event.issue.number }}
+
+      - name: React to comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST \
+            "/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='rocket'
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/SharedSpaces.Client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run screenshot tests
+        run: npx playwright test --project=screenshots
+
+      - name: Commit and push updated screenshots
+        working-directory: .
+        run: |
+          if [ -n "$(git status --porcelain docs/screenshots/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/screenshots/
+            git commit -m "chore(client): regenerate screenshots"
+            git push
+          else
+            echo "Screenshots are already up to date."
+          fi
