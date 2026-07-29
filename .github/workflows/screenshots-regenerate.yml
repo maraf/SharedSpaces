@@ -7,7 +7,7 @@ on:
 permissions:
   contents: write
   issues: write
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: regenerate-screenshots-${{ github.event.issue.number }}
@@ -25,15 +25,30 @@ jobs:
       run:
         working-directory: src/SharedSpaces.Client
     steps:
+      - name: Check PR source
+        id: pr
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head_repo="$(gh api "/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" --jq '.head.repo.full_name')"
+          echo "head_repo=$head_repo" >> "$GITHUB_OUTPUT"
+          if [ "$head_repo" != "${{ github.repository }}" ]; then
+            echo "Skipping screenshot regeneration for fork PR: $head_repo"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.pr.outputs.head_repo == github.repository
 
       - name: Checkout PR branch
+        if: steps.pr.outputs.head_repo == github.repository
         working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh pr checkout ${{ github.event.issue.number }}
 
       - name: React to comment
+        if: steps.pr.outputs.head_repo == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -42,11 +57,13 @@ jobs:
             -f content='rocket'
 
       - name: Set up .NET 10
+        if: steps.pr.outputs.head_repo == github.repository
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
       - name: Set up Node.js
+        if: steps.pr.outputs.head_repo == github.repository
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -54,15 +71,19 @@ jobs:
           cache-dependency-path: src/SharedSpaces.Client/package-lock.json
 
       - name: Install dependencies
+        if: steps.pr.outputs.head_repo == github.repository
         run: npm ci
 
       - name: Install Playwright browsers
+        if: steps.pr.outputs.head_repo == github.repository
         run: npx playwright install --with-deps chromium
 
       - name: Run screenshot tests
+        if: steps.pr.outputs.head_repo == github.repository
         run: npx playwright test --project=screenshots
 
       - name: Commit and push updated screenshots
+        if: steps.pr.outputs.head_repo == github.repository
         working-directory: .
         run: |
           if [ -n "$(git status --porcelain docs/screenshots/)" ]; then
@@ -74,3 +95,8 @@ jobs:
           else
             echo "Screenshots are already up to date."
           fi
+
+      - name: Skip fork PR
+        if: steps.pr.outputs.head_repo != github.repository
+        working-directory: .
+        run: echo "Skipping screenshot regeneration for pull requests from forks."
