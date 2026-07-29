@@ -2,13 +2,15 @@
 
 ## UI Change Workflow
 
-**Any change that touches UI** (components, templates, styles, layout) **must** include Playwright screenshot verification:
+**Any change that touches UI** (components, templates, styles, layout) **must** pass the CI screenshot verification:
 
-1. **Capture baseline** — Run `npx playwright test` from `src/SharedSpaces.Client` to capture current screenshots before making changes
-2. **Make changes** — Edit components, styles, etc.
-3. **Recapture** — Run `npx playwright test` again after changes
-4. **Compare** — Review screenshots (especially mobile) for regressions, overflow, or broken layout
-5. **Commit** — Include updated screenshots in the commit
+1. **Make changes** — Edit components, styles, etc.
+2. **Push** — Open or update a PR targeting `main`
+3. **CI verifies** — The `Screenshots` workflow regenerates screenshots and fails if any differ from the committed versions
+4. **Regenerate** — If CI fails, comment `/regenerate-screenshots` on the PR to have CI regenerate and commit updated screenshots
+5. **Review** — Check the committed screenshot diff (especially mobile) for regressions, overflow, or broken layout
+
+**Do not generate or commit screenshots locally.** Only CI-generated screenshots should be committed to the repo. This ensures consistency across environments.
 
 See `.github/skills/playwright-screenshots/SKILL.md` for full details on isolated DB setup, seeding, and viewport specs.
 
