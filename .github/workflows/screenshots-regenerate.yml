@@ -7,7 +7,7 @@ on:
 permissions:
   contents: write
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: regenerate-screenshots-${{ github.event.issue.number }}
@@ -49,6 +49,7 @@ jobs:
 
       - name: React to comment
         if: steps.pr.outputs.head_repo == github.repository
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
