@@ -490,7 +490,20 @@ self.addEventListener('push', (event: PushEvent) => {
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow('/'));
+  event.waitUntil((async () => {
+    const windowClients = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true,
+    });
+    const existingClient = windowClients[0];
+
+    if (existingClient) {
+      await existingClient.focus();
+      return;
+    }
+
+    await self.clients.openWindow('/');
+  })());
 });
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {

@@ -24,6 +24,7 @@ public sealed class WebPushDeliveryService(
     {
         if (!HasVapidConfiguration(options.Value))
         {
+            logger.LogInformation("Skipping WebPush fan-out for item {ItemId}: VAPID is not configured", item.Id);
             return;
         }
 
@@ -46,8 +47,14 @@ public sealed class WebPushDeliveryService(
 
         if (subscriptions.Count == 0)
         {
+            logger.LogInformation("Skipping WebPush fan-out for item {ItemId}: no active subscriptions", item.Id);
             return;
         }
+
+        logger.LogInformation(
+            "Starting WebPush fan-out for item {ItemId} to {SubscriptionCount} subscription(s)",
+            item.Id,
+            subscriptions.Count);
 
         var payload = JsonSerializer.Serialize(new
         {
@@ -72,6 +79,7 @@ public sealed class WebPushDeliveryService(
             options.Value.PrivateKey);
         var client = new WebPushClient();
         var staleSubscriptionIds = new List<Guid>();
+        var successfulDeliveries = 0;
 
         foreach (var subscription in subscriptions)
         {
@@ -82,6 +90,11 @@ public sealed class WebPushDeliveryService(
                     payload,
                     vapid,
                     cancellationToken: cancellationToken);
+                logger.LogDebug(
+                    "WebPush delivery succeeded for item {ItemId} to subscription {SubscriptionId}",
+                    item.Id,
+                    subscription.Id);
+                successfulDeliveries++;
             }
             catch (WebPushException exception) when (exception.StatusCode is System.Net.HttpStatusCode.Gone or System.Net.HttpStatusCode.NotFound)
             {
@@ -99,6 +112,10 @@ public sealed class WebPushDeliveryService(
 
         if (staleSubscriptionIds.Count == 0)
         {
+            logger.LogInformation(
+                "WebPush fan-out completed for item {ItemId}: delivered to {SubscriptionCount} subscription(s)",
+                item.Id,
+                successfulDeliveries);
             return;
         }
 
@@ -113,6 +130,12 @@ public sealed class WebPushDeliveryService(
 
         db.WebPushSubscriptions.RemoveRange(staleSubscriptions);
         await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "WebPush fan-out completed for item {ItemId}: delivered to {DeliveredCount} subscription(s), removed {StaleCount} stale subscription(s)",
+            item.Id,
+            successfulDeliveries,
+            staleSubscriptionIds.Count);
     }
 
     internal static bool HasVapidConfiguration(WebPushOptions options)
