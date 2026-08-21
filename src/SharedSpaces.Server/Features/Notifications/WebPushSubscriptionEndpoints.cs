@@ -10,6 +10,9 @@ namespace SharedSpaces.Server.Features.Notifications;
 
 public static class WebPushSubscriptionEndpoints
 {
+    private const int MaxEndpointLength = 2000;
+    private const int MaxKeyLength = 256;
+
     public static IEndpointRouteBuilder MapWebPushSubscriptionEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/v1/spaces/{spaceId:guid}/push-subscriptions")
@@ -66,12 +69,14 @@ public static class WebPushSubscriptionEndpoints
             return authorizationResult;
         }
 
-        if (string.IsNullOrWhiteSpace(request.Endpoint))
+        if (request is null || string.IsNullOrWhiteSpace(request.Endpoint))
         {
             return Results.BadRequest(new { Error = "Endpoint is required." });
         }
 
-        if (string.IsNullOrWhiteSpace(request.Keys.P256Dh) || string.IsNullOrWhiteSpace(request.Keys.Auth))
+        if (request.Keys is null
+            || string.IsNullOrWhiteSpace(request.Keys.P256Dh)
+            || string.IsNullOrWhiteSpace(request.Keys.Auth))
         {
             return Results.BadRequest(new { Error = "Subscription keys are required." });
         }
@@ -79,6 +84,12 @@ public static class WebPushSubscriptionEndpoints
         var endpoint = request.Endpoint.Trim();
         var p256Dh = request.Keys.P256Dh.Trim();
         var auth = request.Keys.Auth.Trim();
+        if (endpoint.Length > MaxEndpointLength
+            || p256Dh.Length > MaxKeyLength
+            || auth.Length > MaxKeyLength)
+        {
+            return Results.BadRequest(new { Error = "Subscription endpoint or keys are too long." });
+        }
         var now = systemClock.UtcNow;
 
         var existing = await db.WebPushSubscriptions

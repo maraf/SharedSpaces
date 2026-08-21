@@ -473,7 +473,13 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 });
 
 self.addEventListener('push', (event: PushEvent) => {
-  const payload = event.data?.json() as { item?: { contentType?: string; content?: string } } | undefined;
+  let payload: { item?: { contentType?: string; content?: string } } | undefined;
+  try {
+    payload = event.data?.json();
+  } catch {
+    payload = undefined;
+  }
+
   const contentType = payload?.item?.contentType ?? 'text';
   const content = payload?.item?.content ?? 'A new item was shared.';
   const body = contentType === 'file'

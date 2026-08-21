@@ -18,6 +18,8 @@ public sealed class WebPushDeliveryService(
     IOptions<WebPushOptions> options,
     ILogger<WebPushDeliveryService> logger) : IWebPushDeliveryService
 {
+    private sealed record SubscriptionInfo(Guid Id, string Endpoint, string P256Dh, string Auth);
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task NotifyItemCreatedAsync(SpaceItem item, string displayName, CancellationToken cancellationToken)
@@ -33,17 +35,28 @@ public sealed class WebPushDeliveryService(
             return;
         }
 
-        var subscriptions = await db.WebPushSubscriptions
-            .AsNoTracking()
-            .Where(subscription => subscription.SpaceId == item.SpaceId && !subscription.Member.IsRevoked)
-            .Select(subscription => new
-            {
-                subscription.Id,
-                subscription.Endpoint,
-                subscription.P256Dh,
-                subscription.Auth
-            })
-            .ToListAsync(cancellationToken);
+        List<SubscriptionInfo> subscriptions;
+        try
+        {
+            subscriptions = await db.WebPushSubscriptions
+                .AsNoTracking()
+                .Where(subscription => subscription.SpaceId == item.SpaceId && !subscription.Member.IsRevoked)
+                .Select(subscription => new SubscriptionInfo(
+                    subscription.Id,
+                    subscription.Endpoint,
+                    subscription.P256Dh,
+                    subscription.Auth))
+                .ToListAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Failed to load WebPush subscriptions for item {ItemId}", item.Id);
+            return;
+        }
 
         if (subscriptions.Count == 0)
         {
@@ -100,6 +113,10 @@ public sealed class WebPushDeliveryService(
             {
                 staleSubscriptionIds.Add(subscription.Id);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception exception)
             {
                 logger.LogWarning(
@@ -119,23 +136,37 @@ public sealed class WebPushDeliveryService(
             return;
         }
 
-        var staleSubscriptions = await db.WebPushSubscriptions
-            .Where(subscription => staleSubscriptionIds.Contains(subscription.Id))
-            .ToListAsync(cancellationToken);
-
-        if (staleSubscriptions.Count == 0)
+        try
         {
-            return;
+            var staleSubscriptions = await db.WebPushSubscriptions
+                .Where(subscription => staleSubscriptionIds.Contains(subscription.Id))
+                .ToListAsync(cancellationToken);
+
+            if (staleSubscriptions.Count == 0)
+            {
+                return;
+            }
+
+            db.WebPushSubscriptions.RemoveRange(staleSubscriptions);
+            await db.SaveChangesAsync(cancellationToken);
+
+            logger.LogInformation(
+                "WebPush fan-out completed for item {ItemId}: delivered to {DeliveredCount} subscription(s), removed {StaleCount} stale subscription(s)",
+                item.Id,
+                successfulDeliveries,
+                staleSubscriptionIds.Count);
         }
-
-        db.WebPushSubscriptions.RemoveRange(staleSubscriptions);
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation(
-            "WebPush fan-out completed for item {ItemId}: delivered to {DeliveredCount} subscription(s), removed {StaleCount} stale subscription(s)",
-            item.Id,
-            successfulDeliveries,
-            staleSubscriptionIds.Count);
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Failed to remove stale WebPush subscriptions for item {ItemId}",
+                item.Id);
+        }
     }
 
     internal static bool HasVapidConfiguration(WebPushOptions options)

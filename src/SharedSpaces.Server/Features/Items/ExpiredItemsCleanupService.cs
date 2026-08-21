@@ -54,6 +54,9 @@ public sealed class ExpiredItemsCleanupService(
 
         var expiringItems = await db.SpaceItems
             .Where(item => item.TtlSeconds != null)
+            // Keep the database sweep bounded, while retaining the same boundary semantics as
+            // SpaceItemExpiry.IsExpired. A future SharedAt must not be made to expire early.
+            .Where(item => item.TtlSeconds <= 0 || item.SharedAt <= now.AddSeconds(-item.TtlSeconds!.Value))
             .Select(item => new
             {
                 item.Id,
