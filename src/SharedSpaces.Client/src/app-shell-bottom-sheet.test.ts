@@ -582,6 +582,23 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       // Active space button should have active styling and "Active" label
       expect(activeButton!.textContent).toContain('Active');
     });
+
+    it('renders the space settings button only for the active space in the sheet', async () => {
+      setupSpaces([
+        { id: 'space-a', name: 'Alpha' },
+        { id: 'space-b', name: 'Bravo' },
+      ]);
+      createElement();
+      (element as any).currentSpaceId = 'space-a';
+      (element as any).view = 'space';
+      (element as any).sheetOpen = true;
+      await element.updateComplete;
+
+      const sheetEl = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const settingsButtons = sheetEl.querySelectorAll('[data-testid="sheet-space-settings"]');
+      expect(settingsButtons).toHaveLength(1);
+      expect(settingsButtons[0].getAttribute('aria-label')).toBe('Large space settings for Alpha');
+    });
   });
 
   // ── Admin gear placement on mobile ─────────────────────────────────
