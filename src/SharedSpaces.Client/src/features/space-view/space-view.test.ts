@@ -18,6 +18,7 @@ import * as idbStorage from '../../lib/idb-storage';
 import * as tokenStorage from '../../lib/token-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
 import { buildShareUrl } from '../../lib/share-link';
+import type { CopyButton } from '../../components/copy-button';
 
 async function resetTokenStorageState(): Promise<void> {
   await waitForTokenMirrorWritesForTests();
@@ -1375,6 +1376,74 @@ describe('SpaceView - Leave Space', () => {
       view: 'join',
       reloadSpaces: true,
     });
+  });
+});
+
+describe('Space Id settings row', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = 'space-id-settings-row';
+
+  let element: SpaceView;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    element = document.createElement('space-view') as SpaceView;
+
+    vi.spyOn(element as any, 'loadData').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'loadPendingShares').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'refreshComposeItems').mockResolvedValue(undefined);
+
+    document.body.appendChild(element);
+    element.serverUrl = serverUrl;
+    element.spaceId = spaceId;
+    element.showSettings = true;
+    (element as any).isLoading = false;
+    await element.updateComplete;
+  });
+
+  afterEach(() => {
+    element.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('renders the Space Id row with the current space id when settings are open', () => {
+    const row = element.querySelector('[data-testid="settings-space-id"]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain(spaceId);
+  });
+
+  it('wires the copy-button with the current space id and expected labels', () => {
+    const row = element.querySelector('[data-testid="settings-space-id"]');
+    const copyButton = row?.querySelector('copy-button') as CopyButton | null;
+
+    expect(copyButton).not.toBeNull();
+    expect(copyButton?.text).toBe(spaceId);
+    expect(copyButton?.getAttribute('label')).toBe('Copy space Id');
+    expect(copyButton?.getAttribute('idle-aria-label')).toBe('Copy space Id to clipboard');
+  });
+
+  it('does not render the Space Id row when spaceId is falsy', async () => {
+    element.spaceId = '';
+    await element.updateComplete;
+
+    expect(element.querySelector('[data-testid="settings-space-id"]')).toBeNull();
+  });
+
+  it('copying the space id writes it to the clipboard (integration smoke test; failure/toggle behavior is covered by copy-button.test.ts)', async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    });
+
+    const copyButton = element.querySelector(
+      '[data-testid="settings-space-id"] copy-button',
+    ) as CopyButton;
+    const innerButton = copyButton.querySelector('button') as HTMLButtonElement;
+    innerButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(writeTextMock).toHaveBeenCalledWith(spaceId);
   });
 });
 
@@ -4266,7 +4335,7 @@ describe('SpaceView - File Preview Modal', () => {
       expect(element.querySelector('[aria-label="Close preview"]')).toBeNull();
     });
 
-    it('clears pending copied-state timeout on close', async () => {
+    it('resets copied state when the preview closes', async () => {
       vi.useFakeTimers();
       try {
         const writeTextMock = vi.fn().mockResolvedValue(undefined);
@@ -4278,14 +4347,42 @@ describe('SpaceView - File Preview Modal', () => {
         });
 
         (element as any).filePreviewItem = makeItem();
+        (element as any).filePreviewType = 'text';
         (element as any).filePreviewText = 'copy me';
+        (element as any).filePreviewLoading = false;
+        (element as any).filePreviewError = '';
+        (element as any).isLoading = false;
 
-        await (element as any).handleCopyTextPreview();
-        expect((element as any).filePreviewTextCopied).toBe(true);
+        document.body.appendChild(element);
+        (element as any).requestUpdate();
+        await element.updateComplete;
+
+        const copyButton = element.querySelector(
+          '[aria-label="Copy file content to clipboard"]',
+        ) as HTMLButtonElement;
+        copyButton.click();
+        await Promise.resolve();
+        await element.updateComplete;
+        expect(element.querySelector('[aria-label="Copied to clipboard"]')).not.toBeNull();
 
         (element as any).closeFilePreview();
-        expect((element as any).filePreviewTextCopied).toBe(false);
-        expect((element as any).filePreviewCopyResetTimer).toBeNull();
+        (element as any).requestUpdate();
+        await element.updateComplete;
+
+        // The copy button is removed with the modal, so no stale "copied" state
+        // can leak into the next preview.
+        expect(element.querySelector('[aria-label="Copied to clipboard"]')).toBeNull();
+
+        (element as any).filePreviewItem = makeItem();
+        (element as any).filePreviewType = 'text';
+        (element as any).filePreviewText = 'copy me again';
+        (element as any).requestUpdate();
+        await element.updateComplete;
+
+        expect(
+          element.querySelector('[aria-label="Copy file content to clipboard"]'),
+        ).not.toBeNull();
+        expect(element.querySelector('[aria-label="Copied to clipboard"]')).toBeNull();
       } finally {
         vi.useRealTimers();
       }
@@ -4440,21 +4537,42 @@ describe('SpaceView - File Preview Modal', () => {
       expect(resetButton?.getAttribute('title')).toBe('Copy content');
     });
 
-    it('resets copied timeout from the latest click and allows empty text', async () => {
-      (element as any).filePreviewText = '';
-      await (element as any).handleCopyTextPreview();
-      expect(writeTextMock).toHaveBeenCalledWith('');
-
+    it('resets copied timeout from the latest click', async () => {
+      const item = makeItem({ content: 'notes.txt', fileSize: 100 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'text';
       (element as any).filePreviewText = 'updated';
-      await (element as any).handleCopyTextPreview();
-      await vi.advanceTimersByTimeAsync(1000);
-      await (element as any).handleCopyTextPreview();
-      await vi.advanceTimersByTimeAsync(600);
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
 
-      expect((element as any).filePreviewTextCopied).toBe(true);
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const click = async () => {
+        const button = element.querySelector(
+          '[aria-label="Copy file content to clipboard"], [aria-label="Copied to clipboard"]',
+        ) as HTMLButtonElement;
+        button.click();
+        await Promise.resolve();
+        await element.updateComplete;
+      };
+
+      await click();
+      expect(writeTextMock).toHaveBeenCalledWith('updated');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await click();
+      await vi.advanceTimersByTimeAsync(600);
+      await element.updateComplete;
+
+      // Still copied: the second click restarted the 1500ms window.
+      expect(element.querySelector('[aria-label="Copied to clipboard"]')).not.toBeNull();
 
       await vi.advanceTimersByTimeAsync(900);
-      expect((element as any).filePreviewTextCopied).toBe(false);
+      await element.updateComplete;
+      expect(element.querySelector('[aria-label="Copied to clipboard"]')).toBeNull();
     });
   });
 
