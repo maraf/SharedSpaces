@@ -322,6 +322,7 @@ public static class ItemEndpoints
                 db.SpaceItems.Add(item);
             }
 
+            var committed = false;
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
@@ -330,37 +331,16 @@ public static class ItemEndpoints
                 {
                     await transaction.CommitAsync(cancellationToken);
                 }
-
-                if (item.TtlSeconds is { } ttlSeconds)
-                {
-                    wakeSignal.RequestWakeAt(item.SharedAt.AddSeconds(ttlSeconds));
-                }
-
-                if (existingItem is null)
-                {
-                    var itemAddedEvent = new ItemAddedEvent(
-                        item.Id,
-                        item.SpaceId,
-                        item.MemberId,
-                        displayName,
-                        item.ContentType,
-                        item.Content,
-                        item.FileSize,
-                        item.SharedAt,
-                        item.TtlSeconds);
-
-                    await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
-                    await webPushDeliveryService.NotifyItemCreatedAsync(item, displayName, cancellationToken);
-                }
+                committed = true;
             }
             catch (Exception exception)
             {
-                if (transaction is not null)
+                if (!committed && transaction is not null)
                 {
                     await transaction.RollbackAsync(cancellationToken);
                 }
 
-                if (normalizedContentType == "file" && existingItem is null)
+                if (!committed && normalizedContentType == "file" && existingItem is null)
                 {
                     try
                     {
@@ -373,6 +353,28 @@ public static class ItemEndpoints
 
                 ExceptionDispatchInfo.Capture(exception).Throw();
                 throw;
+            }
+
+            if (item.TtlSeconds is { } ttlSeconds)
+            {
+                wakeSignal.RequestWakeAt(item.SharedAt.AddSeconds(ttlSeconds));
+            }
+
+            if (existingItem is null)
+            {
+                var itemAddedEvent = new ItemAddedEvent(
+                    item.Id,
+                    item.SpaceId,
+                    item.MemberId,
+                    displayName,
+                    item.ContentType,
+                    item.Content,
+                    item.FileSize,
+                    item.SharedAt,
+                    item.TtlSeconds);
+
+                await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+                await webPushDeliveryService.NotifyItemCreatedAsync(item, displayName, cancellationToken);
             }
 
             if (wasFile && normalizedContentType != "file")
@@ -893,6 +895,7 @@ public static class ItemEndpoints
 
         IAsyncDisposable? quotaLock = null;
         IDbContextTransaction? transaction = null;
+        var committed = false;
         var newItemId = Guid.NewGuid();
 
         try
@@ -992,6 +995,7 @@ public static class ItemEndpoints
             {
                 await transaction.CommitAsync(cancellationToken);
             }
+            committed = true;
 
             if (destinationItem.TtlSeconds is { } destinationTtlSeconds)
             {
@@ -1054,13 +1058,13 @@ public static class ItemEndpoints
         }
         catch (Exception exception)
         {
-            if (transaction is not null)
+            if (!committed && transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
 
             // Clean up destination file on failure
-            if (isFile)
+            if (!committed && isFile)
             {
                 try
                 {
