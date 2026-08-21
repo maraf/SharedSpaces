@@ -34,6 +34,7 @@ builder.Services.AddSingleton<ISpaceHubNotifier, SpaceHubNotifier>();
 builder.Services.AddOptions<WebPushOptions>()
     .Bind(builder.Configuration.GetSection("WebPush"));
 builder.Services.AddScoped<IWebPushDeliveryService, WebPushDeliveryService>();
+builder.Services.AddSingleton<IExpiredItemsWakeSignal, ExpiredItemsWakeSignal>();
 builder.Services.AddHostedService<ExpiredItemsCleanupService>();
 builder.Services.Configure<JournalOptions>(builder.Configuration.GetSection("Journal"));
 builder.Services.AddSignalR();

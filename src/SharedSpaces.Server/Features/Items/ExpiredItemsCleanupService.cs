@@ -9,14 +9,13 @@ namespace SharedSpaces.Server.Features.Items;
 
 public sealed class ExpiredItemsCleanupService(
     IServiceScopeFactory scopeFactory,
+    IExpiredItemsWakeSignal wakeSignal,
     ILogger<ExpiredItemsCleanupService> logger) : BackgroundService
 {
     private static readonly TimeSpan SweepInterval = TimeSpan.FromHours(1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(SweepInterval);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -32,7 +31,13 @@ public sealed class ExpiredItemsCleanupService(
                 logger.LogError(exception, "Failed while cleaning up expired space items.");
             }
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken))
+            try
+            {
+                // Waits up to the default sweep interval, but wakes earlier if an item with a
+                // sooner TTL expiry was created in the meantime (see IExpiredItemsWakeSignal).
+                await wakeSignal.WaitAsync(SweepInterval, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }

@@ -145,6 +145,7 @@ public static class ItemEndpoints
         ISpaceHubNotifier hubNotifier,
         IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
+        IExpiredItemsWakeSignal wakeSignal,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -328,6 +329,11 @@ public static class ItemEndpoints
                 if (transaction is not null)
                 {
                     await transaction.CommitAsync(cancellationToken);
+                }
+
+                if (item.TtlSeconds is { } ttlSeconds)
+                {
+                    wakeSignal.RequestWakeAt(item.SharedAt.AddSeconds(ttlSeconds));
                 }
 
                 if (existingItem is null)
@@ -546,6 +552,7 @@ public static class ItemEndpoints
         ISpaceHubNotifier hubNotifier,
         IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
+        IExpiredItemsWakeSignal wakeSignal,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
         IHttpClientFactory httpClientFactory,
@@ -601,7 +608,7 @@ public static class ItemEndpoints
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, webPushDeliveryService, systemClock, configuration, journalOptions, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, webPushDeliveryService, systemClock, wakeSignal, configuration, journalOptions, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
@@ -806,6 +813,7 @@ public static class ItemEndpoints
         ISpaceHubNotifier hubNotifier,
         IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
+        IExpiredItemsWakeSignal wakeSignal,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
@@ -983,6 +991,11 @@ public static class ItemEndpoints
             if (transaction is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
+            }
+
+            if (destinationItem.TtlSeconds is { } destinationTtlSeconds)
+            {
+                wakeSignal.RequestWakeAt(destinationItem.SharedAt.AddSeconds(destinationTtlSeconds));
             }
 
             // Broadcast ItemAdded to destination space
