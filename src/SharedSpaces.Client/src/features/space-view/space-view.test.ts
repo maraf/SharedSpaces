@@ -18,6 +18,7 @@ import * as idbStorage from '../../lib/idb-storage';
 import * as tokenStorage from '../../lib/token-storage';
 import { setToken, waitForTokenMirrorWritesForTests } from '../../lib/token-storage';
 import { buildShareUrl } from '../../lib/share-link';
+import type { CopyButton } from '../../components/copy-button';
 
 async function resetTokenStorageState(): Promise<void> {
   await waitForTokenMirrorWritesForTests();
@@ -1352,6 +1353,74 @@ describe('SpaceView - Leave Space', () => {
       view: 'join',
       reloadSpaces: true,
     });
+  });
+});
+
+describe('Space Id settings row', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = 'space-id-settings-row';
+
+  let element: SpaceView;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    element = document.createElement('space-view') as SpaceView;
+
+    vi.spyOn(element as any, 'loadData').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'loadPendingShares').mockResolvedValue(undefined);
+    vi.spyOn(element as any, 'refreshComposeItems').mockResolvedValue(undefined);
+
+    document.body.appendChild(element);
+    element.serverUrl = serverUrl;
+    element.spaceId = spaceId;
+    element.showSettings = true;
+    (element as any).isLoading = false;
+    await element.updateComplete;
+  });
+
+  afterEach(() => {
+    element.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('renders the Space Id row with the current space id when settings are open', () => {
+    const row = element.querySelector('[data-testid="settings-space-id"]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain(spaceId);
+  });
+
+  it('wires the copy-button with the current space id and expected labels', () => {
+    const row = element.querySelector('[data-testid="settings-space-id"]');
+    const copyButton = row?.querySelector('copy-button') as CopyButton | null;
+
+    expect(copyButton).not.toBeNull();
+    expect(copyButton?.text).toBe(spaceId);
+    expect(copyButton?.getAttribute('label')).toBe('Copy space Id');
+    expect(copyButton?.getAttribute('idle-aria-label')).toBe('Copy space Id to clipboard');
+  });
+
+  it('does not render the Space Id row when spaceId is falsy', async () => {
+    element.spaceId = '';
+    await element.updateComplete;
+
+    expect(element.querySelector('[data-testid="settings-space-id"]')).toBeNull();
+  });
+
+  it('copying the space id writes it to the clipboard (integration smoke test; failure/toggle behavior is covered by copy-button.test.ts)', async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    });
+
+    const copyButton = element.querySelector(
+      '[data-testid="settings-space-id"] copy-button',
+    ) as CopyButton;
+    const innerButton = copyButton.querySelector('button') as HTMLButtonElement;
+    innerButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(writeTextMock).toHaveBeenCalledWith(spaceId);
   });
 });
 

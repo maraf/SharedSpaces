@@ -2317,7 +2317,7 @@ export class SpaceView extends BaseElement {
             label="Copy space Id"
             idle-aria-label="Copy space Id to clipboard"
             .size=${16}
-            button-class="shrink-0 cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-slate-300"
+            button-class="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded text-slate-500 transition hover:text-slate-300"
           ></copy-button>
         </div>
       </div>
@@ -3348,7 +3348,7 @@ export class SpaceView extends BaseElement {
               label="Copy link URL"
               idle-aria-label="Copy link URL"
               .size=${16}
-              button-class="cursor-pointer rounded p-1.5 transition text-slate-500 hover:text-slate-300"
+              button-class="flex h-11 w-11 cursor-pointer items-center justify-center rounded transition text-slate-500 hover:text-slate-300"
             ></copy-button>
             <button
               @click=${() => this.handleToggleShareLinkQrCode(link)}
