@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
-import { renderCopyButton } from '../../components/copy-button';
+import { renderCopyButton, copyWithFeedback } from '../../components/copy-button';
 import type { AppViewChangeDetail } from '../../lib/navigation';
 import { getToken, removeToken } from '../../lib/token-storage';
 import { formatRelativeTime } from '../../lib/format-time';
@@ -1750,17 +1750,15 @@ export class SpaceView extends BaseElement {
   }
 
   private handleCopy = async (item: SpaceItemResponse) => {
-    try {
-      await navigator.clipboard.writeText(item.content);
-      this.copiedItemIds = new Set([...this.copiedItemIds, item.id]);
-      setTimeout(() => {
-        const next = new Set(this.copiedItemIds);
+    await copyWithFeedback(item.content, (copied) => {
+      const next = new Set(this.copiedItemIds);
+      if (copied) {
+        next.add(item.id);
+      } else {
         next.delete(item.id);
-        this.copiedItemIds = next;
-      }, 1500);
-    } catch {
-      // Clipboard API may fail in insecure contexts; silently ignore.
-    }
+      }
+      this.copiedItemIds = next;
+    });
   };
 
   private handleDeleteRequest = (item: SpaceItemResponse) => {
@@ -1950,19 +1948,17 @@ export class SpaceView extends BaseElement {
 
   private handleCopyTextPreview = async () => {
     if (this.filePreviewText == null) return;
-    try {
-      await navigator.clipboard.writeText(this.filePreviewText);
-      this.filePreviewTextCopied = true;
-      if (this.filePreviewCopyResetTimer !== null) {
-        globalThis.clearTimeout(this.filePreviewCopyResetTimer);
-      }
-      this.filePreviewCopyResetTimer = globalThis.setTimeout(() => {
-        this.filePreviewTextCopied = false;
-        this.filePreviewCopyResetTimer = null;
-      }, 1500);
-    } catch {
-      // Clipboard API may fail in insecure contexts; silently ignore.
+    if (this.filePreviewCopyResetTimer !== null) {
+      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
+      this.filePreviewCopyResetTimer = null;
     }
+    this.filePreviewCopyResetTimer = await copyWithFeedback(
+      this.filePreviewText,
+      (copied) => {
+        this.filePreviewTextCopied = copied;
+        if (!copied) this.filePreviewCopyResetTimer = null;
+      },
+    );
   };
 
   private openTransferModal(item: SpaceItemResponse) {
@@ -2023,14 +2019,6 @@ export class SpaceView extends BaseElement {
   }
 
   // --- Shared link handlers ---
-
-  private async copyToClipboard(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // Clipboard may fail in insecure contexts
-    }
-  }
 
   private openShareModal = async (item: SpaceItemResponse) => {
     if (!this.serverUrl || !this.spaceId || !this.token) return;
@@ -2110,13 +2098,13 @@ export class SpaceView extends BaseElement {
     const shareUrl = this.serverUrl
       ? buildShareUrl(link.token, this.serverUrl)
       : `${window.location.origin}/shared/${link.token}`;
-    await this.copyToClipboard(shareUrl);
-    this.shareCopiedLinkId = link.id;
-    setTimeout(() => {
-      if (this.shareCopiedLinkId === link.id) {
+    await copyWithFeedback(shareUrl, (copied) => {
+      if (copied) {
+        this.shareCopiedLinkId = link.id;
+      } else if (this.shareCopiedLinkId === link.id) {
         this.shareCopiedLinkId = null;
       }
-    }, 1500);
+    });
   };
 
   private handleToggleShareLinkQrCode = async (link: SharedLinkResponse) => {
@@ -2173,13 +2161,13 @@ export class SpaceView extends BaseElement {
       }
     }
 
-    await this.copyToClipboard(shareUrl);
-    this.shareCopiedLinkId = link.id;
-    setTimeout(() => {
-      if (this.shareCopiedLinkId === link.id) {
+    await copyWithFeedback(shareUrl, (copied) => {
+      if (copied) {
+        this.shareCopiedLinkId = link.id;
+      } else if (this.shareCopiedLinkId === link.id) {
         this.shareCopiedLinkId = null;
       }
-    }, 1500);
+    });
   };
 
   private handleDeleteShareLink = async (link: SharedLinkResponse) => {
@@ -2378,11 +2366,9 @@ export class SpaceView extends BaseElement {
 
   private handleCopySpaceId = async () => {
     if (!this.spaceId) return;
-    await this.copyToClipboard(this.spaceId);
-    this.spaceIdCopied = true;
-    setTimeout(() => {
-      this.spaceIdCopied = false;
-    }, 2000);
+    await copyWithFeedback(this.spaceId, (copied) => {
+      this.spaceIdCopied = copied;
+    });
   };
 
   private renderSpaceId() {

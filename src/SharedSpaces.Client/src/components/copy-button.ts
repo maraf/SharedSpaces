@@ -1,5 +1,32 @@
 import { html, type TemplateResult } from 'lit';
 
+/** Default duration the "copied" confirmation stays visible. */
+export const COPY_FEEDBACK_MS = 1500;
+
+/**
+ * Copies `text` to the clipboard and drives the transient "copied" feedback
+ * state via `setCopied`. Clipboard failures (for example in insecure contexts)
+ * are swallowed and no feedback is shown.
+ *
+ * Returns the reset timer handle so callers that need to cancel it (for example
+ * when a dialog closes) can clear it.
+ */
+export async function copyWithFeedback(
+  text: string,
+  setCopied: (copied: boolean) => void,
+  resetMs: number = COPY_FEEDBACK_MS,
+): Promise<number | null> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard API may fail in insecure contexts; silently ignore.
+    return null;
+  }
+
+  setCopied(true);
+  return globalThis.setTimeout(() => setCopied(false), resetMs);
+}
+
 export interface CopyButtonOptions {
   /** Whether the button is in the "just copied" state. */
   copied: boolean;
