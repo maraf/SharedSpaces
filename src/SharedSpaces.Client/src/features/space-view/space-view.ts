@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
-import { renderCopyButton, copyWithFeedback } from '../../components/copy-button';
+import { CopyButton } from '../../components/copy-button';
 import type { AppViewChangeDetail } from '../../lib/navigation';
 import { getToken, removeToken } from '../../lib/token-storage';
 import { formatRelativeTime } from '../../lib/format-time';
@@ -174,7 +174,6 @@ export class SpaceView extends BaseElement {
   @state() private isUploading = false;
   @state() private uploadError = '';
   @state() private dragOver = false;
-  @state() private copiedItemIds = new Set<string>();
   @state() private modalItem: SpaceItemResponse | null = null;
   @state() private connectionState: ConnectionState = 'disconnected';
   @state() private isOnline = navigator.onLine;
@@ -190,15 +189,12 @@ export class SpaceView extends BaseElement {
   @state() private filePreviewText: string | null = null;
   @state() private filePreviewLoading = false;
   @state() private filePreviewError = '';
-  @state() private filePreviewTextCopied = false;
-  @state() private spaceIdCopied = false;
   @state() private shareModalItem: SpaceItemResponse | null = null;
   @state() private shareModalLinks: SharedLinkResponse[] = [];
   @state() private shareModalLoading = false;
   @state() private shareModalError = '';
   @state() private shareModalCreating = false;
   @state() private shareModalDeleteConfirmId: string | null = null;
-  @state() private shareCopiedLinkId: string | null = null;
   @state() private shareModalQrOpenLinkId: string | null = null;
   @state() private shareModalQrGeneratingLinkId: string | null = null;
   @state() private shareModalQrCodeDataUrls: Record<string, string> = {};
@@ -237,7 +233,6 @@ export class SpaceView extends BaseElement {
   private journalVerifyTimer: number | null = null;
   private journalVerificationInFlight: Promise<void> | null = null;
   private journalVerificationRequested = false;
-  private filePreviewCopyResetTimer: number | null = null;
 
   private handleOnline = async () => {
     this.isOnline = true;
@@ -348,10 +343,6 @@ export class SpaceView extends BaseElement {
     if (this.journalVerifyTimer !== null) {
       globalThis.clearTimeout(this.journalVerifyTimer);
       this.journalVerifyTimer = null;
-    }
-    if (this.filePreviewCopyResetTimer !== null) {
-      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
-      this.filePreviewCopyResetTimer = null;
     }
   }
 
@@ -1749,18 +1740,6 @@ export class SpaceView extends BaseElement {
     }
   }
 
-  private handleCopy = async (item: SpaceItemResponse) => {
-    await copyWithFeedback(item.content, (copied) => {
-      const next = new Set(this.copiedItemIds);
-      if (copied) {
-        next.add(item.id);
-      } else {
-        next.delete(item.id);
-      }
-      this.copiedItemIds = next;
-    });
-  };
-
   private handleDeleteRequest = (item: SpaceItemResponse) => {
     this.openMenuItemId = null;
     this.deleteConfirmItemId = item.id;
@@ -1933,32 +1912,12 @@ export class SpaceView extends BaseElement {
     if (this.filePreviewUrl) {
       URL.revokeObjectURL(this.filePreviewUrl);
     }
-    if (this.filePreviewCopyResetTimer !== null) {
-      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
-      this.filePreviewCopyResetTimer = null;
-    }
     this.filePreviewItem = null;
     this.filePreviewType = 'none';
     this.filePreviewUrl = null;
     this.filePreviewText = null;
     this.filePreviewLoading = false;
     this.filePreviewError = '';
-    this.filePreviewTextCopied = false;
-  };
-
-  private handleCopyTextPreview = async () => {
-    if (this.filePreviewText == null) return;
-    if (this.filePreviewCopyResetTimer !== null) {
-      globalThis.clearTimeout(this.filePreviewCopyResetTimer);
-      this.filePreviewCopyResetTimer = null;
-    }
-    this.filePreviewCopyResetTimer = await copyWithFeedback(
-      this.filePreviewText,
-      (copied) => {
-        this.filePreviewTextCopied = copied;
-        if (!copied) this.filePreviewCopyResetTimer = null;
-      },
-    );
   };
 
   private openTransferModal(item: SpaceItemResponse) {
@@ -2028,7 +1987,6 @@ export class SpaceView extends BaseElement {
     this.shareModalLoading = true;
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
-    this.shareCopiedLinkId = null;
     this.shareModalQrOpenLinkId = null;
     this.shareModalQrGeneratingLinkId = null;
     this.shareModalQrCodeDataUrls = {};
@@ -2056,7 +2014,6 @@ export class SpaceView extends BaseElement {
     this.shareModalLinks = [];
     this.shareModalError = '';
     this.shareModalDeleteConfirmId = null;
-    this.shareCopiedLinkId = null;
     this.shareModalQrOpenLinkId = null;
     this.shareModalQrGeneratingLinkId = null;
     this.shareModalQrCodeDataUrls = {};
@@ -2092,19 +2049,6 @@ export class SpaceView extends BaseElement {
     } finally {
       this.shareModalCreating = false;
     }
-  };
-
-  private handleCopyShareLink = async (link: SharedLinkResponse) => {
-    const shareUrl = this.serverUrl
-      ? buildShareUrl(link.token, this.serverUrl)
-      : `${window.location.origin}/shared/${link.token}`;
-    await copyWithFeedback(shareUrl, (copied) => {
-      if (copied) {
-        this.shareCopiedLinkId = link.id;
-      } else if (this.shareCopiedLinkId === link.id) {
-        this.shareCopiedLinkId = null;
-      }
-    });
   };
 
   private handleToggleShareLinkQrCode = async (link: SharedLinkResponse) => {
@@ -2161,13 +2105,10 @@ export class SpaceView extends BaseElement {
       }
     }
 
-    await copyWithFeedback(shareUrl, (copied) => {
-      if (copied) {
-        this.shareCopiedLinkId = link.id;
-      } else if (this.shareCopiedLinkId === link.id) {
-        this.shareCopiedLinkId = null;
-      }
-    });
+    // Delegate to the link's copy-button so it shows its own confirmation.
+    this.querySelector<CopyButton>(
+      `copy-button[data-share-link-copy="${link.id}"]`,
+    )?.copy();
   };
 
   private handleDeleteShareLink = async (link: SharedLinkResponse) => {
@@ -2364,13 +2305,6 @@ export class SpaceView extends BaseElement {
     `;
   }
 
-  private handleCopySpaceId = async () => {
-    if (!this.spaceId) return;
-    await copyWithFeedback(this.spaceId, (copied) => {
-      this.spaceIdCopied = copied;
-    });
-  };
-
   private renderSpaceId() {
     if (!this.spaceId) return nothing;
     return html`
@@ -2378,15 +2312,13 @@ export class SpaceView extends BaseElement {
         <p class="text-sm font-medium text-slate-200">Space Id</p>
         <div class="mt-1 flex items-center gap-2">
           <p class="min-w-0 flex-1 break-all font-mono text-xs text-slate-400">${this.spaceId}</p>
-          ${renderCopyButton({
-            copied: this.spaceIdCopied,
-            onClick: this.handleCopySpaceId,
-            title: 'Copy space Id',
-            ariaLabel: 'Copy space Id to clipboard',
-            size: 16,
-            buttonClass:
-              'shrink-0 cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-slate-300',
-          })}
+          <copy-button
+            .text=${this.spaceId ?? ''}
+            label="Copy space Id"
+            idle-aria-label="Copy space Id to clipboard"
+            .size=${16}
+            button-class="shrink-0 cursor-pointer rounded p-1.5 text-slate-500 transition hover:text-slate-300"
+          ></copy-button>
         </div>
       </div>
     `;
@@ -2895,12 +2827,13 @@ export class SpaceView extends BaseElement {
   }
 
   private renderCopyButton(item: SpaceItemResponse) {
-    return renderCopyButton({
-      copied: this.copiedItemIds.has(item.id),
-      onClick: () => this.handleCopy(item),
-      title: 'Copy to clipboard',
-      ariaLabel: 'Copy text to clipboard',
-    });
+    return html`
+      <copy-button
+        .text=${item.content}
+        label="Copy to clipboard"
+        idle-aria-label="Copy text to clipboard"
+      ></copy-button>
+    `;
   }
 
   private renderManageLinksButton(item: SpaceItemResponse) {
@@ -3261,13 +3194,14 @@ export class SpaceView extends BaseElement {
             </h3>
             <div class="flex shrink-0 items-center gap-2">
               ${this.filePreviewType === 'text' && this.filePreviewText != null
-                ? renderCopyButton({
-                    copied: this.filePreviewTextCopied,
-                    onClick: this.handleCopyTextPreview,
-                    title: 'Copy content',
-                    ariaLabel: 'Copy file content to clipboard',
-                    buttonClass: 'rounded p-1 text-slate-400 transition hover:text-white',
-                  })
+                ? html`
+                    <copy-button
+                      .text=${this.filePreviewText}
+                      label="Copy content"
+                      idle-aria-label="Copy file content to clipboard"
+                      button-class="rounded p-1 text-slate-400 transition hover:text-white"
+                    ></copy-button>
+                  `
                 : nothing}
               <button
                 @click=${() => this.handleDownload(this.filePreviewItem!)}
@@ -3377,7 +3311,6 @@ export class SpaceView extends BaseElement {
     const shareUrl = this.serverUrl
       ? buildShareUrl(link.token, this.serverUrl)
       : `${window.location.origin}/shared/${link.token}`;
-    const isCopied = this.shareCopiedLinkId === link.id;
     const isConfirming = this.shareModalDeleteConfirmId === link.id;
     const isQrVisible = this.shareModalQrOpenLinkId === link.id;
     const isQrGenerating = this.shareModalQrGeneratingLinkId === link.id;
@@ -3409,16 +3342,14 @@ export class SpaceView extends BaseElement {
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
             </button>
-            ${renderCopyButton({
-              copied: isCopied,
-              onClick: () => this.handleCopyShareLink(link),
-              title: 'Copy link URL',
-              ariaLabel: 'Copy link URL',
-              size: 16,
-              buttonClass: `cursor-pointer rounded p-1.5 transition ${
-                isCopied ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'
-              }`,
-            })}
+            <copy-button
+              data-share-link-copy=${link.id}
+              .text=${shareUrl}
+              label="Copy link URL"
+              idle-aria-label="Copy link URL"
+              .size=${16}
+              button-class="cursor-pointer rounded p-1.5 transition text-slate-500 hover:text-slate-300"
+            ></copy-button>
             <button
               @click=${() => this.handleToggleShareLinkQrCode(link)}
               ?disabled=${isQrGenerating}

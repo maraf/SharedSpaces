@@ -4121,7 +4121,7 @@ describe('SpaceView - File Preview Modal', () => {
       expect(element.querySelector('[aria-label="Close preview"]')).toBeNull();
     });
 
-    it('clears pending copied-state timeout on close', async () => {
+    it('resets copied state when the preview closes', async () => {
       vi.useFakeTimers();
       try {
         const writeTextMock = vi.fn().mockResolvedValue(undefined);
@@ -4133,14 +4133,42 @@ describe('SpaceView - File Preview Modal', () => {
         });
 
         (element as any).filePreviewItem = makeItem();
+        (element as any).filePreviewType = 'text';
         (element as any).filePreviewText = 'copy me';
+        (element as any).filePreviewLoading = false;
+        (element as any).filePreviewError = '';
+        (element as any).isLoading = false;
 
-        await (element as any).handleCopyTextPreview();
-        expect((element as any).filePreviewTextCopied).toBe(true);
+        document.body.appendChild(element);
+        (element as any).requestUpdate();
+        await element.updateComplete;
+
+        const copyButton = element.querySelector(
+          '[aria-label="Copy file content to clipboard"]',
+        ) as HTMLButtonElement;
+        copyButton.click();
+        await Promise.resolve();
+        await element.updateComplete;
+        expect(element.querySelector('[aria-label="Copied to clipboard"]')).not.toBeNull();
 
         (element as any).closeFilePreview();
-        expect((element as any).filePreviewTextCopied).toBe(false);
-        expect((element as any).filePreviewCopyResetTimer).toBeNull();
+        (element as any).requestUpdate();
+        await element.updateComplete;
+
+        // The copy button is removed with the modal, so no stale "copied" state
+        // can leak into the next preview.
+        expect(element.querySelector('[aria-label="Copied to clipboard"]')).toBeNull();
+
+        (element as any).filePreviewItem = makeItem();
+        (element as any).filePreviewType = 'text';
+        (element as any).filePreviewText = 'copy me again';
+        (element as any).requestUpdate();
+        await element.updateComplete;
+
+        expect(
+          element.querySelector('[aria-label="Copy file content to clipboard"]'),
+        ).not.toBeNull();
+        expect(element.querySelector('[aria-label="Copied to clipboard"]')).toBeNull();
       } finally {
         vi.useRealTimers();
       }
@@ -4295,21 +4323,42 @@ describe('SpaceView - File Preview Modal', () => {
       expect(resetButton?.getAttribute('title')).toBe('Copy content');
     });
 
-    it('resets copied timeout from the latest click and allows empty text', async () => {
-      (element as any).filePreviewText = '';
-      await (element as any).handleCopyTextPreview();
-      expect(writeTextMock).toHaveBeenCalledWith('');
-
+    it('resets copied timeout from the latest click', async () => {
+      const item = makeItem({ content: 'notes.txt', fileSize: 100 });
+      (element as any).filePreviewItem = item;
+      (element as any).filePreviewType = 'text';
       (element as any).filePreviewText = 'updated';
-      await (element as any).handleCopyTextPreview();
-      await vi.advanceTimersByTimeAsync(1000);
-      await (element as any).handleCopyTextPreview();
-      await vi.advanceTimersByTimeAsync(600);
+      (element as any).filePreviewLoading = false;
+      (element as any).filePreviewError = '';
+      (element as any).isLoading = false;
 
-      expect((element as any).filePreviewTextCopied).toBe(true);
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      const click = async () => {
+        const button = element.querySelector(
+          '[aria-label="Copy file content to clipboard"], [aria-label="Copied to clipboard"]',
+        ) as HTMLButtonElement;
+        button.click();
+        await Promise.resolve();
+        await element.updateComplete;
+      };
+
+      await click();
+      expect(writeTextMock).toHaveBeenCalledWith('updated');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await click();
+      await vi.advanceTimersByTimeAsync(600);
+      await element.updateComplete;
+
+      // Still copied: the second click restarted the 1500ms window.
+      expect(element.querySelector('[aria-label="Copied to clipboard"]')).not.toBeNull();
 
       await vi.advanceTimersByTimeAsync(900);
-      expect((element as any).filePreviewTextCopied).toBe(false);
+      await element.updateComplete;
+      expect(element.querySelector('[aria-label="Copied to clipboard"]')).toBeNull();
     });
   });
 

@@ -1,79 +1,102 @@
 import { html, type TemplateResult } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 
-/** Default duration the "copied" confirmation stays visible. */
+import { BaseElement } from '../lib/base-element';
+
+/** How long the "copied" confirmation stays visible. */
 export const COPY_FEEDBACK_MS = 1500;
 
+function renderIcon(size: number, copied: boolean) {
+  return copied
+    ? html`<svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+    : html`<svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+}
+
 /**
- * Copies `text` to the clipboard and drives the transient "copied" feedback
- * state via `setCopied`. Clipboard failures (for example in insecure contexts)
- * are swallowed and no feedback is shown.
+ * Self-contained "copy to clipboard" icon button. Give it the text to copy and
+ * it handles the clipboard write plus the transient green check mark itself, so
+ * callers need no click handler or copied-state bookkeeping.
  *
- * Returns the reset timer handle so callers that need to cancel it (for example
- * when a dialog closes) can clear it.
+ * Clipboard failures (for example in insecure contexts) are swallowed and no
+ * confirmation is shown.
  */
-export async function copyWithFeedback(
-  text: string,
-  setCopied: (copied: boolean) => void,
-  resetMs: number = COPY_FEEDBACK_MS,
-): Promise<number | null> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // Clipboard API may fail in insecure contexts; silently ignore.
-    return null;
+@customElement('copy-button')
+export class CopyButton extends BaseElement {
+  /** Text placed on the clipboard when the button is clicked. */
+  @property({ type: String }) text = '';
+
+  /** Tooltip shown in the idle state. Replaced by "Copied!" once copied. */
+  @property({ type: String }) label = 'Copy to clipboard';
+
+  /** Accessible label shown in the idle state. */
+  @property({ type: String, attribute: 'idle-aria-label' })
+  idleAriaLabel = 'Copy to clipboard';
+
+  /** Icon size in pixels. */
+  @property({ type: Number }) size = 20;
+
+  /** Tailwind classes applied to the inner button element. */
+  @property({ type: String, attribute: 'button-class' })
+  buttonClass = 'cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300';
+
+  @state() private copied = false;
+
+  private resetTimer: number | null = null;
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.clearResetTimer();
+    this.copied = false;
   }
 
-  setCopied(true);
-  return globalThis.setTimeout(() => setCopied(false), resetMs);
+  /**
+   * Copies the current `text` and shows the confirmation. Exposed so flows that
+   * reach the clipboard by another route (for example a share button falling
+   * back to a copy) can surface the same feedback on this button.
+   */
+  async copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.text);
+    } catch {
+      // Clipboard API may fail in insecure contexts; silently ignore.
+      return;
+    }
+
+    this.clearResetTimer();
+    this.copied = true;
+    this.resetTimer = globalThis.setTimeout(() => {
+      this.copied = false;
+      this.resetTimer = null;
+    }, COPY_FEEDBACK_MS);
+  }
+
+  private clearResetTimer() {
+    if (this.resetTimer !== null) {
+      globalThis.clearTimeout(this.resetTimer);
+      this.resetTimer = null;
+    }
+  }
+
+  private handleClick = () => {
+    void this.copy();
+  };
+
+  override render(): TemplateResult {
+    return html`
+      <button
+        @click=${this.handleClick}
+        class=${this.buttonClass}
+        title=${this.copied ? 'Copied!' : this.label}
+        aria-label=${this.copied ? 'Copied to clipboard' : this.idleAriaLabel}
+      >
+        ${renderIcon(this.size, this.copied)}
+      </button>
+    `;
+  }
 }
 
-export interface CopyButtonOptions {
-  /** Whether the button is in the "just copied" state. */
-  copied: boolean;
-  onClick: () => void;
-  /** Tooltip shown in the idle state. Replaced by "Copied!" when copied. */
-  title: string;
-  /** Accessible label shown in the idle state. */
-  ariaLabel: string;
-  /** Icon size in pixels. Defaults to 20. */
-  size?: number;
-  /** Tailwind classes applied to the button element. */
-  buttonClass?: string;
-}
-
-const DEFAULT_BUTTON_CLASS =
-  'cursor-pointer rounded p-2 text-slate-500 transition hover:text-slate-300';
-
-function renderCheckIcon(size: number) {
-  return html`<svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-}
-
-function renderCopyIcon(size: number) {
-  return html`<svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-}
-
-/**
- * Renders the shared "copy to clipboard" icon button that swaps to a green
- * check mark while `copied` is true.
- */
-export function renderCopyButton(options: CopyButtonOptions): TemplateResult {
-  const {
-    copied,
-    onClick,
-    title,
-    ariaLabel,
-    size = 20,
-    buttonClass = DEFAULT_BUTTON_CLASS,
-  } = options;
-
-  return html`
-    <button
-      @click=${onClick}
-      class=${buttonClass}
-      title=${copied ? 'Copied!' : title}
-      aria-label=${copied ? 'Copied to clipboard' : ariaLabel}
-    >
-      ${copied ? renderCheckIcon(size) : renderCopyIcon(size)}
-    </button>
-  `;
+declare global {
+  interface HTMLElementTagNameMap {
+    'copy-button': CopyButton;
+  }
 }
