@@ -1431,6 +1431,128 @@ describe('SpaceView - Journal Sync Verification', () => {
   });
 });
 
+describe('SpaceView - Push Notifications', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+  const vapidPublicKey = 'BAUG';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockSubscribe: ReturnType<typeof vi.fn>;
+
+  function mockNotificationEnvironment(existingSubscription: unknown) {
+    mockSubscribe = vi.fn().mockResolvedValue(existingSubscription);
+
+    Object.defineProperty(window, 'Notification', {
+      value: {
+        permission: 'granted',
+        requestPermission: vi.fn().mockResolvedValue('granted'),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'Notification', {
+      value: window.Notification,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'PushManager', {
+      value: class PushManager {},
+      configurable: true,
+    });
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: {
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        ready: Promise.resolve({
+          pushManager: {
+            getSubscription: vi.fn().mockResolvedValue(existingSubscription),
+            subscribe: mockSubscribe,
+          },
+        }),
+      },
+      configurable: true,
+    });
+  }
+
+  function createPushSubscription(applicationServerKey: ArrayBuffer) {
+    return {
+      options: { applicationServerKey },
+      toJSON: () => ({
+        endpoint: 'https://push.example/subscription',
+        keys: {
+          p256dh: 'p256dh-key',
+          auth: 'auth-key',
+        },
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    element = document.createElement('space-view') as SpaceView;
+    element.serverUrl = serverUrl;
+    element.spaceId = spaceId;
+    (element as any).token = token;
+
+    mockFetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith('/push-subscriptions/vapid-public-key')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ publicKey: vapidPublicKey }),
+        };
+      }
+
+      return {
+        ok: true,
+        status: 204,
+        json: async () => ({}),
+      };
+    });
+    globalThis.fetch = mockFetch;
+  });
+
+  afterEach(() => {
+    element.remove();
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: undefined,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('does not reuse an existing browser push subscription created with a different VAPID key', async () => {
+    const existingSubscription = createPushSubscription(new Uint8Array([1, 2, 3]).buffer);
+    mockNotificationEnvironment(existingSubscription);
+
+    await (element as any).togglePushNotifications();
+
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0].toString()).toContain('/push-subscriptions/vapid-public-key');
+    expect((element as any).pushNotificationsEnabled).toBe(false);
+    expect((element as any).syncMessage).toBe(
+      'Push notifications are already registered for a different SharedSpaces server in this browser. Disable them there before enabling notifications for this server.',
+    );
+  });
+
+  it('reuses an existing browser push subscription when the VAPID key matches this server', async () => {
+    const existingSubscription = createPushSubscription(new Uint8Array([4, 5, 6]).buffer);
+    mockNotificationEnvironment(existingSubscription);
+
+    await (element as any).togglePushNotifications();
+
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0].toString()).toContain('/push-subscriptions/vapid-public-key');
+    expect(mockFetch.mock.calls[1][0].toString()).toBe(
+      `${serverUrl}/v1/spaces/${spaceId}/push-subscriptions`,
+    );
+    expect((element as any).pushNotificationsEnabled).toBe(true);
+  });
+});
+
 describe('SpaceView - Delete Confirmation', () => {
   const serverUrl = 'http://localhost:5000';
   const spaceId = '550e8400-e29b-41d4-a716-446655440000';

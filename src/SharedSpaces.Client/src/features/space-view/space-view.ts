@@ -501,6 +501,16 @@ export class SpaceView extends BaseElement {
     return bytes.buffer;
   }
 
+  private static arrayBuffersEqual(left: ArrayBuffer | null, right: ArrayBuffer): boolean {
+    if (!left || left.byteLength !== right.byteLength) {
+      return false;
+    }
+
+    const leftBytes = new Uint8Array(left);
+    const rightBytes = new Uint8Array(right);
+    return leftBytes.every((value, index) => value === rightBytes[index]);
+  }
+
   private async togglePushNotifications() {
     if (!this.serverUrl || !this.spaceId || !this.token || !this.canUsePushNotifications()) {
       return;
@@ -540,12 +550,23 @@ export class SpaceView extends BaseElement {
         }
       }
 
+      const vapid = await getWebPushPublicKey(this.serverUrl, this.spaceId, this.token);
+      const applicationServerKey = SpaceView.decodeBase64Url(vapid.publicKey);
+
       let subscription = existingSubscription;
+      if (
+        subscription
+        && !SpaceView.arrayBuffersEqual(subscription.options.applicationServerKey, applicationServerKey)
+      ) {
+        this.syncMessage =
+          'Push notifications are already registered for a different SharedSpaces server in this browser. Disable them there before enabling notifications for this server.';
+        return;
+      }
+
       if (!subscription) {
-        const vapid = await getWebPushPublicKey(this.serverUrl, this.spaceId, this.token);
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: SpaceView.decodeBase64Url(vapid.publicKey),
+          applicationServerKey,
         });
       }
 
