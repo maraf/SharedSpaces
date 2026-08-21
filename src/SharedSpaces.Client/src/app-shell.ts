@@ -758,19 +758,23 @@ export class AppShell extends BaseElement {
                         >`
                       : nothing}
                   </button>
-                  <button
-                    class="flex shrink-0 items-center justify-center px-4 text-slate-400 hover:text-slate-200"
-                    data-testid="sheet-space-settings"
-                    title="Large space settings"
-                    aria-label="Large space settings for ${entry.spaceName}"
-                    aria-pressed=${isActive && this.spaceSettingsOpen}
-                    @click=${() => {
-                      this.toggleSpaceSettings(entry);
-                      this.sheetOpen = false;
-                    }}
-                  >
-                    <span class="inline-flex w-4 h-4">${unsafeHTML(gearSvg)}</span>
-                  </button>
+                  ${isActive
+                    ? html`
+                        <button
+                          class="flex shrink-0 items-center justify-center px-4 text-slate-400 hover:text-slate-200"
+                          data-testid="sheet-space-settings"
+                          title="Large space settings"
+                          aria-label="Large space settings for ${entry.spaceName}"
+                          aria-pressed=${this.spaceSettingsOpen}
+                          @click=${() => {
+                            this.toggleSpaceSettings(entry);
+                            this.sheetOpen = false;
+                          }}
+                        >
+                          <span class="inline-flex w-4 h-4">${unsafeHTML(gearSvg)}</span>
+                        </button>
+                      `
+                    : nothing}
                 </div>
               `;
             })}

@@ -2,13 +2,23 @@
 
 ## UI Change Workflow
 
-**Any change that touches UI** (components, templates, styles, layout) **must** include Playwright screenshot verification:
+**Any change that touches UI** (components, templates, styles, layout) **must** pass the CI screenshot verification:
 
-1. **Capture baseline** — Run `npx playwright test` from `src/SharedSpaces.Client` to capture current screenshots before making changes
-2. **Make changes** — Edit components, styles, etc.
-3. **Recapture** — Run `npx playwright test` again after changes
-4. **Compare** — Review screenshots (especially mobile) for regressions, overflow, or broken layout
-5. **Commit** — Include updated screenshots in the commit
+1. **Make changes** — Edit components, styles, etc.
+2. **Push** — Open or update a PR targeting `main`
+3. **CI verifies** — The `Screenshots` workflow regenerates screenshots and fails if any differ from the committed versions
+4. **Regenerate** — If CI fails, comment `/regenerate-screenshots` on the PR to have CI regenerate and commit updated screenshots
+5. **Review** — Check the committed screenshot diff (especially mobile) for regressions, overflow, or broken layout
+
+### When to Use `/regenerate-screenshots`
+
+A screenshot validation failure only means the rendered UI changed — it does not by itself mean the change is correct. Before commenting the slash command:
+
+- Confirm the failure is explained by the UI change you intentionally made (e.g., you changed a component's layout, styles, or copy, and the diff reflects that).
+- If you are not 100% sure the failure only reflects your intended change (e.g., unrelated elements shifted, unexpected diffs, or you didn't touch UI at all), **do not** comment `/regenerate-screenshots`. Investigate the cause first and flag it to the user instead.
+- Only comment the slash command once you can attribute every changed screenshot to an expected, intentional UI change.
+
+**Do not generate or commit screenshots locally.** Only CI-generated screenshots should be committed to the repo. This ensures consistency across environments.
 
 See `.github/skills/playwright-screenshots/SKILL.md` for full details on isolated DB setup, seeding, and viewport specs.
 
