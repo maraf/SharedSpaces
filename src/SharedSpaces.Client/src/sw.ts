@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
+import { jwtDecode } from 'jwt-decode';
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -233,6 +234,64 @@ async function getStoredToken(serverUrl: string, spaceId: string): Promise<strin
     };
     request.onerror = () => reject(request.error);
   });
+}
+
+// Auth-token keys are `${serverUrl}:${spaceId}`; `serverUrl` itself contains
+// colons, so only the trailing segment is the space id (mirrors the split in
+// app-shell.ts loadSpacesFromStorage).
+async function findTokenBySpaceId(spaceId: string): Promise<string | undefined> {
+  const db = await openDB();
+
+  const key = await new Promise<string | undefined>((resolve, reject) => {
+    const tx = db.transaction(AUTH_TOKENS_STORE, 'readonly');
+    const request = tx.objectStore(AUTH_TOKENS_STORE).getAllKeys();
+    request.onsuccess = () => {
+      const match = (request.result as IDBValidKey[]).find(
+        (candidate) =>
+          typeof candidate === 'string' && candidate.split(':').pop() === spaceId,
+      );
+      resolve(typeof match === 'string' ? match : undefined);
+    };
+    request.onerror = () => reject(request.error);
+  });
+
+  if (!key) {
+    return undefined;
+  }
+
+  const serverUrl = key.split(':').slice(0, -1).join(':');
+  return getStoredToken(serverUrl, spaceId);
+}
+
+interface SpaceIdentity {
+  spaceName?: string;
+  serverName?: string;
+}
+
+async function getSpaceIdentity(spaceId: string): Promise<SpaceIdentity> {
+  try {
+    const token = await findTokenBySpaceId(spaceId);
+    if (!token) {
+      return {};
+    }
+
+    const claims = jwtDecode<{ space_name?: string; server_name?: string }>(token);
+    return {
+      spaceName: claims.space_name || undefined,
+      serverName: claims.server_name || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function buildNotificationTitle(spaceId: string | undefined, identity: SpaceIdentity): string {
+  if (!spaceId) {
+    return 'SharedSpaces';
+  }
+
+  const spaceName = identity.spaceName || spaceId.substring(0, 8);
+  return identity.serverName ? `${spaceName} · ${identity.serverName}` : spaceName;
 }
 
 async function removeOfflineQueueItem(id: string): Promise<void> {
@@ -473,29 +532,39 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 });
 
 self.addEventListener('push', (event: PushEvent) => {
-  let payload: { item?: { contentType?: string; content?: string } } | undefined;
+  let payload:
+    | { item?: { id?: string; spaceId?: string; contentType?: string; content?: string } }
+    | undefined;
   try {
     payload = event.data?.json();
   } catch {
     payload = undefined;
   }
 
+  const spaceId = payload?.item?.spaceId;
+  const itemId = payload?.item?.id;
   const contentType = payload?.item?.contentType ?? 'text';
   const content = payload?.item?.content ?? 'A new item was shared.';
   const body = contentType === 'file'
     ? `New file shared: ${content}`
     : content;
 
-  event.waitUntil(
-    self.registration.showNotification('SharedSpaces', {
+  event.waitUntil((async () => {
+    const identity = spaceId ? await getSpaceIdentity(spaceId) : {};
+
+    await self.registration.showNotification(buildNotificationTitle(spaceId, identity), {
       body,
-      tag: 'space-item',
-    }),
-  );
+      // Per-space tag so notifications from different spaces don't collapse.
+      tag: spaceId ? `space-item:${spaceId}` : 'space-item',
+      data: { spaceId, itemId },
+    });
+  })());
 });
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
+  const spaceId = (event.notification.data as { spaceId?: string } | undefined)?.spaceId;
+
   event.waitUntil((async () => {
     const windowClients = await self.clients.matchAll({
       type: 'window',
@@ -505,10 +574,16 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
 
     if (existingClient) {
       await existingClient.focus();
+      if (spaceId) {
+        existingClient.postMessage({ type: 'NAVIGATE_TO_SPACE', spaceId });
+      }
       return;
     }
 
-    await self.clients.openWindow('/');
+    // Cold start: `?space=` overrides the locally stored default space.
+    await self.clients.openWindow(
+      spaceId ? `/?space=${encodeURIComponent(spaceId)}` : '/',
+    );
   })());
 });
 

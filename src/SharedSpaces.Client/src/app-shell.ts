@@ -129,11 +129,19 @@ export class AppShell extends BaseElement {
       this.view = 'join';
     }
 
+    // A notification click cold-start passes `?space=<spaceId>`, which overrides
+    // the locally stored last-selected space.
+    const requestedSpaceId = this.consumeRequestedSpaceFromUrl();
+
     this.initialSpaceLoad = this.loadSpacesFromStorage().then(() => {
-      if (!invitation) {
-        // Auto-select last space if no invitation and no explicit navigation
-        this.autoSelectLastSpace();
+      if (invitation) {
+        return;
       }
+      if (this.navigateToSpaceById(requestedSpaceId)) {
+        return;
+      }
+      // Auto-select last space if no invitation and no explicit navigation
+      this.autoSelectLastSpace();
     });
 
     // Listen for SW messages (registration handled by sw-update service)
@@ -227,8 +235,22 @@ export class AppShell extends BaseElement {
   private handleSwMessage = (event: MessageEvent) => {
     if (event.data?.type === 'pending-share-added') {
       this.refreshPendingShareCount();
+    } else if (event.data?.type === 'NAVIGATE_TO_SPACE') {
+      this.navigateToSpaceById(event.data.spaceId);
     }
   };
+
+  // Selects a space by id alone (notification click). Unknown ids are ignored so
+  // a stale notification can't blank out the current view.
+  private navigateToSpaceById(spaceId?: string): boolean {
+    if (!spaceId) return false;
+
+    const space = this.spaces.find((s) => s.spaceId === spaceId);
+    if (!space) return false;
+
+    this.selectSpace(space);
+    return true;
+  }
 
   private handleVersionClick = () => {
     if (this.swUpdateAvailable) {
@@ -313,6 +335,21 @@ export class AppShell extends BaseElement {
     }
   }
 
+
+  // Reads and strips `?space=` so a reload doesn't re-trigger the navigation.
+  private consumeRequestedSpaceFromUrl(): string | undefined {
+    try {
+      const url = new URL(window.location.href);
+      const spaceId = url.searchParams.get('space') || undefined;
+      if (!spaceId) return undefined;
+
+      url.searchParams.delete('space');
+      window.history.replaceState({}, '', url.pathname + url.search);
+      return spaceId;
+    } catch {
+      return undefined;
+    }
+  }
 
   private autoSelectLastSpace() {
     const lastSpaceKey = getLastSelectedSpace();
