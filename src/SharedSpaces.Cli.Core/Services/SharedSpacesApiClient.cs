@@ -81,6 +81,42 @@ public sealed class SharedSpacesApiClient : IDisposable
             ?? throw new InvalidOperationException("Server returned empty upload response.");
     }
 
+    public async Task<UploadResponse> SendTextAsync(
+        string serverUrl,
+        string spaceId,
+        string itemId,
+        string jwtToken,
+        string text,
+        CancellationToken ct = default,
+        int? ttlSeconds = null)
+    {
+        var url = $"{serverUrl.TrimEnd('/')}/v1/spaces/{spaceId}/items/{itemId}";
+
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent(itemId), "id");
+        content.Add(new StringContent("text"), "contentType");
+        content.Add(new StringContent(text), "content");
+        if (ttlSeconds is not null)
+        {
+            content.Add(new StringContent(ttlSeconds.Value.ToString()), "ttlSeconds");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, url) { Content = content };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+        using var response = await _http.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"Send failed ({(int)response.StatusCode} {response.ReasonPhrase}): {body}");
+        }
+
+        return await response.Content.ReadFromJsonAsync<UploadResponse>(ct)
+            ?? throw new InvalidOperationException("Server returned empty send response.");
+    }
+
     public async Task<List<SpaceItemResponse>> ListItemsAsync(
         string serverUrl,
         string spaceId,

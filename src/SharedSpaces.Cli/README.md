@@ -38,6 +38,29 @@ sharedspaces upload myfile.txt --space-id 550e8400-e29b-41d4-a716-446655440000
 
 The access token for the space is read automatically from the local config stored during `join`.
 
+### `sharedspaces send`
+
+Send a short text message to a space you have already joined. Useful for status updates and notifications.
+
+```bash
+sharedspaces send "Build finished" --space-id 550e8400-e29b-41d4-a716-446655440000
+
+# Expire the message after one hour
+sharedspaces send "Deploy started" --space-id <guid> --ttl 3600
+
+# Read the message from stdin
+echo "Long update" | sharedspaces send --space-id <guid>
+
+# Machine-readable output
+sharedspaces send "Done" --space-id <guid> --json
+```
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `--space-id <guid>` | yes | ID of the space to send to |
+| `--ttl <seconds>` | no | Expire the message after this many seconds |
+| `--json` | no | Print the created item as JSON |
+
 ### `sharedspaces spaces`
 
 List all joined spaces. Also available as `sharedspaces list`.

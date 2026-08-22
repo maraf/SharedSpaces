@@ -20,7 +20,7 @@ Anonymous by design: users pick a display name when joining a space. No email, n
 - **JWT-based access** — Secure, token-based authentication with no expiration
 - **File + text sharing** — Upload files or post text snippets; quota enforced per space
 - **Admin controls** — Create spaces, generate invitations, manage content
-- **CLI tool** — Join spaces, upload files, and sync folders from the terminal
+- **CLI tool** — Join spaces, upload files, send messages, and sync folders from the terminal
 
 ## Screenshots
 
@@ -107,7 +107,7 @@ graph LR
 
 ## Command-Line Interface (CLI)
 
-The **SharedSpaces CLI** lets you join spaces, upload files, list spaces, and sync files — all from the terminal, no browser needed.
+The **SharedSpaces CLI** lets you join spaces, upload files, send messages, list spaces, and sync files — all from the terminal, no browser needed.
 
 ### Install
 
@@ -139,6 +139,12 @@ sharedspaces items --space-id 550e8400-e29b-41d4-a716-446655440000 --json
 sharedspaces upload myfile.txt --space-id 550e8400-e29b-41d4-a716-446655440000
 ```
 
+**Send a text message:**
+```bash
+sharedspaces send "Build finished" --space-id 550e8400-e29b-41d4-a716-446655440000
+sharedspaces send "Deploy started" --space-id 550e8400-e29b-41d4-a716-446655440000 --ttl 3600   # expires after 1 hour
+```
+
 **Sync a folder in real-time** (two-way: downloads from the server and uploads local changes):
 ```bash
 sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/shared
@@ -152,6 +158,7 @@ sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/sha
 | `spaces` | List all joined spaces (supports `--json` for machine-readable output) |
 | `items` | List all items in a space (`--space-id` required; supports `--json`) |
 | `upload <file>` | Upload a file to a space (`--space-id` required) |
+| `send [message]` | Send a text message to a space (`--space-id` required; `--ttl` to expire it; reads stdin when the message is omitted) |
 | `sync` | Two-way file sync between a space and a local folder (`--space-id`, `--folder` required; `--passive` for periodic polling instead of real-time SignalR) |
 
 ### How sync works
@@ -207,7 +214,7 @@ SharedSpaces/
 │   │       ├── lib/                  # SignalR client, API client, utilities
 │   │       └── index.ts
 │   ├── SharedSpaces.Cli/             # .NET global tool (CLI entry point)
-│   │   └── Commands/                 # join, spaces, items, upload, sync
+│   │   └── Commands/                 # join, spaces, items, upload, send, sync
 │   └── SharedSpaces.Cli.Core/        # Shared CLI library
 │       ├── Services/                 # API client, config, sync engine
 │       └── Models/                   # Config model, JWT-backed space entry
