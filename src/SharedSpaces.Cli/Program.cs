@@ -7,6 +7,7 @@ rootCommand.Add(JoinCommand.Create());
 rootCommand.Add(SpacesCommand.Create());
 rootCommand.Add(ItemsCommand.Create());
 rootCommand.Add(UploadCommand.Create());
+rootCommand.Add(SendCommand.Create());
 rootCommand.Add(SyncCommand.Create());
 
 return await CommandLineParser.Parse(rootCommand, args).InvokeAsync();
