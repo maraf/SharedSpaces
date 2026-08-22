@@ -22,6 +22,26 @@ A screenshot validation failure only means the rendered UI changed — it does n
 
 See `.github/skills/playwright-screenshots/SKILL.md` for full details on isolated DB setup, seeding, and viewport specs.
 
+## Agent Test State Setup
+
+When an AI agent needs realistic app state for development tests or browser verification, create that state through the public/admin HTTP APIs instead of editing SQLite directly. For normal development testing, use the default Aspire AppHost and development database:
+
+```bash
+cd src
+dotnet run AppHost.cs
+```
+
+Default local URLs are the Vite client at `http://localhost:5173` and the server at `http://localhost:5165`. Read the admin secret from `Admin:Secret` in `src/SharedSpaces.Server/appsettings.Development.json`. Use an isolated screenshot database only when capturing screenshots or running visual-regression scenarios that must be deterministic; see `.github/skills/playwright-screenshots/SKILL.md` for that workflow.
+
+Core state setup flows:
+
+- **Create a space:** use the admin API (`POST /v1/spaces`) with `X-Admin-Secret`.
+- **Join a user to a space:** create an invitation for that space (`POST /v1/spaces/{spaceId}/invitations`), extract the one-time PIN from the returned invitation string, then exchange it through `POST /v1/tokens` with a display name. Repeat this invitation/token flow for each member you need.
+- **Open the app as a joined user:** prefer the real join flow with `/?join=<invitationString>` and submit the display-name form. Only seed `localStorage["sharedspaces:tokens"]` and dispatch `view-change` directly for narrowly scoped tests where bypassing the join UI is intentional. The app uses event-based view switching; do not navigate to fake `/space` or `/admin` routes.
+- **Upload an item:** call `PUT /v1/spaces/{spaceId}/items/{itemId}` with the member JWT and `multipart/form-data`. Text items use fields `id`, `contentType=text`, and `content`; file items use fields `id`, `contentType=file`, and `file`. Add `ttlSeconds` when testing expiration behavior.
+- **Create a public shared link:** first upload an item, then call `POST /v1/spaces/{spaceId}/items/{itemId}/share/` with the member JWT. Public reads use `GET /v1/shared/{token}` and public file downloads use `GET /v1/shared/{token}/download`. Client share URLs are built by `src/SharedSpaces.Client/src/lib/share-link.ts`.
+- **Create other useful states:** delete items with `DELETE /v1/spaces/{spaceId}/items/{itemId}`, download member-visible files with `GET /v1/spaces/{spaceId}/items/{itemId}/download`, copy/move items with `POST /v1/spaces/{spaceId}/items/{itemId}/transfer`, and use the journal endpoints when testing sync checkpoints or deletion journal entries.
+
 ### Mobile Layout Checks
 
 After recapturing, inspect mobile screenshots (`390 × 844`) and call out:

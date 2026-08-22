@@ -84,7 +84,23 @@ graph LR
    cd SharedSpaces
    ```
 
-2. **Run the server:**
+2. **Run the app with Aspire AppHost (recommended):**
+   ```bash
+   cd src
+   dotnet run AppHost.cs
+   ```
+   Aspire starts both the ASP.NET Core server and the Vite client, wires the client URL into the server CORS configuration, and opens the Aspire Dashboard for logs and resource status. The client will be available at `http://localhost:5173`; check the Aspire Dashboard or terminal output for the server URL.
+
+3. **Connect the client to your server:**
+   - Open the client in your browser at `http://localhost:5173`.
+   - Use the client UI to add/connect to your server by entering its URL from Aspire.
+   - No environment variables are required for API routing; the server URL is chosen at runtime in the client.
+
+#### Direct startup fallback
+
+If you do not want to use Aspire, you can still run the server and client manually.
+
+1. **Run the server:**
    ```bash
    cd src/SharedSpaces.Server
    dotnet restore
@@ -92,7 +108,7 @@ graph LR
    ```
    The API will be available at `https://localhost:7218` (or `http://localhost:5165`). Check the terminal output for the exact URL.
 
-3. **Run the client (in a separate terminal):**
+2. **Run the client (in a separate terminal):**
    ```bash
    cd src/SharedSpaces.Client
    npm install
@@ -100,7 +116,7 @@ graph LR
    ```
    The client will be available at `http://localhost:5173`.
 
-4. **Connect the client to your server:**
+3. **Connect the client to your server:**
    - Open the client in your browser at `http://localhost:5173`.
    - Use the client UI to add/connect to your server by entering its URL (e.g., `https://localhost:7218`).
    - No environment variables are required for API routing; the server URL is chosen at runtime in the client.
@@ -237,4 +253,3 @@ The server and client are **fully decoupled**. The server is a pure API with no 
 - **Multi-server by default** — JWT claims include `server_url` so the client knows where to send requests
 
 For detailed architecture, domain model, and API behavior, explore the codebase — the code is the spec, and inline comments call out key design decisions.
-
