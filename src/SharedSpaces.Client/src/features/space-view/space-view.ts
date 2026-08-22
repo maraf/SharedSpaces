@@ -2470,9 +2470,11 @@ export class SpaceView extends BaseElement {
     if (!this.spaceId) return nothing;
     return html`
       <div data-testid="settings-space-id">
-        <p class="text-sm font-medium text-slate-200">Space Id</p>
-        <div class="mt-1 flex items-center gap-2">
-          <p class="min-w-0 flex-1 break-all font-mono text-xs text-slate-400">${this.spaceId}</p>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-200">Space Id</p>
+            <p class="break-all font-mono text-xs text-slate-400">${this.spaceId}</p>
+          </div>
           <copy-button
             .text=${this.spaceId ?? ''}
             label="Copy space Id"
