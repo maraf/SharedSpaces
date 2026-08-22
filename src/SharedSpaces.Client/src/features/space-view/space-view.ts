@@ -2473,9 +2473,7 @@ export class SpaceView extends BaseElement {
         <div class="flex items-center justify-between gap-4">
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium text-slate-200">Space Id</p>
-            <p
-              class="break-all font-mono text-xs text-slate-400 [-webkit-text-size-adjust:100%] [text-size-adjust:100%]"
-            >${this.spaceId}</p>
+            <p class="break-all font-mono text-xs text-slate-400">${this.spaceId}</p>
           </div>
           <copy-button
             .text=${this.spaceId ?? ''}
