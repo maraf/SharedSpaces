@@ -48,7 +48,7 @@ summary. Keep it under ~40 characters.
 
 ### 4. Persist the setup
 
-Write `{ "spaceId", "spaceName", "serverUrl", "workLabel" }` to
+Write `{ "spaceId", "workLabel" }` to
 `<artifacts_dir>/sharedspaces-notify.json` so setup isn't repeated later in the session.
 **Never write this into the repository.**
 
