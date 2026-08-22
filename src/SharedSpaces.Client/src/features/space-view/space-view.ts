@@ -25,6 +25,10 @@ import {
   deleteSharedLink,
   getJournal,
   updateJournalCheckpoint,
+  getWebPushPublicKey,
+  getWebPushSubscriptionStatus,
+  upsertWebPushSubscription,
+  unsubscribeWebPushSubscription,
   SpaceApiError,
   type JournalResponse,
   type SpaceItemResponse,
@@ -213,6 +217,9 @@ export class SpaceView extends BaseElement {
   @state() private leaveConfirm = false;
   @state() private journalSyncEnabled = false;
   @state() private journalSyncLoading = false;
+  @state() private pushNotificationsEnabled = false;
+  @state() private pushNotificationsLoading = false;
+  @state() private pushNotificationsSupported = false;
   @state() private cacheStorageStatus: StorageBudgetSnapshot | null = null;
   @state() private storagePersisted = false;
 
@@ -403,6 +410,7 @@ export class SpaceView extends BaseElement {
       this.refreshComposeItems(),
       this.loadPendingShares(),
       this.loadJournalSyncSetting(),
+      this.loadPushSubscriptionStatus(),
     ]);
 
     try {
@@ -448,6 +456,134 @@ export class SpaceView extends BaseElement {
       void this.refreshCacheStorageStatus();
     } else {
       this.cacheStorageStatus = null;
+    }
+  }
+
+  private canUsePushNotifications(): boolean {
+    return typeof window !== 'undefined'
+      && 'Notification' in window
+      && 'serviceWorker' in navigator
+      && 'PushManager' in window;
+  }
+
+  private async loadPushSubscriptionStatus() {
+    this.pushNotificationsSupported = this.canUsePushNotifications();
+    if (!this.pushNotificationsSupported || !this.serverUrl || !this.spaceId || !this.token) {
+      this.pushNotificationsEnabled = false;
+      return;
+    }
+
+    try {
+      const status = await getWebPushSubscriptionStatus(this.serverUrl, this.spaceId, this.token);
+      this.pushNotificationsEnabled = status.enabled;
+    } catch {
+      this.pushNotificationsEnabled = false;
+    }
+  }
+
+  private static decodeBase64Url(value: string): ArrayBuffer {
+    const normalized = value
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+      .padEnd(Math.ceil(value.length / 4) * 4, '=');
+    const decoded = atob(normalized);
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index++) {
+      bytes[index] = decoded.charCodeAt(index);
+    }
+    return bytes.buffer;
+  }
+
+  private static arrayBuffersEqual(left: ArrayBuffer | null, right: ArrayBuffer): boolean {
+    if (!left || left.byteLength !== right.byteLength) {
+      return false;
+    }
+
+    const leftBytes = new Uint8Array(left);
+    const rightBytes = new Uint8Array(right);
+    return leftBytes.every((value, index) => value === rightBytes[index]);
+  }
+
+  private async togglePushNotifications() {
+    if (!this.serverUrl || !this.spaceId || !this.token || !this.canUsePushNotifications()) {
+      return;
+    }
+
+    this.pushNotificationsLoading = true;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const existingSubscription = await registration.pushManager.getSubscription();
+
+      if (this.pushNotificationsEnabled) {
+        if (existingSubscription) {
+          const existing = existingSubscription.toJSON();
+          const p256Dh = existing.keys?.p256dh ?? '';
+          const auth = existing.keys?.auth ?? '';
+          if (existing.endpoint && p256Dh && auth) {
+            await unsubscribeWebPushSubscription(this.serverUrl, this.spaceId, this.token, {
+              endpoint: existing.endpoint,
+              keys: { p256Dh, auth },
+            });
+          }
+        }
+        this.pushNotificationsEnabled = false;
+        return;
+      }
+
+      if (Notification.permission === 'denied') {
+        this.syncMessage = 'Push notifications are blocked in browser settings.';
+        return;
+      }
+
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          this.syncMessage = 'Push notifications were not enabled.';
+          return;
+        }
+      }
+
+      const vapid = await getWebPushPublicKey(this.serverUrl, this.spaceId, this.token);
+      const applicationServerKey = SpaceView.decodeBase64Url(vapid.publicKey);
+
+      let subscription = existingSubscription;
+      if (
+        subscription
+        && !SpaceView.arrayBuffersEqual(subscription.options.applicationServerKey, applicationServerKey)
+      ) {
+        this.syncMessage =
+          'Push notifications are already registered for a different SharedSpaces server in this browser. Disable them there before enabling notifications for this server.';
+        return;
+      }
+
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      }
+
+      const serialized = subscription.toJSON();
+      const endpoint = serialized.endpoint ?? '';
+      const p256Dh = serialized.keys?.p256dh ?? '';
+      const auth = serialized.keys?.auth ?? '';
+
+      if (!endpoint || !p256Dh || !auth) {
+        this.syncMessage = 'Push subscription payload is incomplete.';
+        return;
+      }
+
+      await upsertWebPushSubscription(this.serverUrl, this.spaceId, this.token, {
+        endpoint,
+        keys: { p256Dh, auth },
+      });
+
+      this.pushNotificationsEnabled = true;
+    } catch (error) {
+      console.error('Failed to toggle push notifications:', error);
+      this.syncMessage = 'Failed to update push notifications.';
+    } finally {
+      this.pushNotificationsLoading = false;
     }
   }
 
@@ -668,6 +804,7 @@ export class SpaceView extends BaseElement {
       content: payload.content,
       fileSize: payload.fileSize,
       sharedAt: payload.sharedAt,
+      ttlSeconds: payload.ttlSeconds ?? null,
     };
 
     this.items = [newItem, ...this.items];
@@ -2162,6 +2299,28 @@ export class SpaceView extends BaseElement {
     }
   }
 
+  private formatTtl(ttlSeconds: number | null | undefined): string | null {
+    if (ttlSeconds === null || ttlSeconds === undefined || !Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+      return null;
+    }
+
+    let remaining = Math.floor(ttlSeconds);
+    const days = Math.floor(remaining / 86_400);
+    remaining -= days * 86_400;
+    const hours = Math.floor(remaining / 3_600);
+    remaining -= hours * 3_600;
+    const minutes = Math.floor(remaining / 60);
+    remaining -= minutes * 60;
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (remaining > 0 || parts.length === 0) parts.push(`${remaining}s`);
+
+    return parts.slice(0, 2).join(' ');
+  }
+
   // --- Rendering ---
 
   override render() {
@@ -2282,6 +2441,8 @@ export class SpaceView extends BaseElement {
         <hr class="border-slate-700" />
         ${this.renderSpaceId()}
         <hr class="border-slate-700" />
+        ${this.renderPushNotificationsToggle()}
+        <hr class="border-slate-700" />
         ${this.renderJournalSyncToggle()}
         <hr class="border-slate-700" />
         ${this.renderLeaveSpace()}
@@ -2356,6 +2517,52 @@ export class SpaceView extends BaseElement {
           </button>
         </div>
         ${this.journalSyncEnabled ? this.renderCacheUsage() : nothing}
+      </div>
+    `;
+  }
+
+  private renderPushNotificationsToggle() {
+    if (!this.pushNotificationsSupported) {
+      return html`
+        <div>
+          <p class="text-sm font-medium text-slate-200">Push Notifications</p>
+          <p class="text-xs text-slate-500 mt-1">
+            Not supported by this browser.
+          </p>
+        </div>
+      `;
+    }
+
+    return html`
+      <div>
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-200">
+              Push Notifications
+            </p>
+            <p class="text-xs text-slate-500">
+              Notify this browser when new items arrive in this space.
+            </p>
+          </div>
+          <button
+            @click=${this.togglePushNotifications}
+            ?disabled=${this.pushNotificationsLoading}
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${this
+              .pushNotificationsEnabled
+              ? 'bg-sky-600'
+              : 'bg-slate-700'}"
+            role="switch"
+            aria-checked=${this.pushNotificationsEnabled}
+            aria-label="Toggle push notifications"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${this
+                .pushNotificationsEnabled
+                ? 'translate-x-6'
+                : 'translate-x-1'}"
+            ></span>
+          </button>
+        </div>
       </div>
     `;
   }
@@ -2949,6 +3156,7 @@ export class SpaceView extends BaseElement {
   private renderTextContent(item: SpaceItemResponse) {
     const icon = getTextItemIcon();
     const isDeleting = this.deleteConfirmItemId === item.id;
+    const ttl = this.formatTtl(item.ttlSeconds);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -2965,6 +3173,7 @@ export class SpaceView extends BaseElement {
         </p>
         <p class="text-xs text-slate-500">
           <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
+          ${ttl ? html` · TTL ${ttl}` : nothing}
         </p>
       </div>
       <!-- Right: Actions -->
@@ -2993,6 +3202,7 @@ export class SpaceView extends BaseElement {
     const icon = getFileTypeIcon(item.content);
     const canPreview = isPreviewable(item.content);
     const isDeleting = this.deleteConfirmItemId === item.id;
+    const ttl = this.formatTtl(item.ttlSeconds);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -3011,7 +3221,7 @@ export class SpaceView extends BaseElement {
           : html`<p class="truncate text-sm font-medium text-slate-200" title=${item.content}>${item.content}</p>`
         }
         <p class="text-xs text-slate-500">
-          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
+          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>${ttl ? html` · TTL ${ttl}` : nothing}
         </p>
       </div>
       <!-- Right: Actions -->

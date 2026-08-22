@@ -24,6 +24,7 @@ export interface ItemAddedPayload {
   content: string;
   fileSize: number;
   sharedAt: string;
+  ttlSeconds?: number | null;
 }
 
 export interface ItemDeletedPayload {

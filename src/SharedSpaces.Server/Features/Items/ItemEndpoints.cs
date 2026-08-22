@@ -12,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using SharedSpaces.Server.Domain;
 using SharedSpaces.Server.Features.Hubs;
 using SharedSpaces.Server.Features.Journal;
+using SharedSpaces.Server.Features.Notifications;
 using SharedSpaces.Server.Features.Seeding;
 using SharedSpaces.Server.Features.Tokens;
 using SharedSpaces.Server.Infrastructure.FileStorage;
@@ -24,6 +25,7 @@ public static class ItemEndpoints
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SpaceQuotaLocks = new();
     private const int DefaultMaxTextContentBytes = 1_048_576;
     private const int DefaultMaxTextToFileThresholdBytes = 65_536;
+    private const int DefaultMaxTtlSeconds = 2_592_000;
 
     public static IEndpointRouteBuilder MapItemEndpoints(this IEndpointRouteBuilder app)
     {
@@ -85,6 +87,7 @@ public static class ItemEndpoints
             return Results.NotFound(new { Error = "Space not found" });
         }
 
+        var now = DateTime.UtcNow;
         var items = await db.SpaceItems
             .AsNoTracking()
             .Where(item => item.SpaceId == spaceId)
@@ -96,10 +99,11 @@ public static class ItemEndpoints
                 item.ContentType,
                 item.Content,
                 item.FileSize,
-                item.SharedAt))
+                item.SharedAt,
+                item.TtlSeconds))
             .ToListAsync(cancellationToken);
 
-        return Results.Ok(items);
+        return Results.Ok(items.Where(item => !SpaceItemExpiry.IsExpired(item.SharedAt, item.TtlSeconds, now)));
     }
 
     private static async Task<IResult> DownloadFile(
@@ -139,7 +143,9 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
+        IExpiredItemsWakeSignal wakeSignal,
         CancellationToken cancellationToken)
     {
         var authorizationResult = TryAuthorizeSpaceRequest(httpContext, spaceId, out var memberId);
@@ -175,6 +181,16 @@ public static class ItemEndpoints
         if (normalizedContentType is not ("text" or "file"))
         {
             return Results.BadRequest(new { Error = "ContentType must be either 'text' or 'file'" });
+        }
+
+        if (request.TtlSeconds is <= 0)
+        {
+            return Results.BadRequest(new { Error = "ttlSeconds must be greater than 0 when provided" });
+        }
+
+        if (request.TtlSeconds > DefaultMaxTtlSeconds)
+        {
+            return Results.BadRequest(new { Error = $"ttlSeconds must not exceed {DefaultMaxTtlSeconds}" });
         }
 
         var space = await db.Spaces
@@ -298,6 +314,7 @@ public static class ItemEndpoints
             item.ContentType = normalizedContentType;
             item.Content = content;
             item.FileSize = fileSize;
+            item.TtlSeconds = request.TtlSeconds;
             item.SharedAt = systemClock.UtcNow;
 
             if (existingItem is null)
@@ -305,6 +322,7 @@ public static class ItemEndpoints
                 db.SpaceItems.Add(item);
             }
 
+            var committed = false;
             try
             {
                 await db.SaveChangesAsync(cancellationToken);
@@ -313,30 +331,16 @@ public static class ItemEndpoints
                 {
                     await transaction.CommitAsync(cancellationToken);
                 }
-
-                if (existingItem is null)
-                {
-                    var itemAddedEvent = new ItemAddedEvent(
-                        item.Id,
-                        item.SpaceId,
-                        item.MemberId,
-                        displayName,
-                        item.ContentType,
-                        item.Content,
-                        item.FileSize,
-                        item.SharedAt);
-
-                    await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
-                }
+                committed = true;
             }
             catch (Exception exception)
             {
-                if (transaction is not null)
+                if (!committed && transaction is not null)
                 {
                     await transaction.RollbackAsync(cancellationToken);
                 }
 
-                if (normalizedContentType == "file" && existingItem is null)
+                if (!committed && normalizedContentType == "file" && existingItem is null)
                 {
                     try
                     {
@@ -349,6 +353,28 @@ public static class ItemEndpoints
 
                 ExceptionDispatchInfo.Capture(exception).Throw();
                 throw;
+            }
+
+            if (item.TtlSeconds is { } ttlSeconds)
+            {
+                wakeSignal.RequestWakeAt(item.SharedAt.AddSeconds(ttlSeconds));
+            }
+
+            if (existingItem is null)
+            {
+                var itemAddedEvent = new ItemAddedEvent(
+                    item.Id,
+                    item.SpaceId,
+                    item.MemberId,
+                    displayName,
+                    item.ContentType,
+                    item.Content,
+                    item.FileSize,
+                    item.SharedAt,
+                    item.TtlSeconds);
+
+                await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+                await webPushDeliveryService.NotifyItemCreatedAsync(item, displayName, cancellationToken);
             }
 
             if (wasFile && normalizedContentType != "file")
@@ -370,7 +396,8 @@ public static class ItemEndpoints
                 item.ContentType,
                 item.Content,
                 item.FileSize,
-                item.SharedAt);
+                item.SharedAt,
+                item.TtlSeconds);
 
             return existingItem is null
                 ? Results.Created($"/v1/spaces/{spaceId}/items/{item.Id}", response)
@@ -482,14 +509,28 @@ public static class ItemEndpoints
             var content = form.TryGetValue("content", out var contentValues)
                 ? contentValues.ToString()
                 : null;
+            var ttlSecondsValue = form.TryGetValue("ttlSeconds", out var ttlSecondsValues)
+                ? ttlSecondsValues.ToString()
+                : null;
             Guid.TryParse(idValue, out var id);
+            int? ttlSeconds = null;
+            if (!string.IsNullOrWhiteSpace(ttlSecondsValue))
+            {
+                if (!int.TryParse(ttlSecondsValue, out var parsedTtlSeconds))
+                {
+                    return (null, Results.BadRequest(new { Error = "ttlSeconds must be a valid integer" }));
+                }
+
+                ttlSeconds = parsedTtlSeconds;
+            }
 
             return (new UpsertSpaceItemRequest
             {
                 Id = id,
                 ContentType = contentType,
                 Content = content,
-                File = form.Files.GetFile("file")
+                File = form.Files.GetFile("file"),
+                TtlSeconds = ttlSeconds
             }, null);
         }
         catch (BadHttpRequestException)
@@ -511,7 +552,9 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
+        IExpiredItemsWakeSignal wakeSignal,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
         IHttpClientFactory httpClientFactory,
@@ -567,7 +610,7 @@ public static class ItemEndpoints
 
         return await TransferItemSameServer(
             spaceId, itemId, action, request.DestinationToken,
-            httpContext, db, fileStorage, storageOptions, hubNotifier, systemClock, configuration, journalOptions, cancellationToken);
+            httpContext, db, fileStorage, storageOptions, hubNotifier, webPushDeliveryService, systemClock, wakeSignal, configuration, journalOptions, cancellationToken);
     }
 
     private static bool IsSameServer(string sourceUrl, string? destinationUrl)
@@ -636,6 +679,10 @@ public static class ItemEndpoints
         using var formContent = new MultipartFormDataContent();
         formContent.Add(new StringContent(newItemId.ToString()), "id");
         formContent.Add(new StringContent(sourceItem.ContentType), "contentType");
+        if (sourceItem.TtlSeconds is not null)
+        {
+            formContent.Add(new StringContent(sourceItem.TtlSeconds.Value.ToString()), "ttlSeconds");
+        }
 
         if (isFile)
         {
@@ -766,7 +813,9 @@ public static class ItemEndpoints
         IFileStorage fileStorage,
         IOptions<StorageOptions> storageOptions,
         ISpaceHubNotifier hubNotifier,
+        IWebPushDeliveryService webPushDeliveryService,
         ISystemClock systemClock,
+        IExpiredItemsWakeSignal wakeSignal,
         IConfiguration configuration,
         IOptions<JournalOptions> journalOptions,
         CancellationToken cancellationToken)
@@ -846,6 +895,7 @@ public static class ItemEndpoints
 
         IAsyncDisposable? quotaLock = null;
         IDbContextTransaction? transaction = null;
+        var committed = false;
         var newItemId = Guid.NewGuid();
 
         try
@@ -893,6 +943,7 @@ public static class ItemEndpoints
                 ContentType = sourceItem.ContentType,
                 Content = sourceItem.Content,
                 FileSize = sourceItem.FileSize,
+                TtlSeconds = sourceItem.TtlSeconds,
                 SharedAt = systemClock.UtcNow
             };
 
@@ -944,6 +995,12 @@ public static class ItemEndpoints
             {
                 await transaction.CommitAsync(cancellationToken);
             }
+            committed = true;
+
+            if (destinationItem.TtlSeconds is { } destinationTtlSeconds)
+            {
+                wakeSignal.RequestWakeAt(destinationItem.SharedAt.AddSeconds(destinationTtlSeconds));
+            }
 
             // Broadcast ItemAdded to destination space
             var destinationDisplayName = destinationPrincipal.FindFirst(SpaceMemberClaimTypes.DisplayName)?.Value ?? string.Empty;
@@ -955,9 +1012,11 @@ public static class ItemEndpoints
                 destinationItem.ContentType,
                 destinationItem.Content,
                 destinationItem.FileSize,
-                destinationItem.SharedAt);
+                destinationItem.SharedAt,
+                destinationItem.TtlSeconds);
 
             await hubNotifier.NotifyItemAddedAsync(itemAddedEvent, cancellationToken);
+            await webPushDeliveryService.NotifyItemCreatedAsync(destinationItem, destinationDisplayName, cancellationToken);
 
             // Broadcast ItemDeleted to source space if move
             if (action == "move")
@@ -992,19 +1051,20 @@ public static class ItemEndpoints
                 destinationItem.ContentType,
                 destinationItem.Content,
                 destinationItem.FileSize,
-                destinationItem.SharedAt);
+                destinationItem.SharedAt,
+                destinationItem.TtlSeconds);
 
             return Results.Created($"/v1/spaces/{destinationSpaceId}/items/{newItemId}", response);
         }
         catch (Exception exception)
         {
-            if (transaction is not null)
+            if (!committed && transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
 
             // Clean up destination file on failure
-            if (isFile)
+            if (!committed && isFile)
             {
                 try
                 {

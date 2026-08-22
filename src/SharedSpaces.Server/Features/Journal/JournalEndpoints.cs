@@ -69,6 +69,7 @@ public static class JournalEndpoints
         }
         else
         {
+            var now = DateTime.UtcNow;
             addedOrUpdated = await db.SpaceItems
                 .AsNoTracking()
                 .Where(item => item.SpaceId == spaceId && item.SharedAt >= sinceUtc)
@@ -80,8 +81,12 @@ public static class JournalEndpoints
                     item.ContentType,
                     item.Content,
                     item.FileSize,
-                    item.SharedAt))
+                    item.SharedAt,
+                    item.TtlSeconds))
                 .ToArrayAsync(cancellationToken);
+            addedOrUpdated = addedOrUpdated
+                .Where(item => !SpaceItemExpiry.IsExpired(item.SharedAt, item.TtlSeconds, now))
+                .ToArray();
 
             deleted = await db.DeletedItems
                 .AsNoTracking()

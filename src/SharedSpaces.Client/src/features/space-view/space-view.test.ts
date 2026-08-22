@@ -181,6 +181,29 @@ describe('SpaceView - Deduplication Logic', () => {
     });
   });
 
+  describe('SpaceView - TTL metadata formatting', () => {
+    let element: SpaceView;
+
+    beforeEach(() => {
+      element = document.createElement('space-view') as SpaceView;
+    });
+
+    it('formats a 600 second TTL as 10m', () => {
+      expect((element as any).formatTtl(600)).toBe('10m');
+    });
+
+    it('formats mixed durations with two units', () => {
+      expect((element as any).formatTtl(3661)).toBe('1h 1m');
+    });
+
+    it('returns null when TTL is missing or invalid', () => {
+      expect((element as any).formatTtl(null)).toBeNull();
+      expect((element as any).formatTtl(undefined)).toBeNull();
+      expect((element as any).formatTtl(0)).toBeNull();
+      expect((element as any).formatTtl(-5)).toBeNull();
+    });
+  });
+
   describe('Scenario 2: SignalR event arrives BEFORE API response (race condition)', () => {
     it('does not duplicate item when SignalR event arrives before API response completes', async () => {
       // Mock API responses
@@ -1474,6 +1497,128 @@ describe('SpaceView - Journal Sync Verification', () => {
 
     pendingSyncs.shift()?.();
     await Promise.resolve();
+  });
+});
+
+describe('SpaceView - Push Notifications', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const token = 'test-jwt-token';
+  const vapidPublicKey = 'BAUG';
+
+  let element: SpaceView;
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockSubscribe: ReturnType<typeof vi.fn>;
+
+  function mockNotificationEnvironment(existingSubscription: unknown) {
+    mockSubscribe = vi.fn().mockResolvedValue(existingSubscription);
+
+    Object.defineProperty(window, 'Notification', {
+      value: {
+        permission: 'granted',
+        requestPermission: vi.fn().mockResolvedValue('granted'),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'Notification', {
+      value: window.Notification,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'PushManager', {
+      value: class PushManager {},
+      configurable: true,
+    });
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: {
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        ready: Promise.resolve({
+          pushManager: {
+            getSubscription: vi.fn().mockResolvedValue(existingSubscription),
+            subscribe: mockSubscribe,
+          },
+        }),
+      },
+      configurable: true,
+    });
+  }
+
+  function createPushSubscription(applicationServerKey: ArrayBuffer) {
+    return {
+      options: { applicationServerKey },
+      toJSON: () => ({
+        endpoint: 'https://push.example/subscription',
+        keys: {
+          p256dh: 'p256dh-key',
+          auth: 'auth-key',
+        },
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    element = document.createElement('space-view') as SpaceView;
+    element.serverUrl = serverUrl;
+    element.spaceId = spaceId;
+    (element as any).token = token;
+
+    mockFetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith('/push-subscriptions/vapid-public-key')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ publicKey: vapidPublicKey }),
+        };
+      }
+
+      return {
+        ok: true,
+        status: 204,
+        json: async () => ({}),
+      };
+    });
+    globalThis.fetch = mockFetch;
+  });
+
+  afterEach(() => {
+    element.remove();
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: undefined,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('does not reuse an existing browser push subscription created with a different VAPID key', async () => {
+    const existingSubscription = createPushSubscription(new Uint8Array([1, 2, 3]).buffer);
+    mockNotificationEnvironment(existingSubscription);
+
+    await (element as any).togglePushNotifications();
+
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0].toString()).toContain('/push-subscriptions/vapid-public-key');
+    expect((element as any).pushNotificationsEnabled).toBe(false);
+    expect((element as any).syncMessage).toBe(
+      'Push notifications are already registered for a different SharedSpaces server in this browser. Disable them there before enabling notifications for this server.',
+    );
+  });
+
+  it('reuses an existing browser push subscription when the VAPID key matches this server', async () => {
+    const existingSubscription = createPushSubscription(new Uint8Array([4, 5, 6]).buffer);
+    mockNotificationEnvironment(existingSubscription);
+
+    await (element as any).togglePushNotifications();
+
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0].toString()).toContain('/push-subscriptions/vapid-public-key');
+    expect(mockFetch.mock.calls[1][0].toString()).toBe(
+      `${serverUrl}/v1/spaces/${spaceId}/push-subscriptions`,
+    );
+    expect((element as any).pushNotificationsEnabled).toBe(true);
   });
 });
 
@@ -4823,6 +4968,7 @@ describe('SpaceView - Journal sync fallback on failure', () => {
         json: async () => ({ id: spaceId, name: 'Test Space' }),
       });
     });
+
     globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     document.body.appendChild(element);

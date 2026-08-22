@@ -8,6 +8,7 @@ public sealed class UpsertSpaceItemRequest
     public string ContentType { get; init; } = string.Empty;
     public string? Content { get; init; }
     public IFormFile? File { get; init; }
+    public int? TtlSeconds { get; init; }
 }
 
 public sealed record SpaceDetailsResponse(Guid Id, string Name, DateTime CreatedAt);
@@ -19,7 +20,8 @@ public sealed record SpaceItemResponse(
     string ContentType,
     string Content,
     long FileSize,
-    DateTime SharedAt);
+    DateTime SharedAt,
+    int? TtlSeconds = null);
 
 public sealed class TransferItemRequest
 {

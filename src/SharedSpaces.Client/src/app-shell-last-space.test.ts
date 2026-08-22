@@ -626,3 +626,133 @@ describe('AppShell - Auto-select Last Space (#104)', () => {
     });
   });
 });
+
+describe('AppShell - Notification click routing', () => {
+  const serverUrl = 'http://localhost:5000';
+  const spaceId = '550e8400-e29b-41d4-a716-446655440000';
+  const otherSpaceId = '660e8400-e29b-41d4-a716-446655440111';
+  const mockToken = '******';
+  const otherToken = '******-other';
+
+  let element: AppShell;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await tokenStorage.waitForTokenMirrorWritesForTests();
+    await tokenStorage.resetTokenStorageForTests();
+    localStorage.clear();
+    mockStoredAuthTokens.clear();
+    window.history.replaceState({}, '', '/');
+
+    mockJwtDecode.mockImplementation((token: string) =>
+      token === otherToken
+        ? {
+            sub: 'member-id',
+            server_url: serverUrl,
+            space_id: otherSpaceId,
+            space_name: 'Other Space',
+          }
+        : {
+            sub: 'member-id',
+            server_url: serverUrl,
+            space_id: spaceId,
+            space_name: 'Test Space',
+          });
+
+    mockParseInvitationFromUrl.mockReturnValue(null);
+  });
+
+  afterEach(async () => {
+    if (element?.parentNode) {
+      element.remove();
+    }
+    window.history.replaceState({}, '', '/');
+    await tokenStorage.waitForTokenMirrorWritesForTests();
+    await tokenStorage.resetTokenStorageForTests();
+    mockStoredAuthTokens.clear();
+    vi.restoreAllMocks();
+  });
+
+  describe('NAVIGATE_TO_SPACE message', () => {
+    it('selects the space named in the message', async () => {
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, otherSpaceId, otherToken);
+
+      element = document.createElement('app-shell') as AppShell;
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      (element as any).handleSwMessage({
+        data: { type: 'NAVIGATE_TO_SPACE', spaceId: otherSpaceId },
+      } as MessageEvent);
+
+      await vi.waitFor(() => {
+        expect((element as any).view).toBe('space');
+        expect((element as any).currentSpaceId).toBe(otherSpaceId);
+        expect((element as any).currentServerUrl).toBe(serverUrl);
+      });
+      // Navigating also updates the stored default for the next cold start.
+      expect(tokenStorage.getLastSelectedSpace()).toBe(`${serverUrl}:${otherSpaceId}`);
+    });
+
+    it('ignores an unknown space id', async () => {
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
+
+      element = document.createElement('app-shell') as AppShell;
+      document.body.appendChild(element);
+      await vi.waitFor(() => {
+        expect((element as any).currentSpaceId).toBe(spaceId);
+      });
+
+      (element as any).handleSwMessage({
+        data: { type: 'NAVIGATE_TO_SPACE', spaceId: 'not-a-known-space' },
+      } as MessageEvent);
+      await element.updateComplete;
+
+      expect((element as any).currentSpaceId).toBe(spaceId);
+    });
+  });
+
+  describe('cold start via ?space=', () => {
+    it('overrides the stored last-selected space', async () => {
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      await tokenStorage.setToken(serverUrl, otherSpaceId, otherToken);
+      tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
+
+      window.history.replaceState({}, '', `/?space=${otherSpaceId}`);
+
+      element = document.createElement('app-shell') as AppShell;
+      document.body.appendChild(element);
+
+      await vi.waitFor(() => {
+        expect((element as any).view).toBe('space');
+        expect((element as any).currentSpaceId).toBe(otherSpaceId);
+      });
+    });
+
+    it('strips the query param so a reload does not re-navigate', async () => {
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      window.history.replaceState({}, '', `/?space=${spaceId}`);
+
+      element = document.createElement('app-shell') as AppShell;
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      expect(window.location.search).toBe('');
+    });
+
+    it('falls back to the stored default for an unknown space id', async () => {
+      await tokenStorage.setToken(serverUrl, spaceId, mockToken);
+      tokenStorage.setLastSelectedSpace(serverUrl, spaceId);
+      window.history.replaceState({}, '', '/?space=not-a-known-space');
+
+      element = document.createElement('app-shell') as AppShell;
+      document.body.appendChild(element);
+
+      await vi.waitFor(() => {
+        expect((element as any).currentSpaceId).toBe(spaceId);
+      });
+    });
+  });
+});

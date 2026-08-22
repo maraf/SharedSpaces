@@ -8,7 +8,8 @@ public record ItemAddedEvent(
     string ContentType,
     string Content,
     long FileSize,
-    DateTime SharedAt);
+    DateTime SharedAt,
+    int? TtlSeconds = null);
 
 public record ItemDeletedEvent(
     Guid Id,
