@@ -18,15 +18,6 @@ body {
 }
 
 html {
-  /*
-   * Disable mobile browsers' automatic text-size inflation ("font boosting").
-   * Without this, long unbroken strings (e.g. the Space Id UUID) can be
-   * auto-enlarged on narrow viewports, blowing up the row's height even
-   * though the same layout renders correctly on desktop.
-   */
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-
   /* Reserve scrollbar space to prevent layout shift on platforms with non-overlay scrollbars */
   scrollbar-gutter: stable;
 }
