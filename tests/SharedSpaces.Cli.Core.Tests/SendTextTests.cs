@@ -63,9 +63,9 @@ public class SendTextTests
 
         await client.SendTextAsync(ServerUrl, SpaceId, ItemId, Token, "Build finished");
 
-        handler.Body.Should().Contain("name=id").And.Contain(ItemId);
-        handler.Body.Should().Contain("name=contentType").And.Contain("text");
-        handler.Body.Should().Contain("name=content").And.Contain("Build finished");
+        handler.FormFields.Should().Contain(new KeyValuePair<string, string>("id", ItemId));
+        handler.FormFields.Should().Contain(new KeyValuePair<string, string>("contentType", "text"));
+        handler.FormFields.Should().Contain(new KeyValuePair<string, string>("content", "Build finished"));
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class SendTextTests
 
         await client.SendTextAsync(ServerUrl, SpaceId, ItemId, Token, "Hello", ttlSeconds: 3600);
 
-        handler.Body.Should().Contain("name=ttlSeconds").And.Contain("3600");
+        handler.FormFields.Should().Contain(new KeyValuePair<string, string>("ttlSeconds", "3600"));
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class SendTextTests
 
         await client.SendTextAsync(ServerUrl, SpaceId, ItemId, Token, "Hello");
 
-        handler.Body.Should().NotContain("ttlSeconds");
+        handler.FormFields.Should().NotContainKey("ttlSeconds");
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class SendTextTests
         public string? Url { get; private set; }
         public string? AuthScheme { get; private set; }
         public string? AuthParameter { get; private set; }
-        public string Body { get; private set; } = string.Empty;
+        public Dictionary<string, string> FormFields { get; } = new();
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -152,9 +152,16 @@ public class SendTextTests
             AuthScheme = request.Headers.Authorization?.Scheme;
             AuthParameter = request.Headers.Authorization?.Parameter;
 
-            if (request.Content is not null)
+            if (request.Content is MultipartFormDataContent multipart)
             {
-                Body = await request.Content.ReadAsStringAsync(cancellationToken);
+                foreach (var part in multipart)
+                {
+                    var name = part.Headers.ContentDisposition?.Name?.Trim('"');
+                    if (name is not null)
+                    {
+                        FormFields[name] = await part.ReadAsStringAsync(cancellationToken);
+                    }
+                }
             }
 
             return new HttpResponseMessage(_status)
