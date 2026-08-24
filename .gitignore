@@ -24,3 +24,6 @@ build.log
 
 # MSBuild local build caches
 *.lscache
+
+# Playwright MCP tool output (screenshots/logs from ad-hoc browser automation)
+.playwright-mcp/
