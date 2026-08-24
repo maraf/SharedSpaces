@@ -253,7 +253,7 @@ async function postRegenerateComment(cwd, prNumber) {
 
 async function analyzeScreenshot(session, cwd, screenshotPath, before, after) {
     const ext = path.extname(screenshotPath) || ".png";
-    const mimeType = mimeFor(ext);
+    const mimeType = mimeFor(screenshotPath);
     const attachments = [];
     if (before) {
         attachments.push({ type: "blob", data: before.split(",")[1], mimeType, displayName: `before${ext}` });
