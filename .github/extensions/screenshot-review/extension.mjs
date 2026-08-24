@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
 
 const execFileAsync = promisify(execFile);
@@ -279,7 +280,7 @@ async function analyzeScreenshot(session, cwd, screenshotPath, before, after) {
         : "No analysis text was returned.";
 }
 
-function renderHtml() {
+function renderHtml(csrfToken) {
     return `<!doctype html>
 <html>
 <head>
@@ -366,6 +367,7 @@ function renderHtml() {
   <div id="content"><div class="empty">Loading&hellip;</div></div>
 
 <script>
+const CSRF_TOKEN = ${JSON.stringify(csrfToken)};
 const state = { data: null };
 
 async function loadData() {
@@ -391,19 +393,19 @@ function render() {
   }
 
   prMeta.innerHTML = '#' + d.pr.number + ' &middot; ' + escapeHtml(d.pr.title) +
-    ' &middot; <a href="' + d.pr.url + '" target="_blank">view on GitHub</a> &middot; ' + escapeHtml(d.pr.state);
+    ' &middot; <a href="' + escapeHtml(d.pr.url) + '" target="_blank" rel="noopener noreferrer">view on GitHub</a> &middot; ' + escapeHtml(d.pr.state);
 
   let html = '';
 
   const checkUrl = (d.ciStatus.checks || []).find((c) => c.url)?.url;
   const checkLink = checkUrl
-    ? '<a href="' + checkUrl + '" target="_blank" style="white-space:nowrap;">View check</a>'
+    ? '<a href="' + escapeHtml(checkUrl) + '" target="_blank" rel="noopener noreferrer" style="white-space:nowrap;">View check</a>'
     : '';
 
   if (d.regenerateRun && (d.regenerateRun.status === 'in_progress' || d.regenerateRun.status === 'queued')) {
     html += '<div class="banner" style="background:#1a2b3d;border-color:#58a6ff;">' +
       '<span><span class="spinner"></span> Regenerate screenshots workflow is running&hellip;</span>' +
-      '<a href="' + d.regenerateRun.url + '" target="_blank" style="white-space:nowrap;">View run</a>' +
+      '<a href="' + escapeHtml(d.regenerateRun.url) + '" target="_blank" rel="noopener noreferrer" style="white-space:nowrap;">View run</a>' +
       '</div>';
   }
 
@@ -523,7 +525,7 @@ async function onRegenerate() {
   btn.disabled = true;
   btn.textContent = 'Posting…';
   try {
-    const res = await fetch('/api/regenerate', { method: 'POST' });
+    const res = await fetch('/api/regenerate', { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN } });
     if (!res.ok) throw new Error(await res.text());
     btn.textContent = 'Comment posted ✓';
   } catch (err) {
@@ -542,7 +544,7 @@ async function onAnalyze(i) {
     const s = state.data.screenshots[i];
     const res = await fetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
       body: JSON.stringify({ path: s.path }),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -564,15 +566,33 @@ loadData();
 </html>`;
 }
 
+function isTrustedOrigin(req) {
+    // The server only binds to loopback and is meant to be talked to only by the
+    // canvas iframe it serves. Reject cross-origin POSTs (any Origin header from a
+    // different scheme/host/port, or a foreign Referer) to guard against another
+    // local page/process trying to trigger side effects via CSRF.
+    const origin = req.headers.origin;
+    if (origin && origin !== "null") {
+        try {
+            const originHost = new URL(origin).hostname;
+            if (originHost !== "127.0.0.1" && originHost !== "localhost") return false;
+        } catch {
+            return false;
+        }
+    }
+    return true;
+}
+
 async function startServer(instanceId, session, ctx) {
     const cwd = repoRootFor(ctx);
+    const csrfToken = crypto.randomBytes(24).toString("hex");
 
     const server = createServer(async (req, res) => {
         try {
             const url = new URL(req.url, "http://localhost");
             if (req.method === "GET" && url.pathname === "/") {
                 res.setHeader("Content-Type", "text/html; charset=utf-8");
-                res.end(renderHtml());
+                res.end(renderHtml(csrfToken));
                 return;
             }
             if (req.method === "GET" && url.pathname === "/api/data") {
@@ -580,6 +600,14 @@ async function startServer(instanceId, session, ctx) {
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify(data));
                 return;
+            }
+            if (req.method === "POST" && (url.pathname === "/api/regenerate" || url.pathname === "/api/analyze")) {
+                const validToken = req.headers["x-csrf-token"] === csrfToken;
+                if (!validToken || !isTrustedOrigin(req)) {
+                    res.statusCode = 403;
+                    res.end("Forbidden: missing or invalid CSRF token.");
+                    return;
+                }
             }
             if (req.method === "POST" && url.pathname === "/api/regenerate") {
                 const data = await gatherData(cwd);
