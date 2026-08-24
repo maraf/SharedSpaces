@@ -315,6 +315,13 @@ function renderHtml() {
     border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 16px; background: #161b22;
   }
   .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .card-header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .chevron-btn {
+    background: none; border: none; color: #9198a1; cursor: pointer; padding: 2px 4px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px;
+  }
+  .chevron-btn:hover { color: #c9d1d9; background: #30363d; }
+  .chevron { font-size: 10px; display: inline-block; }
   .card-path { font-family: ui-monospace, monospace; font-size: 12px; color: #c9d1d9; word-break: break-all; }
   .slider-wrap {
     position: relative; width: 100%; max-width: 640px; overflow: hidden;
@@ -436,6 +443,8 @@ function render() {
     setupSlider(i);
     const analyzeBtn = document.getElementById('analyze-btn-' + i);
     if (analyzeBtn) analyzeBtn.addEventListener('click', () => onAnalyze(i));
+    const toggleBtn = document.getElementById('toggle-btn-' + i);
+    if (toggleBtn) toggleBtn.addEventListener('click', () => toggleCard(i));
   });
 }
 
@@ -443,21 +452,39 @@ function renderCard(s, i) {
   const hasBefore = !!s.before;
   const after = s.after || '';
   const before = s.before || s.after || '';
-  return '<div class="card">' +
+  return '<div class="card" id="card-' + i + '">' +
     '<div class="card-header">' +
-      '<span class="card-path">' + escapeHtml(s.path) + '</span>' +
+      '<div class="card-header-left">' +
+        '<button class="chevron-btn" id="toggle-btn-' + i + '" aria-expanded="true" title="Collapse/expand">' +
+          '<span class="chevron" id="chevron-' + i + '">&#9660;</span>' +
+        '</button>' +
+        '<span class="card-path">' + escapeHtml(s.path) + '</span>' +
+      '</div>' +
       (hasBefore ? '' : '<span class="new-badge">new file</span>') +
     '</div>' +
-    '<div class="slider-wrap" id="slider-' + i + '">' +
-      '<img src="' + before + '" draggable="false" />' +
-      '<div class="after-layer" id="after-layer-' + i + '"><img src="' + after + '" draggable="false" /></div>' +
-      '<div class="handle" id="handle-' + i + '"></div>' +
+    '<div class="card-body" id="card-body-' + i + '">' +
+      '<div class="slider-wrap" id="slider-' + i + '">' +
+        '<img src="' + before + '" draggable="false" />' +
+        '<div class="after-layer" id="after-layer-' + i + '"><img src="' + after + '" draggable="false" /></div>' +
+        '<div class="handle" id="handle-' + i + '"></div>' +
+      '</div>' +
+      '<div class="row">' +
+        '<button class="btn secondary" id="analyze-btn-' + i + '">Analyze with AI</button>' +
+      '</div>' +
+      '<div class="analysis" id="analysis-' + i + '"></div>' +
     '</div>' +
-    '<div class="row">' +
-      '<button class="btn secondary" id="analyze-btn-' + i + '">Analyze with AI</button>' +
-    '</div>' +
-    '<div class="analysis" id="analysis-' + i + '"></div>' +
   '</div>';
+}
+
+function toggleCard(i) {
+  const body = document.getElementById('card-body-' + i);
+  const btn = document.getElementById('toggle-btn-' + i);
+  const chevron = document.getElementById('chevron-' + i);
+  if (!body || !btn || !chevron) return;
+  const collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  btn.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
+  chevron.innerHTML = collapsed ? '&#9660;' : '&#9654;';
 }
 
 function setupSlider(i) {
