@@ -453,7 +453,7 @@ export class AppShell extends BaseElement {
           <div class="flex min-h-svh flex-col bg-slate-950 text-slate-50">
             <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-8 sm:px-6">
               <div class="mb-8 text-center">
-                <p class="text-sm font-semibold uppercase tracking-[0.3em] text-violet-300">SharedSpaces</p>
+                <p class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300">SharedSpaces</p>
               </div>
               <div class="flex flex-1 flex-col items-center justify-start">
                 <div class="w-full max-w-md space-y-4 py-16 text-center">
@@ -485,7 +485,7 @@ export class AppShell extends BaseElement {
             <div class="flex items-center justify-between">
               <button
                 type="button"
-                class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-violet-300 cursor-pointer bg-transparent border-none p-0"
+                class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
                 @click=${() => { 
                   // Intentional de-select — clear last space to prevent auto-reconnect
                   if (this.view === 'space' && this.currentSpaceId) {
