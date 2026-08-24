@@ -312,9 +312,14 @@ function renderHtml() {
   .card-path { font-family: ui-monospace, monospace; font-size: 12px; color: #c9d1d9; word-break: break-all; }
   .slider-wrap {
     position: relative; width: 100%; max-width: 640px; overflow: hidden;
-    border: 1px solid #30363d; border-radius: 6px; user-select: none; background: #010409;
+    border: 1px solid #30363d; border-radius: 6px; background: #010409;
+    -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
   }
-  .slider-wrap img { display: block; width: 100%; height: auto; pointer-events: none; }
+  .slider-wrap img {
+    display: block; width: 100%; height: auto; pointer-events: none;
+    -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
+    -webkit-user-drag: none;
+  }
   .after-layer { position: absolute; top: 0; left: 0; height: 100%; overflow: hidden; }
   .after-layer img { width: var(--img-width, 640px); max-width: none; }
   .handle {
