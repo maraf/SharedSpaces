@@ -16,7 +16,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
 
 const execFileAsync = promisify(execFile);
@@ -253,18 +252,14 @@ async function postRegenerateComment(cwd, prNumber) {
 }
 
 async function analyzeScreenshot(session, cwd, screenshotPath, before, after) {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "screenshot-review-"));
     const ext = path.extname(screenshotPath) || ".png";
-    const beforePath = path.join(tmpDir, `before${ext}`);
-    const afterPath = path.join(tmpDir, `after${ext}`);
+    const mimeType = mimeFor(ext);
     const attachments = [];
     if (before) {
-        await fs.writeFile(beforePath, Buffer.from(before.split(",")[1], "base64"));
-        attachments.push({ type: "file", path: beforePath });
+        attachments.push({ type: "blob", data: before.split(",")[1], mimeType, displayName: `before${ext}` });
     }
     if (after) {
-        await fs.writeFile(afterPath, Buffer.from(after.split(",")[1], "base64"));
-        attachments.push({ type: "file", path: afterPath });
+        attachments.push({ type: "blob", data: after.split(",")[1], mimeType, displayName: `after${ext}` });
     }
 
     const prompt = before
@@ -277,20 +272,11 @@ async function analyzeScreenshot(session, cwd, screenshotPath, before, after) {
           `version exists). Briefly describe what it shows and flag any obvious layout issues, ` +
           `overflow, or broken rendering. Keep the answer under 100 words.`;
 
-    try {
-        const response = await session.sendAndWait({ prompt, attachments }, 180_000);
-        const content = response && response.data && response.data.content;
-        return typeof content === "string" && content.trim().length > 0
-            ? content.trim()
-            : "No analysis text was returned.";
-    } finally {
-        // The chat UI renders attachment thumbnails asynchronously by reading
-        // the file path after this call returns, so don't delete the temp
-        // files immediately — clean them up after a delay instead.
-        setTimeout(() => {
-            fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-        }, 5 * 60_000).unref?.();
-    }
+    const response = await session.sendAndWait({ prompt, attachments }, 180_000);
+    const content = response && response.data && response.data.content;
+    return typeof content === "string" && content.trim().length > 0
+        ? content.trim()
+        : "No analysis text was returned.";
 }
 
 function renderHtml() {
