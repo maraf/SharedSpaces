@@ -258,33 +258,38 @@ async function analyzeScreenshot(session, cwd, screenshotPath, before, after) {
     const beforePath = path.join(tmpDir, `before${ext}`);
     const afterPath = path.join(tmpDir, `after${ext}`);
     const attachments = [];
+    if (before) {
+        await fs.writeFile(beforePath, Buffer.from(before.split(",")[1], "base64"));
+        attachments.push({ type: "file", path: beforePath });
+    }
+    if (after) {
+        await fs.writeFile(afterPath, Buffer.from(after.split(",")[1], "base64"));
+        attachments.push({ type: "file", path: afterPath });
+    }
+
+    const prompt = before
+        ? `Compare these two screenshots of "${screenshotPath}" from the SharedSpaces app. ` +
+          `The first attachment is the "before" version and the second is the "after" version ` +
+          `from an open pull request. Describe the visual differences concisely (layout, spacing, ` +
+          `color, text, overflow, alignment). Call out anything that looks like a regression or a ` +
+          `bug versus an intentional change. Keep the answer under 150 words.`
+        : `This is a newly added screenshot "${screenshotPath}" in the SharedSpaces app (no "before" ` +
+          `version exists). Briefly describe what it shows and flag any obvious layout issues, ` +
+          `overflow, or broken rendering. Keep the answer under 100 words.`;
+
     try {
-        if (before) {
-            await fs.writeFile(beforePath, Buffer.from(before.split(",")[1], "base64"));
-            attachments.push({ type: "file", path: beforePath });
-        }
-        if (after) {
-            await fs.writeFile(afterPath, Buffer.from(after.split(",")[1], "base64"));
-            attachments.push({ type: "file", path: afterPath });
-        }
-
-        const prompt = before
-            ? `Compare these two screenshots of "${screenshotPath}" from the SharedSpaces app. ` +
-              `The first attachment is the "before" version and the second is the "after" version ` +
-              `from an open pull request. Describe the visual differences concisely (layout, spacing, ` +
-              `color, text, overflow, alignment). Call out anything that looks like a regression or a ` +
-              `bug versus an intentional change. Keep the answer under 150 words.`
-            : `This is a newly added screenshot "${screenshotPath}" in the SharedSpaces app (no "before" ` +
-              `version exists). Briefly describe what it shows and flag any obvious layout issues, ` +
-              `overflow, or broken rendering. Keep the answer under 100 words.`;
-
         const response = await session.sendAndWait({ prompt, attachments }, 180_000);
         const content = response && response.data && response.data.content;
         return typeof content === "string" && content.trim().length > 0
             ? content.trim()
             : "No analysis text was returned.";
     } finally {
-        await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        // The chat UI renders attachment thumbnails asynchronously by reading
+        // the file path after this call returns, so don't delete the temp
+        // files immediately — clean them up after a delay instead.
+        setTimeout(() => {
+            fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        }, 5 * 60_000).unref?.();
     }
 }
 
