@@ -1,7 +1,0 @@
-- generic [active] [ref=e1]:
-  - generic [ref=e2]:
-    - generic [ref=e3]:
-      - heading "Screenshot Review" [level=1] [ref=e4]
-      - generic [ref=e5]: Loading…
-    - button "Refresh" [ref=e6] [cursor=pointer]
-  - generic [ref=e7]: Loading…
