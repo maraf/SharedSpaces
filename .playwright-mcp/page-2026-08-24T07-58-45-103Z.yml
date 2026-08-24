@@ -1,0 +1,267 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - heading "Screenshot Review" [level=1] [ref=e4]
+      - generic [ref=e5]:
+        - text: "#220 · feat: add screenshot-review canvas extension ·"
+        - link "view on GitHub" [ref=e9] [cursor=pointer]:
+          - /url: https://github.com/maraf/SharedSpaces/pull/220
+        - text: · OPEN
+    - button "Refresh" [ref=e6] [cursor=pointer]
+  - generic [ref=e7]:
+    - generic [ref=e10]:
+      - generic [ref=e11]: docs/screenshots/admin-invitations--desktop.png
+      - generic [ref=e13]: ↔
+      - button "Analyze with AI" [ref=e17] [cursor=pointer]
+    - generic [ref=e18]:
+      - generic [ref=e19]: docs/screenshots/admin-invitations--mobile.png
+      - generic [ref=e21]: ↔
+      - button "Analyze with AI" [ref=e25] [cursor=pointer]
+    - generic [ref=e26]:
+      - generic [ref=e27]: docs/screenshots/admin-invite--desktop.png
+      - generic [ref=e29]: ↔
+      - button "Analyze with AI" [ref=e33] [cursor=pointer]
+    - generic [ref=e34]:
+      - generic [ref=e35]: docs/screenshots/admin-invite--mobile.png
+      - generic [ref=e37]: ↔
+      - button "Analyze with AI" [ref=e41] [cursor=pointer]
+    - generic [ref=e42]:
+      - generic [ref=e43]: docs/screenshots/admin-login--desktop.png
+      - generic [ref=e45]: ↔
+      - button "Analyze with AI" [ref=e49] [cursor=pointer]
+    - generic [ref=e50]:
+      - generic [ref=e51]: docs/screenshots/admin-login--mobile.png
+      - generic [ref=e53]: ↔
+      - button "Analyze with AI" [ref=e57] [cursor=pointer]
+    - generic [ref=e58]:
+      - generic [ref=e59]: docs/screenshots/admin-members--desktop.png
+      - generic [ref=e61]: ↔
+      - button "Analyze with AI" [ref=e65] [cursor=pointer]
+    - generic [ref=e66]:
+      - generic [ref=e67]: docs/screenshots/admin-members--mobile.png
+      - generic [ref=e69]: ↔
+      - button "Analyze with AI" [ref=e73] [cursor=pointer]
+    - generic [ref=e74]:
+      - generic [ref=e75]: docs/screenshots/admin-spaces--desktop.png
+      - generic [ref=e77]: ↔
+      - button "Analyze with AI" [ref=e81] [cursor=pointer]
+    - generic [ref=e82]:
+      - generic [ref=e83]: docs/screenshots/admin-spaces--mobile.png
+      - generic [ref=e85]: ↔
+      - button "Analyze with AI" [ref=e89] [cursor=pointer]
+    - generic [ref=e90]:
+      - generic [ref=e91]: docs/screenshots/home--desktop.png
+      - generic [ref=e93]: ↔
+      - button "Analyze with AI" [ref=e97] [cursor=pointer]
+    - generic [ref=e98]:
+      - generic [ref=e99]: docs/screenshots/home--mobile.png
+      - generic [ref=e101]: ↔
+      - button "Analyze with AI" [ref=e105] [cursor=pointer]
+    - generic [ref=e106]:
+      - generic [ref=e107]: docs/screenshots/home-empty--desktop.png
+      - generic [ref=e109]: ↔
+      - button "Analyze with AI" [ref=e113] [cursor=pointer]
+    - generic [ref=e114]:
+      - generic [ref=e115]: docs/screenshots/home-empty--mobile.png
+      - generic [ref=e117]: ↔
+      - button "Analyze with AI" [ref=e121] [cursor=pointer]
+    - generic [ref=e122]:
+      - generic [ref=e123]: docs/screenshots/join--desktop.png
+      - generic [ref=e125]: ↔
+      - button "Analyze with AI" [ref=e129] [cursor=pointer]
+    - generic [ref=e130]:
+      - generic [ref=e131]: docs/screenshots/join--mobile.png
+      - generic [ref=e133]: ↔
+      - button "Analyze with AI" [ref=e137] [cursor=pointer]
+    - generic [ref=e138]:
+      - generic [ref=e139]: docs/screenshots/join-error--desktop.png
+      - generic [ref=e141]: ↔
+      - button "Analyze with AI" [ref=e145] [cursor=pointer]
+    - generic [ref=e146]:
+      - generic [ref=e147]: docs/screenshots/join-error--mobile.png
+      - generic [ref=e149]: ↔
+      - button "Analyze with AI" [ref=e153] [cursor=pointer]
+    - generic [ref=e154]:
+      - generic [ref=e155]: docs/screenshots/join-prefilled--desktop.png
+      - generic [ref=e157]: ↔
+      - button "Analyze with AI" [ref=e161] [cursor=pointer]
+    - generic [ref=e162]:
+      - generic [ref=e163]: docs/screenshots/join-prefilled--mobile.png
+      - generic [ref=e165]: ↔
+      - button "Analyze with AI" [ref=e169] [cursor=pointer]
+    - generic [ref=e170]:
+      - generic [ref=e171]: docs/screenshots/mobile-bottom-sheet--mobile.png
+      - generic [ref=e173]: ↔
+      - button "Analyze with AI" [ref=e177] [cursor=pointer]
+    - generic [ref=e178]:
+      - generic [ref=e179]: docs/screenshots/pending-shares--desktop.png
+      - generic [ref=e181]: ↔
+      - button "Analyze with AI" [ref=e185] [cursor=pointer]
+    - generic [ref=e186]:
+      - generic [ref=e187]: docs/screenshots/pending-shares--mobile.png
+      - generic [ref=e189]: ↔
+      - button "Analyze with AI" [ref=e193] [cursor=pointer]
+    - generic [ref=e194]:
+      - generic [ref=e195]: docs/screenshots/shared-item-error--desktop.png
+      - generic [ref=e197]: ↔
+      - button "Analyze with AI" [ref=e201] [cursor=pointer]
+    - generic [ref=e202]:
+      - generic [ref=e203]: docs/screenshots/shared-item-error--mobile.png
+      - generic [ref=e205]: ↔
+      - button "Analyze with AI" [ref=e209] [cursor=pointer]
+    - generic [ref=e210]:
+      - generic [ref=e211]: docs/screenshots/space--desktop.png
+      - generic [ref=e213]: ↔
+      - button "Analyze with AI" [ref=e217] [cursor=pointer]
+    - generic [ref=e218]:
+      - generic [ref=e219]: docs/screenshots/space--mobile.png
+      - generic [ref=e221]: ↔
+      - button "Analyze with AI" [ref=e225] [cursor=pointer]
+    - generic [ref=e226]:
+      - generic [ref=e227]: docs/screenshots/space-compose-queue--desktop.png
+      - generic [ref=e229]: ↔
+      - button "Analyze with AI" [ref=e233] [cursor=pointer]
+    - generic [ref=e234]:
+      - generic [ref=e235]: docs/screenshots/space-compose-queue--mobile.png
+      - generic [ref=e237]: ↔
+      - button "Analyze with AI" [ref=e241] [cursor=pointer]
+    - generic [ref=e242]:
+      - generic [ref=e243]: docs/screenshots/space-config--desktop.png
+      - generic [ref=e245]: ↔
+      - button "Analyze with AI" [ref=e249] [cursor=pointer]
+    - generic [ref=e250]:
+      - generic [ref=e251]: docs/screenshots/space-config--mobile.png
+      - generic [ref=e253]: ↔
+      - button "Analyze with AI" [ref=e257] [cursor=pointer]
+    - generic [ref=e258]:
+      - generic [ref=e259]: docs/screenshots/space-dead-auth--desktop.png
+      - generic [ref=e261]: ↔
+      - button "Analyze with AI" [ref=e265] [cursor=pointer]
+    - generic [ref=e266]:
+      - generic [ref=e267]: docs/screenshots/space-dead-auth--mobile.png
+      - generic [ref=e269]: ↔
+      - button "Analyze with AI" [ref=e273] [cursor=pointer]
+    - generic [ref=e274]:
+      - generic [ref=e275]: docs/screenshots/space-delete-confirm--desktop.png
+      - generic [ref=e277]: ↔
+      - button "Analyze with AI" [ref=e281] [cursor=pointer]
+    - generic [ref=e282]:
+      - generic [ref=e283]: docs/screenshots/space-delete-confirm--mobile.png
+      - generic [ref=e285]: ↔
+      - button "Analyze with AI" [ref=e289] [cursor=pointer]
+    - generic [ref=e290]:
+      - generic [ref=e291]: docs/screenshots/space-empty--desktop.png
+      - generic [ref=e293]: ↔
+      - button "Analyze with AI" [ref=e297] [cursor=pointer]
+    - generic [ref=e298]:
+      - generic [ref=e299]: docs/screenshots/space-empty--mobile.png
+      - generic [ref=e301]: ↔
+      - button "Analyze with AI" [ref=e305] [cursor=pointer]
+    - generic [ref=e306]:
+      - generic [ref=e307]: docs/screenshots/space-file-preview-image--desktop.png
+      - generic [ref=e309]: ↔
+      - button "Analyze with AI" [ref=e313] [cursor=pointer]
+    - generic [ref=e314]:
+      - generic [ref=e315]: docs/screenshots/space-file-preview-image--mobile.png
+      - generic [ref=e317]: ↔
+      - button "Analyze with AI" [ref=e321] [cursor=pointer]
+    - generic [ref=e322]:
+      - generic [ref=e323]: docs/screenshots/space-file-preview-text--desktop.png
+      - generic [ref=e325]: ↔
+      - button "Analyze with AI" [ref=e329] [cursor=pointer]
+    - generic [ref=e330]:
+      - generic [ref=e331]: docs/screenshots/space-file-preview-text--mobile.png
+      - generic [ref=e333]: ↔
+      - button "Analyze with AI" [ref=e337] [cursor=pointer]
+    - generic [ref=e338]:
+      - generic [ref=e339]: docs/screenshots/space-kebab-menu--mobile.png
+      - generic [ref=e341]: ↔
+      - button "Analyze with AI" [ref=e345] [cursor=pointer]
+    - generic [ref=e346]:
+      - generic [ref=e347]: docs/screenshots/space-offline--desktop.png
+      - generic [ref=e349]: ↔
+      - button "Analyze with AI" [ref=e353] [cursor=pointer]
+    - generic [ref=e354]:
+      - generic [ref=e355]: docs/screenshots/space-offline--mobile.png
+      - generic [ref=e357]: ↔
+      - button "Analyze with AI" [ref=e361] [cursor=pointer]
+    - generic [ref=e362]:
+      - generic [ref=e363]: docs/screenshots/space-pending-uploads--desktop.png
+      - generic [ref=e365]: ↔
+      - button "Analyze with AI" [ref=e369] [cursor=pointer]
+    - generic [ref=e370]:
+      - generic [ref=e371]: docs/screenshots/space-pending-uploads--mobile.png
+      - generic [ref=e373]: ↔
+      - button "Analyze with AI" [ref=e377] [cursor=pointer]
+    - generic [ref=e378]:
+      - generic [ref=e379]: docs/screenshots/space-server-unreachable--desktop.png
+      - generic [ref=e381]: ↔
+      - button "Analyze with AI" [ref=e385] [cursor=pointer]
+    - generic [ref=e386]:
+      - generic [ref=e387]: docs/screenshots/space-server-unreachable--mobile.png
+      - generic [ref=e389]: ↔
+      - button "Analyze with AI" [ref=e393] [cursor=pointer]
+    - generic [ref=e394]:
+      - generic [ref=e395]: docs/screenshots/space-server-unreachable-with-pending--desktop.png
+      - generic [ref=e397]: ↔
+      - button "Analyze with AI" [ref=e401] [cursor=pointer]
+    - generic [ref=e402]:
+      - generic [ref=e403]: docs/screenshots/space-server-unreachable-with-pending--mobile.png
+      - generic [ref=e405]: ↔
+      - button "Analyze with AI" [ref=e409] [cursor=pointer]
+    - generic [ref=e410]:
+      - generic [ref=e411]: docs/screenshots/space-share-modal--desktop.png
+      - generic [ref=e413]: ↔
+      - button "Analyze with AI" [ref=e417] [cursor=pointer]
+    - generic [ref=e418]:
+      - generic [ref=e419]: docs/screenshots/space-share-modal--mobile.png
+      - generic [ref=e421]: ↔
+      - button "Analyze with AI" [ref=e425] [cursor=pointer]
+    - generic [ref=e426]:
+      - generic [ref=e427]: docs/screenshots/space-share-qr--desktop.png
+      - generic [ref=e429]: ↔
+      - button "Analyze with AI" [ref=e433] [cursor=pointer]
+    - generic [ref=e434]:
+      - generic [ref=e435]: docs/screenshots/space-share-qr--mobile.png
+      - generic [ref=e437]: ↔
+      - button "Analyze with AI" [ref=e441] [cursor=pointer]
+    - generic [ref=e442]:
+      - generic [ref=e443]: docs/screenshots/space-text-modal--desktop.png
+      - generic [ref=e445]: ↔
+      - button "Analyze with AI" [ref=e449] [cursor=pointer]
+    - generic [ref=e450]:
+      - generic [ref=e451]: docs/screenshots/space-text-modal--mobile.png
+      - generic [ref=e453]: ↔
+      - button "Analyze with AI" [ref=e457] [cursor=pointer]
+    - generic [ref=e458]:
+      - generic [ref=e459]: docs/screenshots/space-transfer-button--desktop.png
+      - generic [ref=e461]: ↔
+      - button "Analyze with AI" [ref=e465] [cursor=pointer]
+    - generic [ref=e466]:
+      - generic [ref=e467]: docs/screenshots/space-transfer-button--mobile.png
+      - generic [ref=e469]: ↔
+      - button "Analyze with AI" [ref=e473] [cursor=pointer]
+    - generic [ref=e474]:
+      - generic [ref=e475]: docs/screenshots/space-transfer-modal--desktop.png
+      - generic [ref=e477]: ↔
+      - button "Analyze with AI" [ref=e481] [cursor=pointer]
+    - generic [ref=e482]:
+      - generic [ref=e483]: docs/screenshots/space-transfer-modal--mobile.png
+      - generic [ref=e485]: ↔
+      - button "Analyze with AI" [ref=e489] [cursor=pointer]
+    - generic [ref=e490]:
+      - generic [ref=e491]: docs/screenshots/variants/final--desktop.png
+      - generic [ref=e493]: ↔
+      - button "Analyze with AI" [ref=e497] [cursor=pointer]
+    - generic [ref=e498]:
+      - generic [ref=e499]: docs/screenshots/variants/final-closed--mobile.png
+      - generic [ref=e501]: ↔
+      - button "Analyze with AI" [ref=e505] [cursor=pointer]
+    - generic [ref=e506]:
+      - generic [ref=e507]: docs/screenshots/variants/final-open--mobile.png
+      - generic [ref=e509]: ↔
+      - button "Analyze with AI" [ref=e513] [cursor=pointer]
+    - generic [ref=e514]:
+      - generic [ref=e515]: docs/screenshots/variants/final-space-10-items--mobile.png
+      - generic [ref=e517]: ↔
+      - button "Analyze with AI" [ref=e521] [cursor=pointer]

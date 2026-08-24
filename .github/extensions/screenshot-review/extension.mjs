@@ -75,10 +75,53 @@ async function readAtRevAsDataUri(cwd, rev, filePath) {
     }
 }
 
-/**
- * Gather PR info, CI status for the screenshot check, and before/after data
- * for every changed screenshot in the PR.
- */
+async function getRepoNameWithOwner(cwd) {
+    try {
+        const out = await run("gh", ["repo", "view", "--json", "nameWithOwner"], { cwd });
+        return JSON.parse(out).nameWithOwner;
+    } catch {
+        return null;
+    }
+}
+
+// Finds the most recent "Regenerate Screenshots" workflow run associated with
+// this PR. That workflow is triggered by `issue_comment`, which carries no
+// direct PR/run linkage in the API, but GitHub sets the run's `display_title`
+// to the PR title for issue_comment-triggered runs — so we match on that.
+async function getRegenerateRun(cwd, pr) {
+    const nameWithOwner = await getRepoNameWithOwner(cwd);
+    if (!nameWithOwner) return null;
+    try {
+        const out = await run(
+            "gh",
+            [
+                "api",
+                `repos/${nameWithOwner}/actions/workflows/screenshots-regenerate.yml/runs`,
+                "--jq",
+                ".workflow_runs[] | {id, status, conclusion, event, display_title, created_at, html_url}",
+            ],
+            { cwd },
+        );
+        const runs = out
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => JSON.parse(l))
+            .filter((r) => r.event === "issue_comment" && r.display_title === pr.title)
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        if (runs.length === 0) return null;
+        const latest = runs[0];
+        return {
+            status: latest.status, // queued | in_progress | completed
+            conclusion: latest.conclusion, // success | failure | ... | null
+            url: latest.html_url,
+            createdAt: latest.created_at,
+        };
+    } catch {
+        return null;
+    }
+}
+
+
 async function gatherData(cwd) {
     let pr;
     try {
@@ -141,6 +184,8 @@ async function gatherData(cwd) {
         screenshots.push({ path: file, before, after });
     }
 
+    const regenerateRun = await getRegenerateRun(cwd, pr);
+
     return {
         pr: {
             number: pr.number,
@@ -151,6 +196,7 @@ async function gatherData(cwd) {
             baseRefName: pr.baseRefName,
         },
         ciStatus,
+        regenerateRun,
         screenshots,
     };
 }
@@ -335,6 +381,13 @@ function render() {
   const checkLink = checkUrl
     ? '<a href="' + checkUrl + '" target="_blank" style="white-space:nowrap;">View check</a>'
     : '';
+
+  if (d.regenerateRun && (d.regenerateRun.status === 'in_progress' || d.regenerateRun.status === 'queued')) {
+    html += '<div class="banner" style="background:#1a2b3d;border-color:#58a6ff;">' +
+      '<span><span class="spinner"></span> Regenerate screenshots workflow is running&hellip;</span>' +
+      '<a href="' + d.regenerateRun.url + '" target="_blank" style="white-space:nowrap;">View run</a>' +
+      '</div>';
+  }
 
   if (d.ciStatus.state === 'failed') {
     const countText = typeof d.ciStatus.changedFileCount === 'number'
