@@ -309,14 +309,21 @@ function render() {
 
   let html = '';
 
+  const checkUrl = (d.ciStatus.checks || []).find((c) => c.url)?.url;
+  const checkLink = checkUrl
+    ? '<a href="' + checkUrl + '" target="_blank" style="white-space:nowrap;">View check</a>'
+    : '';
+
   if (d.ciStatus.state === 'failed') {
     html += '<div class="banner">' +
       '<span><strong>Screenshot check failed.</strong> The committed screenshots are out of date.</span>' +
-      '<button class="btn" id="regen-btn">Post /regenerate-screenshots</button>' +
+      '<div class="row" style="margin-top:0;">' + checkLink +
+      '<button class="btn" id="regen-btn">Post /regenerate-screenshots</button></div>' +
       '</div>';
   } else if (d.ciStatus.state === 'pending') {
     html += '<div class="banner" style="background:#3b2f1f;border-color:#d29922;">' +
-      '<span>Screenshot check is still running&hellip;</span></div>';
+      '<span>Screenshot check is still running&hellip;</span>' + checkLink +
+      '</div>';
   }
 
   if (!d.screenshots || d.screenshots.length === 0) {
