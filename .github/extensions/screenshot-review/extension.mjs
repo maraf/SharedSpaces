@@ -103,6 +103,9 @@ async function gatherData(cwd) {
         return CI_CHECK_NAME_RE.test(label);
     });
     const ciStatus = summarizeChecks(screenshotChecks);
+    if (ciStatus.state === "failed") {
+        ciStatus.changedFileCount = await getChangedFileCountFromFailedCheck(cwd, ciStatus.checks);
+    }
 
     // Changed files in the PR, filtered to screenshot images.
     let changedFiles = [];
@@ -163,6 +166,25 @@ function summarizeChecks(checks) {
     const pending = normalized.some((c) => ["PENDING", "IN_PROGRESS", "QUEUED", ""].includes(c.state));
     const state = failed ? "failed" : pending ? "pending" : "passed";
     return { state, checks: normalized };
+}
+
+// Extracts the "N files changed, ..." summary line git prints when the
+// verify-screenshots CI step fails, by pulling the failed job's log via `gh
+// run view --log-failed`. The job/run IDs are parsed out of the check's
+// `detailsUrl` (…/actions/runs/<runId>/job/<jobId>).
+async function getChangedFileCountFromFailedCheck(cwd, checks) {
+    const withUrl = checks.find((c) => c.url && /\/actions\/runs\/\d+\/job\/\d+/.test(c.url));
+    if (!withUrl) return null;
+    const match = withUrl.url.match(/\/actions\/runs\/(\d+)\/job\/(\d+)/);
+    if (!match) return null;
+    const [, runId, jobId] = match;
+    try {
+        const log = await run("gh", ["run", "view", runId, "--job", jobId, "--log-failed"], { cwd });
+        const fileMatch = log.match(/(\d+) files? changed/);
+        return fileMatch ? Number(fileMatch[1]) : null;
+    } catch {
+        return null;
+    }
 }
 
 async function postRegenerateComment(cwd, prNumber) {
@@ -315,8 +337,11 @@ function render() {
     : '';
 
   if (d.ciStatus.state === 'failed') {
+    const countText = typeof d.ciStatus.changedFileCount === 'number'
+      ? ' (' + d.ciStatus.changedFileCount + ' file' + (d.ciStatus.changedFileCount === 1 ? '' : 's') + ' changed)'
+      : '';
     html += '<div class="banner">' +
-      '<span><strong>Screenshot check failed.</strong> The committed screenshots are out of date.</span>' +
+      '<span><strong>Screenshot check failed.</strong> The committed screenshots are out of date' + countText + '.</span>' +
       '<div class="row" style="margin-top:0;">' + checkLink +
       '<button class="btn" id="regen-btn">Post /regenerate-screenshots</button></div>' +
       '</div>';
