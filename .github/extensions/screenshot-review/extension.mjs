@@ -146,6 +146,22 @@ async function gatherData(cwd) {
         return CI_CHECK_NAME_RE.test(label);
     });
     const ciStatus = summarizeChecks(screenshotChecks);
+
+    const regenerateRun = await getRegenerateRun(cwd, pr);
+
+    // The "Verify screenshots" check is only re-run when new commits land on
+    // the PR; posting `/regenerate-screenshots` pushes a commit from a
+    // separate workflow run, so the check doesn't restart immediately and can
+    // stay red even after screenshots were fixed. If a regenerate run started
+    // *after* the failing check and already succeeded, treat the check as
+    // stale/superseded rather than failed.
+    if (ciStatus.state === "failed" && regenerateRun && regenerateRun.status === "completed" && regenerateRun.conclusion === "success") {
+        const checkStartedAt = ciStatus.checks.map((c) => c.startedAt).filter(Boolean).sort()[0];
+        if (!checkStartedAt || new Date(regenerateRun.createdAt) > new Date(checkStartedAt)) {
+            ciStatus.state = "superseded";
+        }
+    }
+
     if (ciStatus.state === "failed") {
         ciStatus.changedFileCount = await getChangedFileCountFromFailedCheck(cwd, ciStatus.checks);
     }
@@ -184,8 +200,6 @@ async function gatherData(cwd) {
         screenshots.push({ path: file, before, after });
     }
 
-    const regenerateRun = await getRegenerateRun(cwd, pr);
-
     return {
         pr: {
             number: pr.number,
@@ -207,6 +221,7 @@ function summarizeChecks(checks) {
         name: c.name || c.context || c.workflowName || "Screenshots",
         state: (c.conclusion || c.state || "").toUpperCase(),
         url: c.detailsUrl || c.targetUrl || null,
+        startedAt: c.startedAt || null,
     }));
     const failed = normalized.some((c) => ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT"].includes(c.state));
     const pending = normalized.some((c) => ["PENDING", "IN_PROGRESS", "QUEUED", ""].includes(c.state));
@@ -406,6 +421,10 @@ function render() {
   } else if (d.ciStatus.state === 'pending') {
     html += '<div class="banner" style="background:#3b2f1f;border-color:#d29922;">' +
       '<span>Screenshot check is still running&hellip;</span>' + checkLink +
+      '</div>';
+  } else if (d.ciStatus.state === 'superseded') {
+    html += '<div class="banner" style="background:#132b1f;border-color:#3fb950;">' +
+      '<span><strong style="color:#7ee2a8;">Screenshots regenerated.</strong> The screenshot check is still showing red, but a newer regenerate run already succeeded &mdash; screenshots below reflect the latest commit.</span>' + checkLink +
       '</div>';
   }
 
