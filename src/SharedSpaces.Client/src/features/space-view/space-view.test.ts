@@ -202,6 +202,50 @@ describe('SpaceView - Deduplication Logic', () => {
       expect((element as any).formatTtl(0)).toBeNull();
       expect((element as any).formatTtl(-5)).toBeNull();
     });
+
+    it('formats the computed expiration time for TTL hover text', () => {
+      const item: SpaceItemResponse = {
+        id: 'ttl-item',
+        spaceId: 'space-1',
+        memberId: 'member-1',
+        contentType: 'text',
+        content: 'Expiring text',
+        fileSize: 0,
+        sharedAt: '2026-08-25T12:03:31.000Z',
+        ttlSeconds: 600,
+      };
+      const expectedExpiration = new Date('2026-08-25T12:13:31.000Z');
+
+      expect((element as any).formatTtlExpirationTitle(item)).toBe(
+        `Expires ${expectedExpiration.toLocaleString()}`,
+      );
+    });
+
+    it('renders the TTL label with the computed expiration as a title', async () => {
+      const item: SpaceItemResponse = {
+        id: 'ttl-item',
+        spaceId: 'space-1',
+        memberId: 'member-1',
+        contentType: 'text',
+        content: 'Expiring text',
+        fileSize: 0,
+        sharedAt: '2026-08-25T12:03:31.000Z',
+        ttlSeconds: 600,
+      };
+      const expectedExpiration = new Date('2026-08-25T12:13:31.000Z');
+
+      (element as any).isLoading = false;
+      (element as any).items = [item];
+      document.body.appendChild(element);
+      await element.updateComplete;
+
+      const ttlLabel = element.querySelector('time[title^="Expires "]');
+      expect(ttlLabel?.textContent).toBe('TTL 10m');
+      expect(ttlLabel?.getAttribute('datetime')).toBe(expectedExpiration.toISOString());
+      expect(ttlLabel?.getAttribute('title')).toBe(
+        `Expires ${expectedExpiration.toLocaleString()}`,
+      );
+    });
   });
 
   describe('Scenario 2: SignalR event arrives BEFORE API response (race condition)', () => {

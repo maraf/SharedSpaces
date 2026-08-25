@@ -2321,6 +2321,38 @@ export class SpaceView extends BaseElement {
     return parts.slice(0, 2).join(' ');
   }
 
+  private getTtlExpiration(item: SpaceItemResponse): Date | null {
+    if (item.ttlSeconds === null || item.ttlSeconds === undefined || !Number.isFinite(item.ttlSeconds) || item.ttlSeconds <= 0) {
+      return null;
+    }
+
+    const sharedAtMs = new Date(item.sharedAt).getTime();
+    if (Number.isNaN(sharedAtMs)) {
+      return null;
+    }
+
+    const expiresAt = new Date(sharedAtMs + item.ttlSeconds * 1000);
+    return Number.isNaN(expiresAt.getTime()) ? null : expiresAt;
+  }
+
+  private formatTtlExpirationTitle(item: SpaceItemResponse): string | null {
+    const expiresAt = this.getTtlExpiration(item);
+    return expiresAt ? `Expires ${expiresAt.toLocaleString()}` : null;
+  }
+
+  private renderTtlLabel(item: SpaceItemResponse) {
+    const ttl = this.formatTtl(item.ttlSeconds);
+    if (!ttl) return nothing;
+
+    const expiresAt = this.getTtlExpiration(item);
+    if (!expiresAt) {
+      return html` · <span>TTL ${ttl}</span>`;
+    }
+
+    const title = this.formatTtlExpirationTitle(item) ?? '';
+    return html` · <time datetime=${expiresAt.toISOString()} title=${title}>TTL ${ttl}</time>`;
+  }
+
   // --- Rendering ---
 
   override render() {
@@ -3158,7 +3190,6 @@ export class SpaceView extends BaseElement {
   private renderTextContent(item: SpaceItemResponse) {
     const icon = getTextItemIcon();
     const isDeleting = this.deleteConfirmItemId === item.id;
-    const ttl = this.formatTtl(item.ttlSeconds);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -3175,7 +3206,7 @@ export class SpaceView extends BaseElement {
         </p>
         <p class="text-xs text-slate-500">
           <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>
-          ${ttl ? html` · TTL ${ttl}` : nothing}
+          ${this.renderTtlLabel(item)}
         </p>
       </div>
       <!-- Right: Actions -->
@@ -3204,7 +3235,6 @@ export class SpaceView extends BaseElement {
     const icon = getFileTypeIcon(item.content);
     const canPreview = isPreviewable(item.content);
     const isDeleting = this.deleteConfirmItemId === item.id;
-    const ttl = this.formatTtl(item.ttlSeconds);
     return html`
       <!-- Left: Icon -->
       <div class="shrink-0 ${icon.colorClass}" aria-hidden="true">
@@ -3223,7 +3253,7 @@ export class SpaceView extends BaseElement {
           : html`<p class="truncate text-sm font-medium text-slate-200" title=${item.content}>${item.content}</p>`
         }
         <p class="text-xs text-slate-500">
-          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>${ttl ? html` · TTL ${ttl}` : nothing}
+          ${this.formatFileSize(item.fileSize)} · <time datetime=${item.sharedAt}>${this.formatTime(item.sharedAt)}</time>${this.renderTtlLabel(item)}
         </p>
       </div>
       <!-- Right: Actions -->
