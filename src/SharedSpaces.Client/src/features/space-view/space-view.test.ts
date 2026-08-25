@@ -221,7 +221,7 @@ describe('SpaceView - Deduplication Logic', () => {
       );
     });
 
-    it('renders the TTL label with the computed expiration as a title', async () => {
+    it('renders the TTL label with the computed expiration as a title and accessible label', async () => {
       const item: SpaceItemResponse = {
         id: 'ttl-item',
         spaceId: 'space-1',
@@ -244,6 +244,9 @@ describe('SpaceView - Deduplication Logic', () => {
       expect(ttlLabel?.getAttribute('datetime')).toBe(expectedExpiration.toISOString());
       expect(ttlLabel?.getAttribute('title')).toBe(
         `Expires ${expectedExpiration.toLocaleString()}`,
+      );
+      expect(ttlLabel?.getAttribute('aria-label')).toBe(
+        `TTL 10m, Expires ${expectedExpiration.toLocaleString()}`,
       );
     });
   });

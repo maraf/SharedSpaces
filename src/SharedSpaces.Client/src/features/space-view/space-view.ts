@@ -2350,7 +2350,12 @@ export class SpaceView extends BaseElement {
     }
 
     const title = this.formatTtlExpirationTitle(item) ?? '';
-    return html` · <time datetime=${expiresAt.toISOString()} title=${title}>TTL ${ttl}</time>`;
+    const label = `TTL ${ttl}, ${title}`;
+    return html` · <time
+      datetime=${expiresAt.toISOString()}
+      title=${title}
+      aria-label=${label}
+    >TTL ${ttl}</time>`;
   }
 
   // --- Rendering ---
