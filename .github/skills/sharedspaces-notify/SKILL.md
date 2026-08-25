@@ -26,6 +26,18 @@ sharedspaces --version
 If missing, tell the user to run `dotnet tool install --global SharedSpaces.Cli` (don't install it
 for them without asking).
 
+The CLI requires the **.NET 10 SDK** — having only the .NET 10 runtime is not enough, because
+`dotnet tool install` picks the tool asset based on the SDK version. On an older SDK the install
+fails with a misleading error:
+
+```
+The settings file in the tool's NuGet package is invalid:
+Settings file 'DotnetToolSettings.xml' was not found in the package.
+```
+
+That message means the SDK is too old, not that the package is broken. Tell the user to install
+the .NET 10 SDK and retry.
+
 ### 2. Pick a space
 
 ```bash

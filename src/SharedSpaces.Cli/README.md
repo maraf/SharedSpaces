@@ -8,6 +8,22 @@ A command-line tool for interacting with [SharedSpaces](https://github.com/maraf
 dotnet tool install --global SharedSpaces.Cli
 ```
 
+### Requirements
+
+The **.NET 10 SDK** is required. Installing only the .NET 10 runtime is not enough —
+`dotnet tool install` selects the tool asset based on your SDK version, so an older SDK
+(for example .NET 8) cannot install this package even when the .NET 10 runtime is present.
+
+On an older SDK the install fails with a misleading error:
+
+```
+The settings file in the tool's NuGet package is invalid:
+Settings file 'DotnetToolSettings.xml' was not found in the package.
+```
+
+That message means the SDK is too old, not that the package is broken. Install the
+[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and retry.
+
 ## Commands
 
 ### `sharedspaces join`
