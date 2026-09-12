@@ -62,13 +62,7 @@ public static class LeaveCommand
                 return;
             }
 
-            var spaceLabel = string.IsNullOrEmpty(spaceName) ? spaceId : $"\"{spaceName}\"";
-            var serverLabel = !string.IsNullOrEmpty(serverName)
-                ? $"{serverName} ({serverUrl})"
-                : serverUrl;
-            var location = string.IsNullOrEmpty(serverUrl) ? string.Empty : $" on {serverLabel}";
-
-            Console.WriteLine($"Left {spaceLabel}{location}. Items remain on the server.");
+            Console.WriteLine(FormatLeftMessage(spaceId, spaceName, serverUrl, serverName));
         }
         catch (JsonException ex)
         {
@@ -85,5 +79,21 @@ public static class LeaveCommand
             Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
             Environment.ExitCode = 1;
         }
+    }
+
+    /// <summary>
+    /// Builds the success message shown after leaving a space. The trailing reassurance that
+    /// items survive on the server is the only thing distinguishing this from a destructive
+    /// operation, so it must not be dropped — see <c>LeaveCommandTests</c>.
+    /// </summary>
+    public static string FormatLeftMessage(string spaceId, string spaceName, string serverUrl, string serverName)
+    {
+        var spaceLabel = string.IsNullOrEmpty(spaceName) ? spaceId : $"\"{spaceName}\"";
+        var serverLabel = !string.IsNullOrEmpty(serverName)
+            ? $"{serverName} ({serverUrl})"
+            : serverUrl;
+        var location = string.IsNullOrEmpty(serverUrl) ? string.Empty : $" on {serverLabel}";
+
+        return $"Left {spaceLabel}{location}. Items remain on the server.";
     }
 }
