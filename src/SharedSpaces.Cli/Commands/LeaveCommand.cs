@@ -19,25 +19,37 @@ public static class LeaveCommand
         {
             var spaceId = parseResult.GetRequiredValue(spaceIdOption);
             var json = parseResult.GetValue(jsonOption);
-            await HandleAsync(spaceId, json, ct);
+            var exitCode = await ExecuteAsync(new ConfigService(), spaceId, json, Console.Out, Console.Error, ct);
+            if (exitCode != 0)
+                Environment.ExitCode = exitCode;
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(string spaceId, bool json, CancellationToken ct)
+    public static async Task<int> ExecuteAsync(
+        ConfigService configService,
+        string spaceId,
+        bool json,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken ct)
     {
-        var configService = new ConfigService();
-
         try
         {
+            if (!Guid.TryParse(spaceId, out _))
+            {
+                error.WriteLine($"Error: Space ID '{spaceId}' must be a GUID.");
+                error.WriteLine("Run 'sharedspaces spaces' to list joined spaces.");
+                return 1;
+            }
+
             var space = await configService.GetSpaceAsync(spaceId, ct);
             if (space is null)
             {
-                Console.Error.WriteLine($"Error: No token found for space {spaceId}.");
-                Console.Error.WriteLine("Run 'sharedspaces spaces' to list joined spaces.");
-                Environment.ExitCode = 1;
-                return;
+                error.WriteLine($"Error: No token found for space {spaceId}.");
+                error.WriteLine("Run 'sharedspaces spaces' to list joined spaces.");
+                return 1;
             }
 
             var spaceName = space.SpaceName;
@@ -49,7 +61,7 @@ public static class LeaveCommand
 
             if (json)
             {
-                var output = new
+                var jsonOutput = new
                 {
                     left = true,
                     spaceId,
@@ -58,26 +70,27 @@ public static class LeaveCommand
                     serverUrl,
                     serverName = string.IsNullOrEmpty(serverName) ? null : serverName,
                 };
-                Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
-                return;
+                output.WriteLine(JsonSerializer.Serialize(jsonOutput, new JsonSerializerOptions { WriteIndented = true }));
+                return 0;
             }
 
-            Console.WriteLine(FormatLeftMessage(spaceId, spaceName, serverUrl, serverName));
+            output.WriteLine(FormatLeftMessage(spaceId, spaceName, serverUrl, serverName));
+            return 0;
         }
         catch (JsonException ex)
         {
-            Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
+            error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
+            return 1;
         }
         catch (IOException ex)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            error.WriteLine($"Error: {ex.Message}");
+            return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
-            Environment.ExitCode = 1;
+            error.WriteLine($"Error: Access denied — {ex.Message}");
+            return 1;
         }
     }
 
