@@ -82,4 +82,15 @@ public sealed class ConfigService
         config.Spaces.Add(entry);
         await SaveAsync(config, ct);
     }
+
+    public async Task<bool> RemoveSpaceAsync(string spaceId, CancellationToken ct = default)
+    {
+        var config = await LoadAsync(ct);
+        var removed = config.Spaces.RemoveAll(s => s.SpaceId.Equals(spaceId, StringComparison.OrdinalIgnoreCase));
+        if (removed == 0)
+            return false;
+
+        await SaveAsync(config, ct);
+        return true;
+    }
 }

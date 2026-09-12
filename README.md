@@ -166,11 +166,17 @@ sharedspaces send "Deploy started" --space-id 550e8400-e29b-41d4-a716-4466554400
 sharedspaces sync --space-id 550e8400-e29b-41d4-a716-446655440000 --folder ~/shared
 ```
 
+**Leave a space** (removes the local token only; items stay on the server):
+```bash
+sharedspaces leave --space-id 550e8400-e29b-41d4-a716-446655440000
+```
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `join <url>` | Exchange an invitation PIN for an access token and store it locally |
+| `leave` | Leave a space by removing its locally stored token (`--space-id` required; supports `--json`) |
 | `spaces` | List all joined spaces (supports `--json` for machine-readable output) |
 | `items` | List all items in a space (`--space-id` required; supports `--json`) |
 | `upload <file>` | Upload a file to a space (`--space-id` required) |

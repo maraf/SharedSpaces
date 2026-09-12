@@ -44,6 +44,26 @@ sharedspaces join "https://server.example.com|550e8400-e29b-41d4-a716-4466554400
 sharedspaces join "https://server.example.com|550e8400-e29b-41d4-a716-446655440000|123456" --display-name "Alice"
 ```
 
+### `sharedspaces leave`
+
+Leave a space you have joined. This removes the locally stored token for that space — your items
+stay on the server, and rejoining requires a new invitation PIN.
+
+```bash
+sharedspaces leave --space-id 550e8400-e29b-41d4-a716-446655440000
+
+# Machine-readable output
+sharedspaces leave --space-id 550e8400-e29b-41d4-a716-446655440000 --json
+```
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `--space-id <guid>` | yes | ID of the space to leave |
+| `--json` | no | Print the removed space as JSON |
+
+Use `sharedspaces spaces` to look up the space ID. Nothing is sent to the server — this only
+edits the local config.
+
 ### `sharedspaces upload`
 
 Upload a file to a space you have already joined.

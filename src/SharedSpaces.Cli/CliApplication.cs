@@ -10,6 +10,7 @@ public static class CliApplication
     {
         var rootCommand = new RootCommand("SharedSpaces CLI — join spaces and sync files");
         rootCommand.Add(JoinCommand.Create());
+        rootCommand.Add(LeaveCommand.Create());
         rootCommand.Add(SpacesCommand.Create());
         rootCommand.Add(ItemsCommand.Create());
         rootCommand.Add(UploadCommand.Create());
