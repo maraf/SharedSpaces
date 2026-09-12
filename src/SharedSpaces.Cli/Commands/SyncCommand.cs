@@ -27,26 +27,24 @@ public static class SyncCommand
             var passive = parseResult.GetValue(passiveOption);
             var interval = parseResult.GetValue(intervalOption);
             var intervalExplicit = parseResult.GetResult(intervalOption) is { Implicit: false };
-            await HandleAsync(spaceId, folder, passive, interval, intervalExplicit, ct);
+            return await HandleAsync(spaceId, folder, passive, interval, intervalExplicit, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(string spaceId, string folder, bool passive, int intervalSeconds, bool intervalExplicit, CancellationToken ct)
+    private static async Task<int> HandleAsync(string spaceId, string folder, bool passive, int intervalSeconds, bool intervalExplicit, CancellationToken ct)
     {
         if (intervalExplicit && !passive)
         {
             Console.Error.WriteLine("Error: --interval can only be used together with --passive.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (passive && intervalSeconds < 5)
         {
             Console.Error.WriteLine("Error: --interval must be at least 5 seconds.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         var configService = new ConfigService();
@@ -59,16 +57,14 @@ public static class SyncCommand
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (space is null)
         {
             Console.Error.WriteLine($"Error: No token found for space {spaceId}.");
             Console.Error.WriteLine("Run 'sharedspaces join' first to join the space.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         // Validate and create folder
@@ -83,8 +79,7 @@ public static class SyncCommand
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine($"Error: Invalid folder path — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         // Create and run sync service
@@ -103,31 +98,33 @@ public static class SyncCommand
         try
         {
             await syncService.RunAsync(ct);
+            return 0;
         }
         catch (HttpRequestException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
             Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (IOException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to parse server response — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (OperationCanceledException)
         {
             // Normal cancellation via Ctrl+C
             Console.WriteLine("\nSync stopped by user.");
+            return 0;
         }
     }
 }

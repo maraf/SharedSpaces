@@ -20,13 +20,13 @@ public static class ItemsCommand
         {
             var spaceId = parseResult.GetRequiredValue(spaceIdOption);
             var json = parseResult.GetValue(jsonOption);
-            await HandleAsync(spaceId, json, ct);
+            return await HandleAsync(spaceId, json, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(string spaceId, bool json, CancellationToken ct)
+    private static async Task<int> HandleAsync(string spaceId, bool json, CancellationToken ct)
     {
         var configService = new ConfigService();
         SpaceEntry? space;
@@ -38,16 +38,14 @@ public static class ItemsCommand
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (space is null)
         {
             Console.Error.WriteLine($"Error: No token found for space {spaceId}.");
             Console.Error.WriteLine("Run 'sharedspaces join' first to join the space.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         using var client = new SharedSpacesApiClient();
@@ -60,14 +58,12 @@ public static class ItemsCommand
         catch (HttpRequestException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to parse server response — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (json)
@@ -84,13 +80,13 @@ public static class ItemsCommand
                 ttlSeconds = i.TtlSeconds,
             });
             Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
-            return;
+            return 0;
         }
 
         if (items.Count == 0)
         {
             Console.WriteLine("No items in this space.");
-            return;
+            return 0;
         }
 
         const int idWidth = -36;
@@ -111,5 +107,7 @@ public static class ItemsCommand
             Console.WriteLine(
                 $"{item.Id.ToString(),idWidth}  {item.ContentType,typeWidth}  {content,contentWidth}  {item.FileSize.ToString(),sizeWidth}  {ttlDisplay,ttlWidth}  {item.SharedAt:yyyy-MM-dd HH:mm:ss}");
         }
+
+        return 0;
     }
 }

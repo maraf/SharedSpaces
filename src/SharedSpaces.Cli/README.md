@@ -158,3 +158,17 @@ Tokens are stored in `~/.sharedspaces/config.json`. Each entry contains only the
   ]
 }
 ```
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Command completed successfully. `sync` stopped with Ctrl+C also exits `0`. |
+| `1` | Command failed — invalid arguments, missing token, or a server/IO error. |
+| non-zero | Command-line parse errors (unknown command, missing required option). |
+
+This makes the CLI safe to chain in scripts and CI:
+
+```bash
+sharedspaces upload report.pdf --space-id "$SPACE_ID" && echo "uploaded"
+```

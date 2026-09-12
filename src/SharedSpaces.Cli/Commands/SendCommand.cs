@@ -30,19 +30,18 @@ public static class SendCommand
             var spaceId = parseResult.GetRequiredValue(spaceIdOption);
             var ttlSeconds = parseResult.GetValue(ttlSecondsOption);
             var json = parseResult.GetValue(jsonOption);
-            await HandleAsync(message, spaceId, ttlSeconds, json, ct);
+            return await HandleAsync(message, spaceId, ttlSeconds, json, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(string? message, string spaceId, int? ttlSeconds, bool json, CancellationToken ct)
+    private static async Task<int> HandleAsync(string? message, string spaceId, int? ttlSeconds, bool json, CancellationToken ct)
     {
         if (ttlSeconds is <= 0)
         {
             Console.Error.WriteLine("Error: --ttl must be greater than 0.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (message is null or "-")
@@ -53,8 +52,7 @@ public static class SendCommand
         if (string.IsNullOrWhiteSpace(message))
         {
             Console.Error.WriteLine("Error: message must not be empty.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         var configService = new ConfigService();
@@ -67,16 +65,14 @@ public static class SendCommand
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (space is null)
         {
             Console.Error.WriteLine($"Error: No token found for space {spaceId}.");
             Console.Error.WriteLine("Run 'sharedspaces join' first to join the space.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         var itemId = Guid.NewGuid().ToString();
@@ -111,21 +107,23 @@ public static class SendCommand
                 Console.WriteLine($"Sent message to space {spaceId}.");
                 Console.WriteLine($"Item ID: {response.Id}");
             }
+
+            return 0;
         }
         catch (HttpRequestException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
             Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to parse server response — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
     }
 }
