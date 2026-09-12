@@ -23,19 +23,18 @@ public static class UploadCommand
             var file = parseResult.GetRequiredValue(fileArg);
             var spaceId = parseResult.GetRequiredValue(spaceIdOption);
             var ttlSeconds = parseResult.GetValue(ttlSecondsOption);
-            await HandleAsync(file, spaceId, ttlSeconds, ct);
+            return await HandleAsync(file, spaceId, ttlSeconds, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(FileInfo file, string spaceId, int? ttlSeconds, CancellationToken ct)
+    private static async Task<int> HandleAsync(FileInfo file, string spaceId, int? ttlSeconds, CancellationToken ct)
     {
         if (ttlSeconds is <= 0)
         {
             Console.Error.WriteLine("Error: --ttl-seconds must be greater than 0.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         var configService = new ConfigService();
@@ -48,16 +47,14 @@ public static class UploadCommand
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to read CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         if (space is null)
         {
             Console.Error.WriteLine($"Error: No token found for space {spaceId}.");
             Console.Error.WriteLine("Run 'sharedspaces join' first to join the space.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         var itemId = Guid.NewGuid().ToString();
@@ -79,26 +76,27 @@ public static class UploadCommand
 
             Console.WriteLine($"Uploaded {file.Name} ({response.FileSize:N0} bytes).");
             Console.WriteLine($"Item ID: {response.Id}");
+            return 0;
         }
         catch (HttpRequestException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
             Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (IOException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to parse server response — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
     }
 }

@@ -24,13 +24,13 @@ public static class JoinCommand
             var url = parseResult.GetRequiredValue(urlArg);
             var pinOverride = parseResult.GetValue(pinOption);
             var displayName = parseResult.GetValue(displayNameOption);
-            await HandleAsync(url, pinOverride, displayName, ct);
+            return await HandleAsync(url, pinOverride, displayName, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(string url, string? pinOverride, string? displayName, CancellationToken ct)
+    private static async Task<int> HandleAsync(string url, string? pinOverride, string? displayName, CancellationToken ct)
     {
         var invitation = InvitationParser.Parse(url);
         if (invitation is null)
@@ -39,16 +39,14 @@ public static class JoinCommand
             Console.Error.WriteLine("Expected format: serverUrl|pin or serverUrl|spaceId[|pin]");
             Console.Error.WriteLine("            or: https://app.example.com/?join=serverUrl%7Cpin");
             Console.Error.WriteLine("Use --pin to provide the PIN separately when not embedded in the invite.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         var pin = pinOverride ?? invitation.Pin;
         if (string.IsNullOrEmpty(pin))
         {
             Console.Error.WriteLine("Error: No PIN provided. Use --pin or include it in the invite URL.");
-            Environment.ExitCode = 1;
-            return;
+            return 1;
         }
 
         displayName ??= Environment.UserName;
@@ -71,26 +69,27 @@ public static class JoinCommand
 
             Console.WriteLine($"Joined as \"{displayName}\".");
             Console.WriteLine($"Token stored in config.");
+            return 0;
         }
         catch (HttpRequestException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
             Console.Error.WriteLine($"Error: Access denied — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (IOException ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
         catch (JsonException ex)
         {
             Console.Error.WriteLine($"Error: Failed to write CLI config — {ex.Message}");
-            Environment.ExitCode = 1;
+            return 1;
         }
     }
 }

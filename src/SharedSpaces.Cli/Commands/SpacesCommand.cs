@@ -17,13 +17,13 @@ public static class SpacesCommand
         command.SetAction(async (parseResult, ct) =>
         {
             var json = parseResult.GetValue(jsonOption);
-            await HandleAsync(json, ct);
+            return await HandleAsync(json, ct);
         });
 
         return command;
     }
 
-    private static async Task HandleAsync(bool json, CancellationToken ct)
+    private static async Task<int> HandleAsync(bool json, CancellationToken ct)
     {
         var configService = new ConfigService();
         var config = await configService.LoadAsync(ct);
@@ -39,13 +39,13 @@ public static class SpacesCommand
                 spaceId = s.SpaceId,
             });
             Console.WriteLine(JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true }));
-            return;
+            return 0;
         }
 
         if (config.Spaces.Count == 0)
         {
             Console.WriteLine("No spaces joined. Use 'join' to connect to a space.");
-            return;
+            return 0;
         }
 
         const int nameWidth = -20;
@@ -65,5 +65,7 @@ public static class SpacesCommand
             Console.WriteLine(
                 $"{space.SpaceName,nameWidth}  {space.DisplayName,displayWidth}  {serverLabel,serverWidth}  {space.SpaceId}");
         }
+
+        return 0;
     }
 }
