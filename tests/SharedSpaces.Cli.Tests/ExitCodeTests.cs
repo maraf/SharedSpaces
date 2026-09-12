@@ -106,6 +106,15 @@ public class ExitCodeTests
     }
 
     [Fact]
+    public async Task Leave_WithNonGuidSpaceId_ReturnsOne()
+    {
+        var result = await CliRunner.RunAsync(["leave", "--space-id", "not-a-guid"]);
+
+        result.ExitCode.Should().Be(1);
+        result.StdErr.Should().Contain("must be a GUID");
+    }
+
+    [Fact]
     public async Task UnknownCommand_ReturnsNonZero()
     {
         var result = await CliRunner.RunAsync(["definitely-not-a-command"]);

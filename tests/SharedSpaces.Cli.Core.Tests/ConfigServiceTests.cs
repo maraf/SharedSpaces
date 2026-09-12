@@ -124,6 +124,57 @@ public class ConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveSpaceAsync_RemovesMatchingEntryAndKeepsOthers()
+    {
+        var target = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "User", "Notifications");
+        var other = CreateTestJwt("11111111-2222-3333-4444-555555555555", "https://other.example.com", "User", "Notifications");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = target });
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = other });
+
+        var removed = await _service.RemoveSpaceAsync("550e8400-e29b-41d4-a716-446655440000");
+
+        removed.Should().BeTrue();
+        var config = await _service.LoadAsync();
+        config.Spaces.Should().HaveCount(1);
+        config.Spaces[0].SpaceId.Should().Be("11111111-2222-3333-4444-555555555555");
+    }
+
+    [Fact]
+    public async Task RemoveSpaceAsync_CaseInsensitiveMatch()
+    {
+        var jwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "User");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = jwt });
+
+        var removed = await _service.RemoveSpaceAsync("550E8400-E29B-41D4-A716-446655440000");
+
+        removed.Should().BeTrue();
+        (await _service.LoadAsync()).Spaces.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RemoveSpaceAsync_NotFound_ReturnsFalseAndLeavesFileUntouched()
+    {
+        var jwt = CreateTestJwt("550e8400-e29b-41d4-a716-446655440000", "https://server.example.com", "User");
+        await _service.UpsertSpaceAsync(new SpaceEntry { JwtToken = jwt });
+        var configPath = Path.Combine(_tempDir, "config.json");
+        var before = await File.ReadAllTextAsync(configPath);
+
+        var removed = await _service.RemoveSpaceAsync("00000000-0000-0000-0000-000000000000");
+
+        removed.Should().BeFalse();
+        (await File.ReadAllTextAsync(configPath)).Should().Be(before);
+    }
+
+    [Fact]
+    public async Task RemoveSpaceAsync_NoConfigFile_ReturnsFalse()
+    {
+        var removed = await _service.RemoveSpaceAsync("550e8400-e29b-41d4-a716-446655440000");
+
+        removed.Should().BeFalse();
+        File.Exists(Path.Combine(_tempDir, "config.json")).Should().BeFalse();
+    }
+
+    [Fact]
     public void SpaceEntry_ExtractsClaimsFromJwt()
     {
         var jwt = CreateTestJwt(
