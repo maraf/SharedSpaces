@@ -2361,14 +2361,6 @@ export class SpaceView extends BaseElement {
   // --- Rendering ---
 
   override render() {
-    if (this.isLoading) {
-      return html`
-        <div class="flex w-full items-center justify-center py-16">
-          <p class="text-sm text-slate-400">Loading space…</p>
-        </div>
-      `;
-    }
-
     // Only block the view for auth errors (token revoked/invalid)
     if (this.errorMessage && this.connectionErrorType === 'auth') {
       return html`
@@ -2993,6 +2985,22 @@ export class SpaceView extends BaseElement {
   }
 
   private renderItemsList() {
+    if (this.isLoading) {
+      return html`
+        <section class="space-y-3">
+          <p
+            class="sticky z-10 bg-slate-950 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+            style="top: var(--header-height, 0px)"
+          >
+            Shared items
+          </p>
+          <div class="flex w-full items-center justify-center py-16">
+            <p class="text-sm text-slate-400">Loading items…</p>
+          </div>
+        </section>
+      `;
+    }
+
     // Show inline error if network error and no items loaded
     if (this.items.length === 0 && this.connectionErrorType === 'network') {
       return html`

@@ -4140,6 +4140,20 @@ describe('SpaceView - File Preview Modal', () => {
   // --- Loading state ---
 
   describe('loading state', () => {
+    it('shows create item form immediately while space items are loading below', async () => {
+      (element as any).isLoading = true;
+      document.body.appendChild(element);
+      (element as any).requestUpdate();
+      await element.updateComplete;
+
+      // Compose form (textarea and buttons) should be rendered
+      const textarea = element.querySelector('textarea[aria-label="Text to share"]');
+      expect(textarea).not.toBeNull();
+
+      // Items list section should show loading indicator
+      expect(element.innerHTML).toContain('Loading items…');
+    });
+
     it('shows loading indicator while file is being fetched', async () => {
       const item = makeItem({ content: 'photo.png', fileSize: 500 });
       (element as any).filePreviewItem = item;
