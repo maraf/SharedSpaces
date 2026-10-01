@@ -469,11 +469,13 @@ describe('SpaceView - Deduplication Logic', () => {
       });
 
       let callCount = 0;
-      mockFetch.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return upload1Promise;
-        if (callCount === 2) return upload2Promise;
-        if (callCount === 3) return upload3Promise;
+      mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          callCount++;
+          if (callCount === 1) return upload1Promise;
+          if (callCount === 2) return upload2Promise;
+          if (callCount === 3) return upload3Promise;
+        }
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -484,8 +486,11 @@ describe('SpaceView - Deduplication Logic', () => {
       // Mock crypto.randomUUID for predictable IDs
       const uuidMock = vi.spyOn(crypto, 'randomUUID');
       uuidMock
+        .mockReturnValueOnce('draft-1')
         .mockReturnValueOnce(file1Id)
+        .mockReturnValueOnce('draft-2')
         .mockReturnValueOnce(file2Id)
+        .mockReturnValueOnce('draft-3')
         .mockReturnValueOnce(file3Id);
 
       // Trigger file uploads
@@ -496,75 +501,64 @@ describe('SpaceView - Deduplication Logic', () => {
       ];
 
       (element as any).token = token;
-      const uploadPromise = (element as any).uploadFiles(mockFiles);
-
-      // Wait for pendingItemIds to be populated
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      (element as any).promptFilesForUpload(mockFiles);
+      const uploadPromise = (element as any).uploadComposeQueue();
 
       const pendingIds = (element as any).pendingItemIds as Set<string>;
-      expect(pendingIds.has(file1Id)).toBe(true);
+      await vi.waitFor(() => expect(pendingIds.has(file1Id)).toBe(true));
 
-      // Simulate SignalR events arriving before API responses
-      if (signalRItemAddedHandler) {
-        const payload1: ItemAddedPayload = {
-          id: file1Id,
-          spaceId,
-          memberId: 'member-1',
-          displayName: 'User 1',
-          contentType: 'file',
-          content: '/files/file1.txt',
-          fileSize: 1024,
-          sharedAt: file1.sharedAt,
-        };
+      // Exercise the same handler SignalR calls even when the mocked connection is not started.
+      const onItemAdded = (payload: ItemAddedPayload) => (element as any).handleItemAdded(payload);
+      const payload1: ItemAddedPayload = {
+        id: file1Id,
+        spaceId,
+        memberId: 'member-1',
+        displayName: 'User 1',
+        contentType: 'file',
+        content: '/files/file1.txt',
+        fileSize: 1024,
+        sharedAt: file1.sharedAt,
+      };
+      const payload2: ItemAddedPayload = {
+        id: file2Id,
+        spaceId,
+        memberId: 'member-1',
+        displayName: 'User 1',
+        contentType: 'file',
+        content: '/files/file2.txt',
+        fileSize: 2048,
+        sharedAt: file2.sharedAt,
+      };
+      const payload3: ItemAddedPayload = {
+        id: file3Id,
+        spaceId,
+        memberId: 'member-1',
+        displayName: 'User 1',
+        contentType: 'file',
+        content: '/files/file3.txt',
+        fileSize: 4096,
+        sharedAt: file3.sharedAt,
+      };
 
-        const payload2: ItemAddedPayload = {
-          id: file2Id,
-          spaceId,
-          memberId: 'member-1',
-          displayName: 'User 1',
-          contentType: 'file',
-          content: '/files/file2.txt',
-          fileSize: 2048,
-          sharedAt: file2.sharedAt,
-        };
+      // Each upload is sent in turn; ignore its SignalR event while its API response is pending.
+      onItemAdded(payload1);
+      expect((element as any).items).toHaveLength(0);
 
-        const payload3: ItemAddedPayload = {
-          id: file3Id,
-          spaceId,
-          memberId: 'member-1',
-          displayName: 'User 1',
-          contentType: 'file',
-          content: '/files/file3.txt',
-          fileSize: 4096,
-          sharedAt: file3.sharedAt,
-        };
-
-        // Send all SignalR events while uploads are pending
-        signalRItemAddedHandler(payload1);
-        signalRItemAddedHandler(payload2);
-        signalRItemAddedHandler(payload3);
-
-        await new Promise((resolve) => setTimeout(resolve, 10));
-
-        // Verify no items added yet (all blocked by pendingItemIds)
-        const itemsAfterSignalR = (element as any).items as SpaceItemResponse[];
-        expect(itemsAfterSignalR).toHaveLength(0);
-      }
-
-      // Complete API responses
       upload1Resolve!({
         ok: true,
         status: 200,
         json: async () => file1,
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await vi.waitFor(() => expect(pendingIds.has(file2Id)).toBe(true));
+      onItemAdded(payload2);
 
       upload2Resolve!({
         ok: true,
         status: 200,
         json: async () => file2,
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await vi.waitFor(() => expect(pendingIds.has(file3Id)).toBe(true));
+      onItemAdded(payload3);
 
       upload3Resolve!({
         ok: true,
@@ -573,7 +567,6 @@ describe('SpaceView - Deduplication Logic', () => {
       });
 
       await uploadPromise;
-      await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Verify all items added exactly once via API responses
       const itemsAfterUploads = (element as any).items as SpaceItemResponse[];
@@ -2441,8 +2434,7 @@ describe('SpaceView - Clipboard paste', () => {
     vi.restoreAllMocks();
   });
 
-  it('uploads pasted images through uploadFiles and generates fallback filenames', async () => {
-    const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+  it('stages pasted images without uploading and generates fallback filenames', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
     const unnamedImage = new File(['image-data'], '', { type: 'image/png' });
@@ -2453,16 +2445,15 @@ describe('SpaceView - Clipboard paste', () => {
     await (element as any).handleTextareaPaste(event);
 
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(uploadFilesSpy).toHaveBeenCalledOnce();
-
-    const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
-    expect(uploadedFiles).toHaveLength(1);
-    expect(uploadedFiles[0].name).toBe('pasted-image-1700000000000-1.png');
-    expect(uploadedFiles[0].type).toBe('image/png');
+    expect(mockFetch).not.toHaveBeenCalled();
+    const drafts = (element as any).draftEntries;
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].name).toBe('pasted-image-1700000000000-1.png');
+    expect(drafts[0].file.type).toBe('image/png');
+    expect((element as any).hasComposeQueue).toBe(true);
   });
 
   it('preserves named clipboard images and ignores non-image clipboard items', async () => {
-    const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
     vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
     const namedImage = new File(['image-data'], 'clipboard-photo.jpg', { type: 'image/jpeg' });
@@ -2478,18 +2469,34 @@ describe('SpaceView - Clipboard paste', () => {
     await (element as any).handleTextareaPaste(event);
 
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(uploadFilesSpy).toHaveBeenCalledOnce();
-
-    const uploadedFiles = uploadFilesSpy.mock.calls[0][0] as File[];
-    expect(uploadedFiles.map((file) => file.name)).toEqual([
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect((element as any).draftEntries.map((draft: { name: string }) => draft.name)).toEqual([
       'clipboard-photo.jpg',
       'pasted-image-1700000000000-2.png',
     ]);
   });
 
-  it('does not intercept regular text paste', async () => {
-    const uploadFilesSpy = vi.spyOn(element as any, 'uploadFiles').mockResolvedValue(undefined);
+  it('appends pasted images to picked files and lets users rename or remove them before sharing', async () => {
+    const pickedFile = new File(['picked'], 'picked.txt', { type: 'text/plain' });
+    (element as any).promptFilesForUpload([pickedFile]);
+    const pastedImage = new File(['image-data'], '', { type: 'image/png' });
+    const { event } = createPasteEvent([
+      { kind: 'file', type: 'image/png', file: pastedImage },
+    ]);
 
+    (element as any).handleTextareaPaste(event);
+
+    const drafts = (element as any).draftEntries;
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0].name).toBe('picked.txt');
+    (element as any).handleComposeNameInput(drafts[1].id, 'renamed.png');
+    expect((element as any).draftEntries[1].name).toBe('renamed.png');
+    (element as any).removeComposeEntryByUser(drafts[1].id);
+    expect((element as any).draftEntries.map((draft: { name: string }) => draft.name)).toEqual(['picked.txt']);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not intercept regular text paste', async () => {
     const { event, preventDefault } = createPasteEvent([
       { kind: 'string', type: 'text/plain' },
     ]);
@@ -2497,7 +2504,7 @@ describe('SpaceView - Clipboard paste', () => {
     await (element as any).handleTextareaPaste(event);
 
     expect(preventDefault).not.toHaveBeenCalled();
-    expect(uploadFilesSpy).not.toHaveBeenCalled();
+    expect((element as any).draftEntries).toHaveLength(0);
   });
 });
 

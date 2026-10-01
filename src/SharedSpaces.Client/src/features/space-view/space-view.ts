@@ -1728,19 +1728,12 @@ export class SpaceView extends BaseElement {
       .filter((file): file is File => file !== null);
   }
 
-  private handleTextareaPaste = async (event: ClipboardEvent) => {
+  private handleTextareaPaste = (event: ClipboardEvent) => {
     const imageFiles = this.getClipboardImageFiles(event);
-    if (
-      imageFiles.length === 0
-      || !this.serverUrl
-      || !this.spaceId
-      || !this.token
-    ) {
-      return;
-    }
+    if (imageFiles.length === 0) return;
 
     event.preventDefault();
-    await this.uploadFiles(normalizeClipboardImageFiles(imageFiles));
+    this.promptFilesForUpload(normalizeClipboardImageFiles(imageFiles));
   };
 
   private handleFileSelect = async (e: Event) => {
@@ -1807,75 +1800,6 @@ export class SpaceView extends BaseElement {
       input.click();
     }
   };
-
-  private async uploadFiles(files: File[]): Promise<number> {
-    if (!this.serverUrl || !this.spaceId || !this.token) return 0;
-
-    this.isUploading = true;
-    this.uploadError = '';
-    let processedCount = 0;
-
-    try {
-      for (const file of files) {
-        // If offline, queue for later
-        if (!navigator.onLine) {
-          const arrayBuffer = await file.arrayBuffer();
-          await this.enqueueForOffline('file', {
-            fileName: file.name,
-            fileType: file.type,
-            fileData: arrayBuffer,
-          });
-          processedCount++;
-          continue;
-        }
-
-        try {
-          const itemId = crypto.randomUUID();
-          this.pendingItemIds.add(itemId);
-          try {
-            const item = await shareFile(
-              this.serverUrl,
-              this.spaceId,
-              itemId,
-              file,
-              this.token,
-            );
-            this.items = [item, ...this.items];
-            processedCount++;
-          } finally {
-            this.pendingItemIds.delete(itemId);
-          }
-        } catch (error) {
-          // On network error, queue remaining files for offline
-          if (error instanceof SpaceApiError && !error.status) {
-            const arrayBuffer = await file.arrayBuffer();
-            await this.enqueueForOffline('file', {
-              fileName: file.name,
-              fileType: file.type,
-              fileData: arrayBuffer,
-            });
-            processedCount++;
-            continue;
-          }
-          throw error;
-        }
-      }
-      return processedCount;
-    } catch (error) {
-      if (error instanceof SpaceApiError && (error.status === 401 || error.status === 404)) {
-        this.connectionErrorType = 'auth';
-        this.errorMessage = 'Authentication failed. Your token may have been revoked or the space no longer exists.';
-        return processedCount;
-      }
-      this.uploadError =
-        error instanceof SpaceApiError
-          ? error.message
-          : 'Failed to upload file.';
-      return processedCount;
-    } finally {
-      this.isUploading = false;
-    }
-  }
 
   private handleDeleteRequest = (item: SpaceItemResponse) => {
     this.openMenuItemId = null;
