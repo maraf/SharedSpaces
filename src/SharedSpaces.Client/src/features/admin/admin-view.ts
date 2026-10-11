@@ -2,6 +2,8 @@ import { html, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
+import { exchangeToken } from '../../lib/api-client';
+import { parseInvitationString } from '../../lib/invitation';
 import {
   addAdminServerUrl,
   getAdminServerUrls,
@@ -68,6 +70,13 @@ export class AdminView extends BaseElement {
 
   @state() private spaceCardState: Record<string, SpaceCardState> = {};
   @state() private activeModal: ModalState = null;
+  @state() private jwtExchange = {
+    clientName: '',
+    token: '',
+    error: '',
+    isExchanging: false,
+    copied: false,
+  };
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     if (
@@ -82,6 +91,11 @@ export class AdminView extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     this.savedServerUrls = getAdminServerUrls();
+  }
+
+  override disconnectedCallback() {
+    this.clearModal();
+    super.disconnectedCallback();
   }
 
   private normalizeServerUrl(serverUrl: string) {
@@ -108,9 +122,13 @@ export class AdminView extends BaseElement {
 
   private sortMembers(members: MemberResponse[]) {
     return [...members].sort((a, b) => {
-      const displayNameCompare = a.displayName.localeCompare(b.displayName, undefined, {
-        sensitivity: 'base',
-      });
+      const displayNameCompare = a.displayName.localeCompare(
+        b.displayName,
+        undefined,
+        {
+          sensitivity: 'base',
+        },
+      );
       if (displayNameCompare !== 0) {
         return displayNameCompare;
       }
@@ -181,7 +199,11 @@ export class AdminView extends BaseElement {
     return nextState[spaceId];
   }
 
-  private getPendingState(record: Record<string, boolean>, key: string, isPending: boolean) {
+  private getPendingState(
+    record: Record<string, boolean>,
+    key: string,
+    isPending: boolean,
+  ) {
     if (isPending) {
       return { ...record, [key]: true };
     }
@@ -192,7 +214,9 @@ export class AdminView extends BaseElement {
   }
 
   private isCurrentSession(serverUrl: string, adminSecret: string) {
-    return this.adminServerUrl === serverUrl && this.adminSecret === adminSecret;
+    return (
+      this.adminServerUrl === serverUrl && this.adminSecret === adminSecret
+    );
   }
 
   private isUnauthorizedError(error: unknown) {
@@ -366,6 +390,7 @@ export class AdminView extends BaseElement {
   };
 
   private handleLogout = () => {
+    this.clearModal();
     const nextServerUrl = this.adminServerUrl ?? this.getDefaultServerUrl();
 
     this.adminSecret = null;
@@ -405,7 +430,11 @@ export class AdminView extends BaseElement {
 
   private handleCreateSpace = async (e: Event) => {
     e.preventDefault();
-    if (!this.newSpaceName.trim() || !this.adminSecret || !this.adminServerUrl) {
+    if (
+      !this.newSpaceName.trim() ||
+      !this.adminSecret ||
+      !this.adminServerUrl
+    ) {
       return;
     }
 
@@ -416,7 +445,10 @@ export class AdminView extends BaseElement {
     const maxUploadSize =
       quotaMb !== '' ? Math.round(parseFloat(quotaMb) * 1024 * 1024) : null;
 
-    if (maxUploadSize !== null && (!Number.isFinite(maxUploadSize) || maxUploadSize <= 0)) {
+    if (
+      maxUploadSize !== null &&
+      (!Number.isFinite(maxUploadSize) || maxUploadSize <= 0)
+    ) {
       this.errorMessage = 'Upload quota must be a positive number';
       return;
     }
@@ -425,7 +457,12 @@ export class AdminView extends BaseElement {
     this.errorMessage = '';
 
     try {
-      const space = await createSpace(serverUrl, adminSecret, this.newSpaceName, maxUploadSize);
+      const space = await createSpace(
+        serverUrl,
+        adminSecret,
+        this.newSpaceName,
+        maxUploadSize,
+      );
 
       if (!this.isCurrentSession(serverUrl, adminSecret)) {
         return;
@@ -449,10 +486,13 @@ export class AdminView extends BaseElement {
 
   private handleGenerateInvitation = async (spaceId: string) => {
     if (!this.adminSecret || !this.adminServerUrl) return;
+    if (this.jwtExchange.isExchanging || this.jwtExchange.token) return;
 
     const serverUrl = this.adminServerUrl;
     const adminSecret = this.adminSecret;
     const state = this.getSpaceCardState(spaceId);
+    if (state.isGeneratingInvitation) return;
+    const modal = this.activeModal;
 
     this.updateSpaceCardState(spaceId, {
       invitationGenerationError: '',
@@ -467,7 +507,10 @@ export class AdminView extends BaseElement {
         state.clientAppUrl.trim() || undefined,
       );
 
-      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+      if (
+        !this.isCurrentSession(serverUrl, adminSecret) ||
+        this.activeModal !== modal
+      ) {
         return;
       }
 
@@ -486,13 +529,18 @@ export class AdminView extends BaseElement {
         return;
       }
 
-      if (!this.isCurrentSession(serverUrl, adminSecret)) {
+      if (
+        !this.isCurrentSession(serverUrl, adminSecret) ||
+        this.activeModal !== modal
+      ) {
         return;
       }
 
       this.updateSpaceCardState(spaceId, {
         invitationGenerationError:
-          error instanceof Error ? error.message : 'Failed to generate invitation',
+          error instanceof Error
+            ? error.message
+            : 'Failed to generate invitation',
         isGeneratingInvitation: false,
       });
     }
@@ -731,7 +779,9 @@ export class AdminView extends BaseElement {
       const latestState = this.getSpaceCardState(spaceId);
       this.updateSpaceCardState(spaceId, {
         invitationsError:
-          error instanceof Error ? error.message : 'Failed to delete invitation',
+          error instanceof Error
+            ? error.message
+            : 'Failed to delete invitation',
         pendingInvitationDeletions: this.getPendingState(
           latestState.pendingInvitationDeletions,
           invitationId,
@@ -747,7 +797,93 @@ export class AdminView extends BaseElement {
     });
   };
 
-  private openModal(type: 'members' | 'invitations' | 'invite', spaceId: string) {
+  private handleExchangeInvitation = async (e: Event, spaceId: string) => {
+    e.preventDefault();
+    if (this.jwtExchange.isExchanging || this.jwtExchange.token) return;
+    const clientName = this.jwtExchange.clientName.trim();
+    if (!clientName || clientName.length > 100) {
+      this.jwtExchange = {
+        ...this.jwtExchange,
+        error: 'Enter a client name between 1 and 100 characters.',
+      };
+      return;
+    }
+    const invitation = this.getSpaceCardState(spaceId).generatedInvitation;
+    const parsed =
+      invitation && parseInvitationString(invitation.invitationString);
+    if (!parsed) {
+      this.jwtExchange = {
+        ...this.jwtExchange,
+        error: 'Invalid invitation. Generate a new invitation.',
+      };
+      return;
+    }
+    if (!this.adminServerUrl || !this.adminSecret) return;
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const modal = this.activeModal;
+    const pending = {
+      ...this.jwtExchange,
+      error: '',
+      copied: false,
+      isExchanging: true,
+    };
+    this.jwtExchange = pending;
+    try {
+      const response = await exchangeToken(serverUrl, parsed.pin, clientName);
+      if (
+        this.activeModal !== modal ||
+        this.jwtExchange !== pending ||
+        !this.isCurrentSession(serverUrl, adminSecret)
+      )
+        return;
+      this.jwtExchange = {
+        ...pending,
+        token: response.token,
+        isExchanging: false,
+      };
+      this.updateSpaceCardState(spaceId, { generatedInvitation: null });
+      void this.loadSpaceCollections(spaceId, serverUrl, adminSecret);
+    } catch (error) {
+      if (
+        this.activeModal !== modal ||
+        this.jwtExchange !== pending ||
+        !this.isCurrentSession(serverUrl, adminSecret)
+      )
+        return;
+      this.jwtExchange = {
+        ...pending,
+        isExchanging: false,
+        error: `${error instanceof Error ? error.message : 'Token exchange failed.'} If the server already consumed the PIN, the JWT cannot be recovered; generate a new invitation.`,
+      };
+    }
+  };
+
+  private handleCopyJwt = async () => {
+    const current = this.jwtExchange;
+    try {
+      await navigator.clipboard.writeText(current.token);
+      if (this.jwtExchange === current) {
+        this.jwtExchange = { ...current, copied: true, error: '' };
+      }
+    } catch {
+      if (this.jwtExchange === current) {
+        this.jwtExchange = {
+          ...current,
+          copied: false,
+          error:
+            'Failed to copy JWT. Select and copy the token manually before closing.',
+        };
+      }
+    }
+  };
+
+  private openModal(
+    type: 'members' | 'invitations' | 'invite',
+    spaceId: string,
+  ) {
+    if (this.jwtExchange.isExchanging) return;
+    this.clearModal();
     if (type === 'invite') {
       this.updateSpaceCardState(spaceId, {
         generatedInvitation: null,
@@ -763,12 +899,31 @@ export class AdminView extends BaseElement {
   }
 
   private closeModal = () => {
+    if (this.jwtExchange.isExchanging) return;
+    this.clearModal();
+  };
+
+  private clearModal() {
+    if (this.activeModal?.type === 'invite') {
+      this.updateSpaceCardState(this.activeModal.spaceId, {
+        generatedInvitation: null,
+        isGeneratingInvitation: false,
+        invitationGenerationError: '',
+      });
+    }
     if (this.handleEscapeKey) {
       document.removeEventListener('keydown', this.handleEscapeKey);
       this.handleEscapeKey = null;
     }
     this.activeModal = null;
-  };
+    this.jwtExchange = {
+      clientName: '',
+      token: '',
+      error: '',
+      isExchanging: false,
+      copied: false,
+    };
+  }
 
   private handleEscapeKey: ((e: KeyboardEvent) => void) | null = null;
 
@@ -785,8 +940,7 @@ export class AdminView extends BaseElement {
 
     return html`
       <div class="space-y-4">
-        ${this.renderConnectionCard()}
-        ${this.renderCreateSpaceForm()}
+        ${this.renderConnectionCard()} ${this.renderCreateSpaceForm()}
         ${this.spaces.map((space) => this.renderSpaceCard(space))}
       </div>
       ${this.activeModal ? this.renderModal() : null}
@@ -818,7 +972,9 @@ export class AdminView extends BaseElement {
                   type="text"
                   .value=${this.serverUrlInput}
                   @input=${(e: InputEvent) =>
-                    (this.serverUrlInput = (e.target as HTMLInputElement).value)}
+                    (this.serverUrlInput = (
+                      e.target as HTMLInputElement
+                    ).value)}
                   @focus=${this.handleUrlInputFocus}
                   @blur=${this.handleUrlInputBlur}
                   placeholder="https://api.example.com"
@@ -843,7 +999,8 @@ export class AdminView extends BaseElement {
                               </button>
                               <button
                                 type="button"
-                                @click=${(e: Event) => this.handleUrlRemove(e, url)}
+                                @click=${(e: Event) =>
+                                  this.handleUrlRemove(e, url)}
                                 class="px-3 py-3 text-slate-400 hover:text-red-400"
                                 title="Remove from history"
                                 aria-label=${`Remove ${url} from history`}
@@ -890,7 +1047,9 @@ export class AdminView extends BaseElement {
 
           <button
             type="submit"
-            ?disabled=${this.isConnecting || !this.secretInput.trim() || !this.serverUrlInput.trim()}
+            ?disabled=${this.isConnecting ||
+            !this.secretInput.trim() ||
+            !this.serverUrlInput.trim()}
             class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             ${this.isConnecting ? 'Connecting...' : 'Continue'}
@@ -907,7 +1066,9 @@ export class AdminView extends BaseElement {
       >
         <p class="min-w-0 truncate text-sm text-slate-400">
           Connected to
-          <span class="font-mono text-xs text-slate-300">${this.adminServerUrl}</span>
+          <span class="font-mono text-xs text-slate-300"
+            >${this.adminServerUrl}</span
+          >
         </p>
         <div class="flex shrink-0 gap-2">
           <button
@@ -996,7 +1157,10 @@ export class AdminView extends BaseElement {
             Created ${this.formatDate(space.createdAt)}
           </p>
           <p class="text-xs text-slate-500">
-            Upload quota: ${this.formatBytesAsMb(space.effectiveMaxUploadSize)}${space.maxUploadSize == null ? ' (default)' : ''}
+            Upload quota:
+            ${this.formatBytesAsMb(
+              space.effectiveMaxUploadSize,
+            )}${space.maxUploadSize == null ? ' (default)' : ''}
           </p>
         </div>
 
@@ -1069,11 +1233,16 @@ export class AdminView extends BaseElement {
           aria-labelledby="modal-title"
           class="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
         >
-          <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
-            <h3 id="modal-title" class="text-sm font-semibold text-white">${title}</h3>
+          <div
+            class="flex items-center justify-between border-b border-slate-800 px-5 py-4"
+          >
+            <h3 id="modal-title" class="text-sm font-semibold text-white">
+              ${title}
+            </h3>
             <button
               type="button"
               @click=${this.closeModal}
+              ?disabled=${this.jwtExchange.isExchanging}
               aria-label="Close dialog"
               class="rounded-full p-1 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
             >
@@ -1081,9 +1250,7 @@ export class AdminView extends BaseElement {
             </button>
           </div>
 
-          <div class="max-h-[75vh] overflow-y-auto px-5 py-4">
-            ${content}
-          </div>
+          <div class="max-h-[75vh] overflow-y-auto px-5 py-4">${content}</div>
         </div>
       </div>
     `;
@@ -1096,7 +1263,9 @@ export class AdminView extends BaseElement {
 
     if (state.membersError) {
       return html`
-        <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+        <div
+          class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+        >
           ${state.membersError}
         </div>
       `;
@@ -1110,10 +1279,13 @@ export class AdminView extends BaseElement {
       <div class="divide-y divide-slate-800">
         ${state.members.map((member) => {
           const isRevokePending = !!state.pendingMemberRevocations[member.id];
-          const isUnrevokePending = !!state.pendingMemberUnrevocations[member.id];
+          const isUnrevokePending =
+            !!state.pendingMemberUnrevocations[member.id];
           const isRemovePending = !!state.pendingMemberRemovals[member.id];
           return html`
-            <div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div
+              class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+            >
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <p
@@ -1134,7 +1306,9 @@ export class AdminView extends BaseElement {
                     : null}
                 </div>
                 <p class="text-xs text-slate-500">
-                  Joined ${this.formatDate(member.joinedAt)} · ${member.itemCount} ${member.itemCount === 1 ? 'item' : 'items'}
+                  Joined ${this.formatDate(member.joinedAt)} ·
+                  ${member.itemCount}
+                  ${member.itemCount === 1 ? 'item' : 'items'}
                 </p>
               </div>
 
@@ -1143,7 +1317,8 @@ export class AdminView extends BaseElement {
                     <div class="flex shrink-0 gap-2 self-end sm:self-auto">
                       <button
                         type="button"
-                        @click=${() => this.handleUnrevokeMember(spaceId, member.id)}
+                        @click=${() =>
+                          this.handleUnrevokeMember(spaceId, member.id)}
                         ?disabled=${isUnrevokePending || isRemovePending}
                         class="shrink-0 rounded-full border border-emerald-800 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-200 transition hover:border-emerald-700 hover:bg-emerald-950/70 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1151,7 +1326,8 @@ export class AdminView extends BaseElement {
                       </button>
                       <button
                         type="button"
-                        @click=${() => this.handleRemoveMember(spaceId, member.id)}
+                        @click=${() =>
+                          this.handleRemoveMember(spaceId, member.id)}
                         ?disabled=${isRemovePending || isUnrevokePending}
                         class="shrink-0 rounded-full border border-slate-700 bg-slate-800/40 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:border-red-700 hover:bg-red-950/40 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1162,7 +1338,8 @@ export class AdminView extends BaseElement {
                 : html`
                     <button
                       type="button"
-                      @click=${() => this.handleRevokeMember(spaceId, member.id)}
+                      @click=${() =>
+                        this.handleRevokeMember(spaceId, member.id)}
                       ?disabled=${isRevokePending}
                       class="shrink-0 self-end rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
                     >
@@ -1176,21 +1353,28 @@ export class AdminView extends BaseElement {
     `;
   }
 
-  private renderInvitationsModalContent(spaceId: string, state: SpaceCardState) {
+  private renderInvitationsModalContent(
+    spaceId: string,
+    state: SpaceCardState,
+  ) {
     if (state.isLoadingInvitations) {
       return html`<p class="text-sm text-slate-500">Loading invitations…</p>`;
     }
 
     if (state.invitationsError) {
       return html`
-        <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+        <div
+          class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+        >
           ${state.invitationsError}
         </div>
       `;
     }
 
     if (state.invitations.length === 0) {
-      return html`<p class="text-sm text-slate-500">No pending invitations.</p>`;
+      return html`<p class="text-sm text-slate-500">
+        No pending invitations.
+      </p>`;
     }
 
     return html`
@@ -1204,7 +1388,8 @@ export class AdminView extends BaseElement {
               </p>
               <button
                 type="button"
-                @click=${() => this.handleDeleteInvitation(spaceId, invitation.id)}
+                @click=${() =>
+                  this.handleDeleteInvitation(spaceId, invitation.id)}
                 ?disabled=${isPending}
                 class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -1218,10 +1403,13 @@ export class AdminView extends BaseElement {
   }
 
   private renderInviteModalContent(spaceId: string, state: SpaceCardState) {
+    const exchange = this.jwtExchange;
     return html`
       <div class="space-y-4">
         <div class="space-y-2">
-          <label class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+          <label
+            class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
+          >
             Client App URL
           </label>
           <div class="flex flex-col sm:flex-row gap-3">
@@ -1234,12 +1422,16 @@ export class AdminView extends BaseElement {
                 })}
               placeholder="https://app.example.com"
               class="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              ?disabled=${state.isGeneratingInvitation}
+              ?disabled=${state.isGeneratingInvitation ||
+              exchange.isExchanging ||
+              !!exchange.token}
             />
             <button
               type="button"
               @click=${() => this.handleGenerateInvitation(spaceId)}
-              ?disabled=${state.isGeneratingInvitation}
+              ?disabled=${state.isGeneratingInvitation ||
+              exchange.isExchanging ||
+              !!exchange.token}
               class="w-full sm:w-auto shrink-0 rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
               ${state.isGeneratingInvitation ? 'Generating…' : 'Generate'}
@@ -1249,14 +1441,96 @@ export class AdminView extends BaseElement {
 
         ${state.invitationGenerationError
           ? html`
-              <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+              <div
+                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+              >
                 ${state.invitationGenerationError}
               </div>
             `
           : null}
-
         ${state.generatedInvitation
           ? this.renderGeneratedInvitation(state.generatedInvitation)
+          : null}
+        ${state.generatedInvitation
+          ? html`
+              <form
+                class="space-y-3 border-t border-slate-800 pt-4"
+                @submit=${(e: Event) =>
+                  this.handleExchangeInvitation(e, spaceId)}
+              >
+                <label
+                  for="jwt-client-name"
+                  class="block text-sm font-semibold text-slate-300"
+                  >Client name</label
+                >
+                <input
+                  id="jwt-client-name"
+                  type="text"
+                  required
+                  maxlength="100"
+                  autocomplete="off"
+                  .value=${exchange.clientName}
+                  @input=${(e: Event) => {
+                    this.jwtExchange = {
+                      ...this.jwtExchange,
+                      clientName: (e.target as HTMLInputElement).value,
+                      error: '',
+                    };
+                  }}
+                  ?disabled=${exchange.isExchanging ||
+                  state.isGeneratingInvitation}
+                  class="w-full min-w-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+                <p class="text-xs text-slate-400">
+                  Exchange this one-time PIN for a JWT instead of joining in the
+                  app. This creates a member with the client name.
+                </p>
+                <button
+                  type="submit"
+                  ?disabled=${exchange.isExchanging ||
+                  state.isGeneratingInvitation ||
+                  !exchange.clientName.trim()}
+                  class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ${exchange.isExchanging ? 'Exchanging…' : 'Get JWT'}
+                </button>
+              </form>
+            `
+          : null}
+        ${exchange.token
+          ? html`
+              <div class="space-y-3">
+                <p class="text-sm text-amber-300">
+                  Copy this JWT before closing. It is not stored and cannot be
+                  recovered after this modal closes.
+                </p>
+                <label
+                  for="invitation-jwt"
+                  class="block text-sm font-semibold text-emerald-400"
+                  >JWT token</label
+                >
+                <textarea
+                  id="invitation-jwt"
+                  readonly
+                  rows="6"
+                  spellcheck="false"
+                  .value=${exchange.token}
+                  class="block w-full min-w-0 resize-none rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-xs text-emerald-300"
+                ></textarea>
+                <button
+                  type="button"
+                  @click=${this.handleCopyJwt}
+                  class="w-full rounded-full border border-emerald-700 px-4 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
+                >
+                  ${exchange.copied ? 'Copied!' : 'Copy JWT'}
+                </button>
+              </div>
+            `
+          : null}
+        ${exchange.error
+          ? html`<p role="alert" class="text-sm text-red-300">
+              ${exchange.error}
+            </p>`
           : null}
       </div>
     `;
@@ -1266,7 +1540,9 @@ export class AdminView extends BaseElement {
     return html`
       <div class="space-y-3 pb-4">
         <div class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
+          <p
+            class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400"
+          >
             Invitation String
           </p>
           <div class="flex flex-col sm:flex-row gap-2">
@@ -1278,7 +1554,8 @@ export class AdminView extends BaseElement {
             />
             <button
               type="button"
-              @click=${() => this.handleCopyInvitation(invitation.invitationString)}
+              @click=${() =>
+                this.handleCopyInvitation(invitation.invitationString)}
               class="w-full sm:w-auto rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
               title="Copy to clipboard"
             >
@@ -1290,7 +1567,9 @@ export class AdminView extends BaseElement {
         ${invitation.qrCodeBase64
           ? html`
               <div class="space-y-2">
-                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
+                <p
+                  class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400"
+                >
                   QR Code
                 </p>
                 <img

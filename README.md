@@ -22,6 +22,8 @@ Anonymous by design: users pick a display name when joining a space. No email, n
 - **Admin controls** — Create spaces, generate invitations, manage content
 - **CLI tool** — Join spaces, upload files, send messages, and sync folders from the terminal
 
+In the admin **Invite** modal, generate an invitation, enter a **Client name**, and select **Get JWT** to exchange the one-time PIN directly for a member access token. This consumes the invitation without joining the admin's browser to the space. Use **Copy JWT** before closing the modal: the token is held only in modal memory, is not stored on the server or in browser storage, and cannot be recovered after closing.
+
 ## Screenshots
 
 **Inside a space** — Real-time shared content:
