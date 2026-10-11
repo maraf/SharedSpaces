@@ -430,11 +430,7 @@ export class AdminView extends BaseElement {
 
   private handleCreateSpace = async (e: Event) => {
     e.preventDefault();
-    if (
-      !this.newSpaceName.trim() ||
-      !this.adminSecret ||
-      !this.adminServerUrl
-    ) {
+    if (!this.newSpaceName.trim() || !this.adminSecret || !this.adminServerUrl) {
       return;
     }
 
@@ -445,10 +441,7 @@ export class AdminView extends BaseElement {
     const maxUploadSize =
       quotaMb !== '' ? Math.round(parseFloat(quotaMb) * 1024 * 1024) : null;
 
-    if (
-      maxUploadSize !== null &&
-      (!Number.isFinite(maxUploadSize) || maxUploadSize <= 0)
-    ) {
+    if (maxUploadSize !== null && (!Number.isFinite(maxUploadSize) || maxUploadSize <= 0)) {
       this.errorMessage = 'Upload quota must be a positive number';
       return;
     }
@@ -538,9 +531,7 @@ export class AdminView extends BaseElement {
 
       this.updateSpaceCardState(spaceId, {
         invitationGenerationError:
-          error instanceof Error
-            ? error.message
-            : 'Failed to generate invitation',
+          error instanceof Error ? error.message : 'Failed to generate invitation',
         isGeneratingInvitation: false,
       });
     }
@@ -779,9 +770,7 @@ export class AdminView extends BaseElement {
       const latestState = this.getSpaceCardState(spaceId);
       this.updateSpaceCardState(spaceId, {
         invitationsError:
-          error instanceof Error
-            ? error.message
-            : 'Failed to delete invitation',
+          error instanceof Error ? error.message : 'Failed to delete invitation',
         pendingInvitationDeletions: this.getPendingState(
           latestState.pendingInvitationDeletions,
           invitationId,
@@ -940,7 +929,8 @@ export class AdminView extends BaseElement {
 
     return html`
       <div class="space-y-4">
-        ${this.renderConnectionCard()} ${this.renderCreateSpaceForm()}
+        ${this.renderConnectionCard()}
+        ${this.renderCreateSpaceForm()}
         ${this.spaces.map((space) => this.renderSpaceCard(space))}
       </div>
       ${this.activeModal ? this.renderModal() : null}
@@ -972,9 +962,7 @@ export class AdminView extends BaseElement {
                   type="text"
                   .value=${this.serverUrlInput}
                   @input=${(e: InputEvent) =>
-                    (this.serverUrlInput = (
-                      e.target as HTMLInputElement
-                    ).value)}
+                    (this.serverUrlInput = (e.target as HTMLInputElement).value)}
                   @focus=${this.handleUrlInputFocus}
                   @blur=${this.handleUrlInputBlur}
                   placeholder="https://api.example.com"
@@ -999,8 +987,7 @@ export class AdminView extends BaseElement {
                               </button>
                               <button
                                 type="button"
-                                @click=${(e: Event) =>
-                                  this.handleUrlRemove(e, url)}
+                                @click=${(e: Event) => this.handleUrlRemove(e, url)}
                                 class="px-3 py-3 text-slate-400 hover:text-red-400"
                                 title="Remove from history"
                                 aria-label=${`Remove ${url} from history`}
@@ -1047,9 +1034,7 @@ export class AdminView extends BaseElement {
 
           <button
             type="submit"
-            ?disabled=${this.isConnecting ||
-            !this.secretInput.trim() ||
-            !this.serverUrlInput.trim()}
+            ?disabled=${this.isConnecting || !this.secretInput.trim() || !this.serverUrlInput.trim()}
             class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             ${this.isConnecting ? 'Connecting...' : 'Continue'}
@@ -1066,9 +1051,7 @@ export class AdminView extends BaseElement {
       >
         <p class="min-w-0 truncate text-sm text-slate-400">
           Connected to
-          <span class="font-mono text-xs text-slate-300"
-            >${this.adminServerUrl}</span
-          >
+          <span class="font-mono text-xs text-slate-300">${this.adminServerUrl}</span>
         </p>
         <div class="flex shrink-0 gap-2">
           <button
@@ -1233,12 +1216,8 @@ export class AdminView extends BaseElement {
           aria-labelledby="modal-title"
           class="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
         >
-          <div
-            class="flex items-center justify-between border-b border-slate-800 px-5 py-4"
-          >
-            <h3 id="modal-title" class="text-sm font-semibold text-white">
-              ${title}
-            </h3>
+          <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+            <h3 id="modal-title" class="text-sm font-semibold text-white">${title}</h3>
             <button
               type="button"
               @click=${this.closeModal}
@@ -1250,7 +1229,9 @@ export class AdminView extends BaseElement {
             </button>
           </div>
 
-          <div class="max-h-[75vh] overflow-y-auto px-5 py-4">${content}</div>
+          <div class="max-h-[75vh] overflow-y-auto px-5 py-4">
+            ${content}
+          </div>
         </div>
       </div>
     `;
@@ -1263,9 +1244,7 @@ export class AdminView extends BaseElement {
 
     if (state.membersError) {
       return html`
-        <div
-          class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-        >
+        <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
           ${state.membersError}
         </div>
       `;
@@ -1279,13 +1258,10 @@ export class AdminView extends BaseElement {
       <div class="divide-y divide-slate-800">
         ${state.members.map((member) => {
           const isRevokePending = !!state.pendingMemberRevocations[member.id];
-          const isUnrevokePending =
-            !!state.pendingMemberUnrevocations[member.id];
+          const isUnrevokePending = !!state.pendingMemberUnrevocations[member.id];
           const isRemovePending = !!state.pendingMemberRemovals[member.id];
           return html`
-            <div
-              class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
-            >
+            <div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <p
@@ -1306,9 +1282,7 @@ export class AdminView extends BaseElement {
                     : null}
                 </div>
                 <p class="text-xs text-slate-500">
-                  Joined ${this.formatDate(member.joinedAt)} ·
-                  ${member.itemCount}
-                  ${member.itemCount === 1 ? 'item' : 'items'}
+                  Joined ${this.formatDate(member.joinedAt)} · ${member.itemCount} ${member.itemCount === 1 ? 'item' : 'items'}
                 </p>
               </div>
 
@@ -1317,8 +1291,7 @@ export class AdminView extends BaseElement {
                     <div class="flex shrink-0 gap-2 self-end sm:self-auto">
                       <button
                         type="button"
-                        @click=${() =>
-                          this.handleUnrevokeMember(spaceId, member.id)}
+                        @click=${() => this.handleUnrevokeMember(spaceId, member.id)}
                         ?disabled=${isUnrevokePending || isRemovePending}
                         class="shrink-0 rounded-full border border-emerald-800 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-200 transition hover:border-emerald-700 hover:bg-emerald-950/70 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1326,8 +1299,7 @@ export class AdminView extends BaseElement {
                       </button>
                       <button
                         type="button"
-                        @click=${() =>
-                          this.handleRemoveMember(spaceId, member.id)}
+                        @click=${() => this.handleRemoveMember(spaceId, member.id)}
                         ?disabled=${isRemovePending || isUnrevokePending}
                         class="shrink-0 rounded-full border border-slate-700 bg-slate-800/40 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:border-red-700 hover:bg-red-950/40 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1338,8 +1310,7 @@ export class AdminView extends BaseElement {
                 : html`
                     <button
                       type="button"
-                      @click=${() =>
-                        this.handleRevokeMember(spaceId, member.id)}
+                      @click=${() => this.handleRevokeMember(spaceId, member.id)}
                       ?disabled=${isRevokePending}
                       class="shrink-0 self-end rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
                     >
@@ -1363,18 +1334,14 @@ export class AdminView extends BaseElement {
 
     if (state.invitationsError) {
       return html`
-        <div
-          class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-        >
+        <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
           ${state.invitationsError}
         </div>
       `;
     }
 
     if (state.invitations.length === 0) {
-      return html`<p class="text-sm text-slate-500">
-        No pending invitations.
-      </p>`;
+      return html`<p class="text-sm text-slate-500">No pending invitations.</p>`;
     }
 
     return html`
@@ -1388,8 +1355,7 @@ export class AdminView extends BaseElement {
               </p>
               <button
                 type="button"
-                @click=${() =>
-                  this.handleDeleteInvitation(spaceId, invitation.id)}
+                @click=${() => this.handleDeleteInvitation(spaceId, invitation.id)}
                 ?disabled=${isPending}
                 class="shrink-0 rounded-full border border-rose-800 bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:border-rose-700 hover:bg-rose-950/70 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -1407,9 +1373,7 @@ export class AdminView extends BaseElement {
     return html`
       <div class="space-y-4">
         <div class="space-y-2">
-          <label
-            class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500"
-          >
+          <label class="block text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
             Client App URL
           </label>
           <div class="flex flex-col sm:flex-row gap-3">
@@ -1441,9 +1405,7 @@ export class AdminView extends BaseElement {
 
         ${state.invitationGenerationError
           ? html`
-              <div
-                class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300"
-              >
+              <div class="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
                 ${state.invitationGenerationError}
               </div>
             `
@@ -1540,9 +1502,7 @@ export class AdminView extends BaseElement {
     return html`
       <div class="space-y-3 pb-4">
         <div class="space-y-2">
-          <p
-            class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400"
-          >
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
             Invitation String
           </p>
           <div class="flex flex-col sm:flex-row gap-2">
@@ -1554,8 +1514,7 @@ export class AdminView extends BaseElement {
             />
             <button
               type="button"
-              @click=${() =>
-                this.handleCopyInvitation(invitation.invitationString)}
+              @click=${() => this.handleCopyInvitation(invitation.invitationString)}
               class="w-full sm:w-auto rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
               title="Copy to clipboard"
             >
@@ -1567,9 +1526,7 @@ export class AdminView extends BaseElement {
         ${invitation.qrCodeBase64
           ? html`
               <div class="space-y-2">
-                <p
-                  class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400"
-                >
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-400">
                   QR Code
                 </p>
                 <img
