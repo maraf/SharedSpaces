@@ -500,16 +500,17 @@ export class AdminView extends BaseElement {
         state.clientAppUrl.trim() || undefined,
       );
 
-      if (
-        !this.isCurrentSession(serverUrl, adminSecret) ||
-        this.activeModal !== modal
-      ) {
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
         return;
       }
 
       this.updateSpaceCardState(spaceId, {
-        generatedInvitation: invitation,
-        invitationGenerationError: '',
+        ...(this.activeModal === modal
+          ? {
+              generatedInvitation: invitation,
+              invitationGenerationError: '',
+            }
+          : {}),
         isGeneratingInvitation: false,
       });
       void this.loadSpaceCollections(spaceId, serverUrl, adminSecret, {
@@ -522,16 +523,19 @@ export class AdminView extends BaseElement {
         return;
       }
 
-      if (
-        !this.isCurrentSession(serverUrl, adminSecret) ||
-        this.activeModal !== modal
-      ) {
+      if (!this.isCurrentSession(serverUrl, adminSecret)) {
         return;
       }
 
       this.updateSpaceCardState(spaceId, {
-        invitationGenerationError:
-          error instanceof Error ? error.message : 'Failed to generate invitation',
+        ...(this.activeModal === modal
+          ? {
+              invitationGenerationError:
+                error instanceof Error
+                  ? error.message
+                  : 'Failed to generate invitation',
+            }
+          : {}),
         isGeneratingInvitation: false,
       });
     }
@@ -896,7 +900,6 @@ export class AdminView extends BaseElement {
     if (this.activeModal?.type === 'invite') {
       this.updateSpaceCardState(this.activeModal.spaceId, {
         generatedInvitation: null,
-        isGeneratingInvitation: false,
         invitationGenerationError: '',
       });
     }

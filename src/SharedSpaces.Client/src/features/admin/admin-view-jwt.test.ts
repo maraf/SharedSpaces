@@ -115,6 +115,55 @@ afterEach(() => {
 });
 
 describe('admin invitation JWT exchange', () => {
+  it('keeps invitation generation pending across close and reopen', async () => {
+    const generationButton = () =>
+      [...element.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+        .find((candidate) =>
+          /^(Generate|Generating…)$/.test(candidate.textContent?.trim() ?? ''),
+        )!;
+    let resolve!: (value: {
+      invitationString: string;
+      qrCodeBase64: null;
+    }) => void;
+    mocks.createInvitation.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    mocks.createInvitation.mockClear();
+
+    query<HTMLButtonElement>('[aria-label="Close dialog"]').click();
+    await element.updateComplete;
+    button('Invite').click();
+    await element.updateComplete;
+    const invitationListCalls = mocks.listInvitations.mock.calls.length;
+    button('Generate').click();
+    await element.updateComplete;
+    expect(generationButton().disabled).toBe(true);
+    expect(mocks.createInvitation).toHaveBeenCalledTimes(1);
+
+    query<HTMLButtonElement>('[aria-label="Close dialog"]').click();
+    await element.updateComplete;
+    button('Invite').click();
+    await element.updateComplete;
+    expect(generationButton().disabled).toBe(true);
+    generationButton().click();
+    expect(mocks.createInvitation).toHaveBeenCalledTimes(1);
+
+    const staleInvitation = `${serverUrl}|654321`;
+    resolve({ invitationString: staleInvitation, qrCodeBase64: null });
+    await vi.waitFor(async () => {
+      await element.updateComplete;
+      expect(generationButton().disabled).toBe(false);
+    });
+
+    expect(mocks.listInvitations).toHaveBeenCalledTimes(
+      invitationListCalls + 1,
+    );
+    expect(element.textContent).not.toContain(staleInvitation);
+    expect(element.querySelector('#jwt-client-name')).toBeNull();
+  });
+
   it('uses the connected server and trimmed client name without persisting or navigating', async () => {
     const navigation = vi.fn();
     element.addEventListener('view-change', navigation);
