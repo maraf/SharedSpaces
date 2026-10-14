@@ -2,6 +2,8 @@ import { html, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import { BaseElement } from '../../lib/base-element';
+import { exchangeToken } from '../../lib/api-client';
+import { parseInvitationString } from '../../lib/invitation';
 import {
   addAdminServerUrl,
   getAdminServerUrls,
@@ -68,6 +70,13 @@ export class AdminView extends BaseElement {
 
   @state() private spaceCardState: Record<string, SpaceCardState> = {};
   @state() private activeModal: ModalState = null;
+  @state() private jwtExchange = {
+    clientName: '',
+    token: '',
+    error: '',
+    isExchanging: false,
+    copied: false,
+  };
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     if (
@@ -82,6 +91,11 @@ export class AdminView extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     this.savedServerUrls = getAdminServerUrls();
+  }
+
+  override disconnectedCallback() {
+    this.clearModal();
+    super.disconnectedCallback();
   }
 
   private normalizeServerUrl(serverUrl: string) {
@@ -108,9 +122,13 @@ export class AdminView extends BaseElement {
 
   private sortMembers(members: MemberResponse[]) {
     return [...members].sort((a, b) => {
-      const displayNameCompare = a.displayName.localeCompare(b.displayName, undefined, {
-        sensitivity: 'base',
-      });
+      const displayNameCompare = a.displayName.localeCompare(
+        b.displayName,
+        undefined,
+        {
+          sensitivity: 'base',
+        },
+      );
       if (displayNameCompare !== 0) {
         return displayNameCompare;
       }
@@ -181,7 +199,11 @@ export class AdminView extends BaseElement {
     return nextState[spaceId];
   }
 
-  private getPendingState(record: Record<string, boolean>, key: string, isPending: boolean) {
+  private getPendingState(
+    record: Record<string, boolean>,
+    key: string,
+    isPending: boolean,
+  ) {
     if (isPending) {
       return { ...record, [key]: true };
     }
@@ -192,7 +214,9 @@ export class AdminView extends BaseElement {
   }
 
   private isCurrentSession(serverUrl: string, adminSecret: string) {
-    return this.adminServerUrl === serverUrl && this.adminSecret === adminSecret;
+    return (
+      this.adminServerUrl === serverUrl && this.adminSecret === adminSecret
+    );
   }
 
   private isUnauthorizedError(error: unknown) {
@@ -366,6 +390,7 @@ export class AdminView extends BaseElement {
   };
 
   private handleLogout = () => {
+    this.clearModal();
     const nextServerUrl = this.adminServerUrl ?? this.getDefaultServerUrl();
 
     this.adminSecret = null;
@@ -425,7 +450,12 @@ export class AdminView extends BaseElement {
     this.errorMessage = '';
 
     try {
-      const space = await createSpace(serverUrl, adminSecret, this.newSpaceName, maxUploadSize);
+      const space = await createSpace(
+        serverUrl,
+        adminSecret,
+        this.newSpaceName,
+        maxUploadSize,
+      );
 
       if (!this.isCurrentSession(serverUrl, adminSecret)) {
         return;
@@ -449,10 +479,13 @@ export class AdminView extends BaseElement {
 
   private handleGenerateInvitation = async (spaceId: string) => {
     if (!this.adminSecret || !this.adminServerUrl) return;
+    if (this.jwtExchange.isExchanging || this.jwtExchange.token) return;
 
     const serverUrl = this.adminServerUrl;
     const adminSecret = this.adminSecret;
     const state = this.getSpaceCardState(spaceId);
+    if (state.isGeneratingInvitation) return;
+    const modal = this.activeModal;
 
     this.updateSpaceCardState(spaceId, {
       invitationGenerationError: '',
@@ -472,8 +505,12 @@ export class AdminView extends BaseElement {
       }
 
       this.updateSpaceCardState(spaceId, {
-        generatedInvitation: invitation,
-        invitationGenerationError: '',
+        ...(this.activeModal === modal
+          ? {
+              generatedInvitation: invitation,
+              invitationGenerationError: '',
+            }
+          : {}),
         isGeneratingInvitation: false,
       });
       void this.loadSpaceCollections(spaceId, serverUrl, adminSecret, {
@@ -491,8 +528,14 @@ export class AdminView extends BaseElement {
       }
 
       this.updateSpaceCardState(spaceId, {
-        invitationGenerationError:
-          error instanceof Error ? error.message : 'Failed to generate invitation',
+        ...(this.activeModal === modal
+          ? {
+              invitationGenerationError:
+                error instanceof Error
+                  ? error.message
+                  : 'Failed to generate invitation',
+            }
+          : {}),
         isGeneratingInvitation: false,
       });
     }
@@ -747,7 +790,93 @@ export class AdminView extends BaseElement {
     });
   };
 
-  private openModal(type: 'members' | 'invitations' | 'invite', spaceId: string) {
+  private handleExchangeInvitation = async (e: Event, spaceId: string) => {
+    e.preventDefault();
+    if (this.jwtExchange.isExchanging || this.jwtExchange.token) return;
+    const clientName = this.jwtExchange.clientName.trim();
+    if (!clientName || clientName.length > 100) {
+      this.jwtExchange = {
+        ...this.jwtExchange,
+        error: 'Enter a client name between 1 and 100 characters.',
+      };
+      return;
+    }
+    const invitation = this.getSpaceCardState(spaceId).generatedInvitation;
+    const parsed =
+      invitation && parseInvitationString(invitation.invitationString);
+    if (!parsed) {
+      this.jwtExchange = {
+        ...this.jwtExchange,
+        error: 'Invalid invitation. Generate a new invitation.',
+      };
+      return;
+    }
+    if (!this.adminServerUrl || !this.adminSecret) return;
+    const serverUrl = this.adminServerUrl;
+    const adminSecret = this.adminSecret;
+    const modal = this.activeModal;
+    const pending = {
+      ...this.jwtExchange,
+      error: '',
+      copied: false,
+      isExchanging: true,
+    };
+    this.jwtExchange = pending;
+    try {
+      const response = await exchangeToken(serverUrl, parsed.pin, clientName);
+      if (
+        this.activeModal !== modal ||
+        this.jwtExchange !== pending ||
+        !this.isCurrentSession(serverUrl, adminSecret)
+      )
+        return;
+      this.jwtExchange = {
+        ...pending,
+        token: response.token,
+        isExchanging: false,
+      };
+      this.updateSpaceCardState(spaceId, { generatedInvitation: null });
+      void this.loadSpaceCollections(spaceId, serverUrl, adminSecret);
+    } catch (error) {
+      if (
+        this.activeModal !== modal ||
+        this.jwtExchange !== pending ||
+        !this.isCurrentSession(serverUrl, adminSecret)
+      )
+        return;
+      this.jwtExchange = {
+        ...pending,
+        isExchanging: false,
+        error: `${error instanceof Error ? error.message : 'Token exchange failed.'} If the server already consumed the PIN, the JWT cannot be recovered; generate a new invitation.`,
+      };
+    }
+  };
+
+  private handleCopyJwt = async () => {
+    const current = this.jwtExchange;
+    try {
+      await navigator.clipboard.writeText(current.token);
+      if (this.jwtExchange === current) {
+        this.jwtExchange = { ...current, copied: true, error: '' };
+      }
+    } catch {
+      if (this.jwtExchange === current) {
+        this.jwtExchange = {
+          ...current,
+          copied: false,
+          error:
+            'Failed to copy JWT. Select and copy the token manually before closing.',
+        };
+      }
+    }
+  };
+
+  private openModal(
+    type: 'members' | 'invitations' | 'invite',
+    spaceId: string,
+  ) {
+    if (this.jwtExchange.isExchanging) return;
+    this.clearModal();
     if (type === 'invite') {
       this.updateSpaceCardState(spaceId, {
         generatedInvitation: null,
@@ -763,12 +892,30 @@ export class AdminView extends BaseElement {
   }
 
   private closeModal = () => {
+    if (this.jwtExchange.isExchanging) return;
+    this.clearModal();
+  };
+
+  private clearModal() {
+    if (this.activeModal?.type === 'invite') {
+      this.updateSpaceCardState(this.activeModal.spaceId, {
+        generatedInvitation: null,
+        invitationGenerationError: '',
+      });
+    }
     if (this.handleEscapeKey) {
       document.removeEventListener('keydown', this.handleEscapeKey);
       this.handleEscapeKey = null;
     }
     this.activeModal = null;
-  };
+    this.jwtExchange = {
+      clientName: '',
+      token: '',
+      error: '',
+      isExchanging: false,
+      copied: false,
+    };
+  }
 
   private handleEscapeKey: ((e: KeyboardEvent) => void) | null = null;
 
@@ -996,7 +1143,10 @@ export class AdminView extends BaseElement {
             Created ${this.formatDate(space.createdAt)}
           </p>
           <p class="text-xs text-slate-500">
-            Upload quota: ${this.formatBytesAsMb(space.effectiveMaxUploadSize)}${space.maxUploadSize == null ? ' (default)' : ''}
+            Upload quota:
+            ${this.formatBytesAsMb(
+              space.effectiveMaxUploadSize,
+            )}${space.maxUploadSize == null ? ' (default)' : ''}
           </p>
         </div>
 
@@ -1074,6 +1224,7 @@ export class AdminView extends BaseElement {
             <button
               type="button"
               @click=${this.closeModal}
+              ?disabled=${this.jwtExchange.isExchanging}
               aria-label="Close dialog"
               class="rounded-full p-1 text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
             >
@@ -1176,7 +1327,10 @@ export class AdminView extends BaseElement {
     `;
   }
 
-  private renderInvitationsModalContent(spaceId: string, state: SpaceCardState) {
+  private renderInvitationsModalContent(
+    spaceId: string,
+    state: SpaceCardState,
+  ) {
     if (state.isLoadingInvitations) {
       return html`<p class="text-sm text-slate-500">Loading invitations…</p>`;
     }
@@ -1218,6 +1372,7 @@ export class AdminView extends BaseElement {
   }
 
   private renderInviteModalContent(spaceId: string, state: SpaceCardState) {
+    const exchange = this.jwtExchange;
     return html`
       <div class="space-y-4">
         <div class="space-y-2">
@@ -1234,12 +1389,16 @@ export class AdminView extends BaseElement {
                 })}
               placeholder="https://app.example.com"
               class="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/20"
-              ?disabled=${state.isGeneratingInvitation}
+              ?disabled=${state.isGeneratingInvitation ||
+              exchange.isExchanging ||
+              !!exchange.token}
             />
             <button
               type="button"
               @click=${() => this.handleGenerateInvitation(spaceId)}
-              ?disabled=${state.isGeneratingInvitation}
+              ?disabled=${state.isGeneratingInvitation ||
+              exchange.isExchanging ||
+              !!exchange.token}
               class="w-full sm:w-auto shrink-0 rounded-full bg-sky-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
               ${state.isGeneratingInvitation ? 'Generating…' : 'Generate'}
@@ -1254,9 +1413,89 @@ export class AdminView extends BaseElement {
               </div>
             `
           : null}
-
         ${state.generatedInvitation
           ? this.renderGeneratedInvitation(state.generatedInvitation)
+          : null}
+        ${state.generatedInvitation
+          ? html`
+              <form
+                class="space-y-3 border-t border-slate-800 pt-4"
+                @submit=${(e: Event) =>
+                  this.handleExchangeInvitation(e, spaceId)}
+              >
+                <label
+                  for="jwt-client-name"
+                  class="block text-sm font-semibold text-slate-300"
+                  >Client name</label
+                >
+                <input
+                  id="jwt-client-name"
+                  type="text"
+                  required
+                  maxlength="100"
+                  autocomplete="off"
+                  .value=${exchange.clientName}
+                  @input=${(e: Event) => {
+                    this.jwtExchange = {
+                      ...this.jwtExchange,
+                      clientName: (e.target as HTMLInputElement).value,
+                      error: '',
+                    };
+                  }}
+                  ?disabled=${exchange.isExchanging ||
+                  state.isGeneratingInvitation}
+                  class="w-full min-w-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+                <p class="text-xs text-slate-400">
+                  Exchange this one-time PIN for a JWT instead of joining in the
+                  app. This creates a member with the client name.
+                </p>
+                <button
+                  type="submit"
+                  ?disabled=${exchange.isExchanging ||
+                  state.isGeneratingInvitation ||
+                  !exchange.clientName.trim()}
+                  class="w-full rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ${exchange.isExchanging ? 'Exchanging…' : 'Get JWT'}
+                </button>
+              </form>
+            `
+          : null}
+        ${exchange.token
+          ? html`
+              <div class="space-y-3">
+                <p class="text-sm text-amber-300">
+                  Copy this JWT before closing. It is not stored and cannot be
+                  recovered after this modal closes.
+                </p>
+                <label
+                  for="invitation-jwt"
+                  class="block text-sm font-semibold text-emerald-400"
+                  >JWT token</label
+                >
+                <textarea
+                  id="invitation-jwt"
+                  readonly
+                  rows="6"
+                  spellcheck="false"
+                  .value=${exchange.token}
+                  class="block w-full min-w-0 resize-none rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-xs text-emerald-300"
+                ></textarea>
+                <button
+                  type="button"
+                  @click=${this.handleCopyJwt}
+                  class="w-full rounded-full border border-emerald-700 px-4 py-3 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-900/30"
+                >
+                  ${exchange.copied ? 'Copied!' : 'Copy JWT'}
+                </button>
+              </div>
+            `
+          : null}
+        ${exchange.error
+          ? html`<p role="alert" class="text-sm text-red-300">
+              ${exchange.error}
+            </p>`
           : null}
       </div>
     `;

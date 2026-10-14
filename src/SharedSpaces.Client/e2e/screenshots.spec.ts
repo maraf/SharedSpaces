@@ -1,4 +1,4 @@
-import { test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -826,6 +826,30 @@ test.describe('Screenshot Capture', () => {
       await page.waitForTimeout(500);
 
       await capture(page, 'admin-invite', vp);
+
+      const previewJwt = buildFakeJwt({
+        sub: '11111111-1111-4111-8111-111111111111',
+        display_name: 'Automation client',
+        server_url: SERVER_URL,
+        space_id: '22222222-2222-4222-8222-222222222222',
+        space_name: 'My Shared Space',
+      });
+      await page.route(`${SERVER_URL}/v1/tokens`, (route) =>
+        route.fulfill({ json: { token: previewJwt } }),
+      );
+      await dialog.getByLabel('Client name').fill('Automation client');
+      await dialog.getByRole('button', { name: 'Get JWT', exact: true }).click();
+      await expect(dialog.getByLabel('JWT token')).toHaveValue(previewJwt);
+      await expect(dialog.getByRole('button', { name: 'Copy JWT', exact: true })).toBeVisible();
+      const widths = await page.evaluate(() => ({
+        content: document.body.scrollWidth,
+        viewport: document.documentElement.clientWidth,
+      }));
+      expect(widths.content).toBeLessThanOrEqual(widths.viewport);
+      await capture(page, 'admin-invite-jwt', vp);
+      await dialog.getByRole('button', { name: 'Close dialog' }).click();
+      await inviteButton.click();
+      await expect(page.getByLabel('JWT token')).toHaveCount(0);
     });
 
     // --- New screenshot tests for uncaptured UI states ---
