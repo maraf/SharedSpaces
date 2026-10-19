@@ -133,13 +133,6 @@ export class SharedItemView extends BaseElement {
     return html`
       <div class="flex min-h-svh flex-col bg-slate-950 text-slate-50">
         <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-8 sm:px-6">
-          <!-- Header -->
-          <div class="mb-8 text-center">
-            <p class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300">
-              SharedSpaces
-            </p>
-          </div>
-
           <!-- Content -->
           <div class="flex flex-1 flex-col items-center justify-start">
             ${this.isLoading
