@@ -154,6 +154,70 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
     return element;
   }
 
+  describe('header UX', () => {
+    it('does not repeat the app name in the header', async () => {
+      setupEmptySpaces();
+      createElement();
+      await element.updateComplete;
+
+      expect(element.querySelector('header')?.textContent).not.toContain('SharedSpaces');
+    });
+
+    it('places a clickable version immediately before each server connection button', async () => {
+      setupEmptySpaces();
+      createElement();
+      const checkForUpdates = vi.fn();
+      (element as any).handleVersionClick = checkForUpdates;
+      await element.updateComplete;
+
+      const adminButtons = element.querySelectorAll('header button[aria-label="Admin panel"]');
+      expect(adminButtons).toHaveLength(2);
+      for (const adminButton of adminButtons) {
+        const versionButton = adminButton.previousElementSibling as HTMLButtonElement;
+        expect(versionButton.tagName).toBe('BUTTON');
+        expect(versionButton.textContent?.trim()).toMatch(/^v/);
+        expect(versionButton.title).toBe('Check for updates');
+        versionButton.click();
+      }
+      expect(checkForUpdates).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps inactive desktop settings in layout and reveals them only for the active space', async () => {
+      setupSpaces([
+        { id: 'space-a', name: 'Alpha' },
+        { id: 'space-b', name: 'Beta' },
+      ]);
+      createElement();
+      await element.updateComplete;
+
+      const getSettings = () => Array.from(
+        element.querySelectorAll<HTMLElement>('[data-testid="space-settings-toggle"]'),
+      );
+      expect(getSettings()).toHaveLength(2);
+      for (const button of getSettings()) {
+        expect(button.classList.contains('invisible')).toBe(true);
+        expect(button.classList.contains('border-transparent')).toBe(true);
+        expect(button.classList.contains('hidden')).toBe(false);
+      }
+
+      const [firstSpace, secondSpace] = (element as any).spaces;
+      (element as any).selectSpace(firstSpace);
+      await element.updateComplete;
+      expect(getSettings()[0].classList.contains('invisible')).toBe(false);
+      expect(getSettings()[1].classList.contains('invisible')).toBe(true);
+
+      (element as any).selectSpace(secondSpace);
+      await element.updateComplete;
+      expect(getSettings()[0].classList.contains('invisible')).toBe(true);
+      expect(getSettings()[1].classList.contains('invisible')).toBe(false);
+      for (const button of getSettings()) {
+        expect(button.classList.contains('border-l')).toBe(true);
+        expect(button.classList.contains('px-2')).toBe(true);
+        expect(button.classList.contains('py-1.5')).toBe(true);
+      }
+    });
+  });
+
   // ── Sheet toggle ───────────────────────────────────────────────────
 
   describe('sheet toggle', () => {

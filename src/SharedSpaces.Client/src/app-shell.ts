@@ -445,6 +445,17 @@ export class AppShell extends BaseElement {
   private readonly pillActive =
     'border-sky-500 bg-sky-950/60 text-sky-300';
 
+  private renderVersionButton() {
+    return html`
+      <button
+        type="button"
+        class="text-xs bg-transparent border-none p-0 cursor-pointer ${this.swUpdateAvailable ? 'version-rainbow font-semibold' : 'text-slate-500'}"
+        title="${this.swUpdateAvailable ? 'Update available — click to activate' : 'Check for updates'}"
+        @click=${this.handleVersionClick}
+      >v${__APP_VERSION__}</button>
+    `;
+  }
+
   override render() {
     // Shared-item view is standalone — no app chrome (header, nav, bottom bar)
     if (this.view === 'shared-item') {
@@ -452,9 +463,6 @@ export class AppShell extends BaseElement {
         return html`
           <div class="flex min-h-svh flex-col bg-slate-950 text-slate-50">
             <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-8 sm:px-6">
-              <div class="mb-8 text-center">
-                <p class="text-sm font-semibold uppercase tracking-[0.3em] text-sky-300">SharedSpaces</p>
-              </div>
               <div class="flex flex-1 flex-col items-center justify-start">
                 <div class="w-full max-w-md space-y-4 py-16 text-center">
                   <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-slate-700 bg-slate-800/60">
@@ -482,27 +490,9 @@ export class AppShell extends BaseElement {
           class="mx-auto flex min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col gap-6"
         >
           <header class="sticky top-0 z-20 bg-slate-950 pt-6 pb-2 flex flex-col gap-4">
-            <div class="flex items-center justify-between">
-              <button
-                type="button"
-                class="w-fit text-sm font-semibold uppercase tracking-[0.3em] text-sky-300 cursor-pointer bg-transparent border-none p-0"
-                @click=${() => { 
-                  // Intentional de-select — clear last space to prevent auto-reconnect
-                  if (this.view === 'space' && this.currentSpaceId) {
-                    clearLastSelectedSpace();
-                  }
-                  this.view = 'home'; 
-                }}
-              >
-                SharedSpaces
-              </button>
+            <div class="sm:hidden flex items-center justify-end">
               <div class="flex items-center gap-3">
-                <button
-                  type="button"
-                  class="text-xs bg-transparent border-none p-0 cursor-pointer ${this.swUpdateAvailable ? 'version-rainbow font-semibold' : 'text-slate-500'}"
-                  title="${this.swUpdateAvailable ? 'Update available — click to activate' : 'Check for updates'}"
-                  @click=${this.handleVersionClick}
-                >v${__APP_VERSION__}</button>
+                ${this.renderVersionButton()}
                 <button
                   @click=${() => { this.view = 'admin'; }}
                   class="sm:hidden ${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
@@ -551,7 +541,7 @@ export class AppShell extends BaseElement {
                       @click=${() => this.toggleSpaceSettings(entry)}
                       class="inline-flex items-center justify-center rounded-r-full border-l ${isActive
                         ? 'border-sky-500/60 hover:bg-sky-900/40'
-                        : 'border-slate-700/80 hover:bg-slate-800'} px-2 py-1.5"
+                        : 'invisible border-transparent'} px-2 py-1.5"
                       title="Large space settings"
                       aria-label="Large space settings for ${entry.spaceName}"
                       aria-pressed=${isActive && this.spaceSettingsOpen}
@@ -572,6 +562,7 @@ export class AppShell extends BaseElement {
 
               <span class="flex-1"></span>
 
+              ${this.renderVersionButton()}
               <button
                 @click=${() => { this.view = 'admin'; }}
                 class="${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
