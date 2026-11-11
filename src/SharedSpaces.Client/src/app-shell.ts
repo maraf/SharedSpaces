@@ -445,11 +445,11 @@ export class AppShell extends BaseElement {
   private readonly pillActive =
     'border-sky-500 bg-sky-950/60 text-sky-300';
 
-  private renderVersionButton() {
+  private renderVersionButton(mobile = false) {
     return html`
       <button
         type="button"
-        class="text-xs bg-transparent border-none p-0 cursor-pointer ${this.swUpdateAvailable ? 'version-rainbow font-semibold' : 'text-slate-500'}"
+        class="text-xs bg-transparent border-none p-0 cursor-pointer ${mobile ? 'min-h-11 min-w-11' : ''} ${this.swUpdateAvailable ? 'version-rainbow font-semibold' : 'text-slate-500'}"
         title="${this.swUpdateAvailable ? 'Update available — click to activate' : 'Check for updates'}"
         @click=${this.handleVersionClick}
       >v${__APP_VERSION__}</button>
@@ -484,26 +484,12 @@ export class AppShell extends BaseElement {
 
     return html`
       <div
-        class="min-h-svh bg-slate-950 px-4 pb-20 sm:pb-6 text-slate-50 sm:px-6 lg:px-8"
+        class="min-h-svh bg-slate-950 px-4 pt-6 sm:pt-0 pb-20 sm:pb-6 text-slate-50 sm:px-6 lg:px-8"
       >
         <div
           class="mx-auto flex min-h-[calc(100svh-5rem)] sm:min-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col gap-6"
         >
-          <header class="sticky top-0 z-20 bg-slate-950 pt-6 pb-2 flex flex-col gap-4">
-            <div class="sm:hidden flex items-center justify-end">
-              <div class="flex items-center gap-3">
-                ${this.renderVersionButton()}
-                <button
-                  @click=${() => { this.view = 'admin'; }}
-                  class="sm:hidden ${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
-                  title="Admin panel"
-                  aria-label="Admin panel"
-                >
-                  ${unsafeHTML(databaseGearSvg)}
-                </button>
-              </div>
-            </div>
-
+          <header class="sticky top-0 z-20 bg-slate-950 pt-6 pb-2 hidden sm:flex flex-col gap-4">
             <!-- Desktop pill nav — hidden on mobile -->
             <nav class="hidden sm:flex items-center gap-2 flex-wrap text-xs" data-testid="desktop-pills">
               ${this.pendingShareCount > 0
@@ -806,6 +792,21 @@ export class AppShell extends BaseElement {
                 </div>
               `;
             })}
+          </div>
+          <div class="shrink-0 flex items-center justify-between gap-3 border-t border-slate-800 mt-2 px-4 pt-2">
+            ${this.renderVersionButton(true)}
+            <button
+              @click=${() => {
+                this.view = 'admin';
+                this.sheetOpen = false;
+              }}
+              class="inline-flex min-h-11 items-center gap-2 ${this.pillBase} ${this.view === 'admin' ? this.pillActive : this.pillDefault}"
+              title="Admin panel"
+              aria-label="Admin panel"
+            >
+              ${unsafeHTML(databaseGearSvg)}
+              Connect to admin
+            </button>
           </div>
         </div>
       </div>
