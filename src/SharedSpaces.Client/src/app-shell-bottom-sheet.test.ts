@@ -170,7 +170,7 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       (element as any).handleVersionClick = checkForUpdates;
       await element.updateComplete;
 
-      const adminButtons = element.querySelectorAll('header button[aria-label="Admin panel"]');
+      const adminButtons = element.querySelectorAll('button[aria-label="Admin panel"]');
       expect(adminButtons).toHaveLength(2);
       for (const adminButton of adminButtons) {
         const versionButton = adminButton.previousElementSibling as HTMLButtonElement;
@@ -668,15 +668,18 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
   // ── Admin gear placement on mobile ─────────────────────────────────
 
   describe('admin gear on mobile', () => {
-    it('renders admin gear in header title row with sm:hidden', async () => {
+    it('moves mobile admin and version controls into the drawer and hides the header', async () => {
       setupEmptySpaces();
       createElement();
       await element.updateComplete;
 
-      // Admin gear button in the header — use aria-label (stable accessible selector)
       const header = element.querySelector('header') as HTMLElement;
-      const mobileAdminBtn = header.querySelector('button[aria-label="Admin panel"]');
-      expect(mobileAdminBtn).toBeTruthy();
+      expect(header.classList.contains('hidden')).toBe(true);
+      expect(header.classList.contains('sm:flex')).toBe(true);
+      expect(header.querySelectorAll('button[aria-label="Admin panel"]')).toHaveLength(1);
+      const sheet = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      expect(sheet.querySelector('button[aria-label="Admin panel"]')?.textContent).toContain('Connect to admin');
+      expect(sheet.querySelector('button[title="Check for updates"]')).toBeTruthy();
     });
 
     it('navigates to admin view when mobile admin gear is clicked', async () => {
@@ -684,12 +687,18 @@ describe('AppShell — Bottom Sheet Mobile Navigation (Issue #99)', () => {
       createElement();
       await element.updateComplete;
 
-      const header = element.querySelector('header') as HTMLElement;
-      const mobileAdminBtn = header.querySelector('button[aria-label="Admin panel"]') as HTMLElement;
+      element.querySelector<HTMLElement>('[data-testid="bottom-bar"]')!.click();
+      await element.updateComplete;
+      expect(document.body.classList.contains('overflow-hidden')).toBe(true);
+
+      const sheet = element.querySelector('[data-testid="bottom-sheet"]') as HTMLElement;
+      const mobileAdminBtn = sheet.querySelector('button[aria-label="Admin panel"]') as HTMLElement;
       mobileAdminBtn.click();
       await element.updateComplete;
 
-      expect((element as any).view).toBe('admin');
+      expect(element.view).toBe('admin');
+      expect(sheet.getAttribute('aria-hidden')).toBe('true');
+      expect(document.body.classList.contains('overflow-hidden')).toBe(false);
     });
   });
 

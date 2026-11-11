@@ -237,12 +237,19 @@ async function injectTokens(page: Page, tokens: Record<string, string>) {
   }, tokens);
 }
 
-async function navigateToAdminSignedIn(page: Page) {
-  // Two admin buttons exist (mobile sm:hidden + desktop nav); click the visible one
-  const adminBtns = page.locator('button[title="Admin panel"]');
-  const mobileBtn = adminBtns.first();
-  await (await mobileBtn.isVisible() ? mobileBtn : adminBtns.nth(1)).click();
+async function navigateToAdmin(page: Page) {
+  const bottomBar = page.getByTestId('bottom-bar');
+  if (await bottomBar.isVisible()) {
+    await bottomBar.click();
+    await page.getByTestId('bottom-sheet').getByRole('button', { name: 'Admin panel' }).click();
+  } else {
+    await page.locator('header').getByRole('button', { name: 'Admin panel' }).click();
+  }
   await page.waitForSelector('admin-view');
+}
+
+async function navigateToAdminSignedIn(page: Page) {
+  await navigateToAdmin(page);
 
   await page.fill('#admin-server-url', SERVER_URL);
   await page.fill('#admin-secret', ADMIN_SECRET);
@@ -931,10 +938,7 @@ test.describe('Screenshot Capture', () => {
       await page.reload();
       await page.waitForSelector('app-shell');
       // Navigate to admin view — shows login form before authentication
-      const adminBtns = page.locator('button[title="Admin panel"]');
-      const mobileBtn = adminBtns.first();
-      await (await mobileBtn.isVisible() ? mobileBtn : adminBtns.nth(1)).click();
-      await page.waitForSelector('admin-view');
+      await navigateToAdmin(page);
       await page.waitForTimeout(500);
       await capture(page, 'admin-login', vp);
     });
